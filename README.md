@@ -8,7 +8,6 @@ Extensions for [Paseo](https://github.com/getpaseo/paseo), organized in a pnpm w
 
 | Plugin | Description |
 | --- | --- |
-| [Claude Code panel (deprecated)](plugins/claude-code-panel) | Legacy panel superseded by the Claude TTY ACP app. |
 | [Discord Rich Presence](plugins/discord-rich-presence) | Show your current Paseo activity on Discord. |
 | [Catppuccin theme](plugins/catppuccin-theme) | Add all four Catppuccin flavours as app themes. |
 | [Claude TTY](plugins/claude-tty) | Install, diagnose, and manage the Claude TTY ACP adapter on the daemon host. |
@@ -28,7 +27,7 @@ pnpm test
 Enable Paseo plugins, then install each plugin from its own directory:
 
 ```sh
-paseo plugin install "/absolute/path/to/paseo-plugins/plugins/claude-code-panel"
+paseo plugin install "/absolute/path/to/paseo-plugins/plugins/claude-tty"
 paseo plugin ls
 ```
 

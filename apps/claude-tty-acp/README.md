@@ -15,9 +15,6 @@ This adapter avoids the SDK by driving the same CLI you would otherwise run in a
 You keep its binary, authentication, billing, sessions, `CLAUDE.md` hierarchy, MCP servers, plugins, skills, and permission rules, and get Paseo's native agent UI on top of them.
 The price is that every native affordance has to be reconstructed from terminal output, transcript files, and hooks, which is where the [limitations](#limitations) come from.
 
-The [Claude Code panel plugin](../../plugins/claude-code-panel) solved the same problem inside a workspace panel.
-It is deprecated in favour of this app, still works for existing installations, and is not required here.
-
 ## Requirements
 
 - Linux or macOS
