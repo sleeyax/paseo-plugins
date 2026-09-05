@@ -25,7 +25,7 @@ export const MODELS: ModelInfo[] = [
 ];
 
 export const MODEL_IDS = MODELS.map((model) => model.modelId);
-export const MODE_IDS = ["default", "acceptEdits", "plan", "auto"] as const;
+export const MODE_IDS = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"] as const;
 
 export type ModeId = (typeof MODE_IDS)[number];
 
@@ -44,6 +44,7 @@ export function modeState(currentModeId: string): SessionModeState {
       { id: "acceptEdits", name: "Accept Edits", description: "Automatically accept file edits" },
       { id: "plan", name: "Plan", description: "Explore and plan without making changes" },
       { id: "auto", name: "Auto", description: "Let Claude Code handle permissions automatically" },
+      { id: "bypassPermissions", name: "Bypass Permissions", description: "Never ask - for unattended agents" },
     ],
   };
 }
