@@ -170,6 +170,8 @@ export class ClaudeRuntime {
   private subagentHold: NodeJS.Timeout | null = null;
   private heldAssistantMessage: string | undefined;
   private heldAt = 0;
+  /** When Claude last called a hook, which it does only while it is doing something. */
+  private lastHookAt = 0;
   private intentionalExit: Deferred<void> | null = null;
 
   constructor(
@@ -225,6 +227,16 @@ export class ClaudeRuntime {
   /** A permission or question card is on screen in Paseo and nobody has answered it yet. */
   get interactionPending(): boolean {
     return this.interactions.pending;
+  }
+
+  /**
+   * When this session last showed any sign of life, whether or not a prompt was open: a hook Claude
+   * called, a record it or one of its agents wrote, or a notification it was woken with. A turn is
+   * only what Paseo asked for; Claude goes on working after one — launching agents, answering for
+   * them — and that work is what this reports.
+   */
+  get activityAt(): number {
+    return Math.max(this.translator.activityAt, this.lastHookAt);
   }
 
   async prompt(content: ContentBlock[]): Promise<PromptResponse> {
@@ -397,6 +409,7 @@ export class ClaudeRuntime {
   }
 
   private async handleHook(payload: HookPayload): Promise<HookResponse> {
+    this.lastHookAt = Date.now();
     switch (payload.hook_event_name) {
       // Hooks arrive over their own channel, ahead of the transcript the watcher is still polling.
       // Draining first keeps the prompt from landing before the assistant text that explains it.

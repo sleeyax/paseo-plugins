@@ -7,6 +7,7 @@ import test from "node:test";
 import type { AgentSideConnection, RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from "@agentclientprotocol/sdk";
 import type { IPty, IPtyForkOptions } from "node-pty";
 import { ClaudeTtyAgent } from "./agent.ts";
+import { subagentsDirectory } from "./subagent-transcript.ts";
 import { escapeProjectDirName } from "./transcript-reader.ts";
 
 class FakePty {
@@ -433,6 +434,105 @@ test("suspends an idle native process and resumes it on the next prompt", async 
   } finally {
     await agent.close();
     await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+/**
+ * A session for the idle tests: a fake PTY that exits on Ctrl-D, a config directory the transcript
+ * watcher reads, and an idle timeout short enough to watch run out.
+ */
+async function createIdleHarness(name: string, idleTimeoutMs: number) {
+  const root = await mkdtemp(path.join(os.tmpdir(), `claude-runtime-${name}-`));
+  const configDirectory = path.join(root, "claude");
+  const cwd = `/work/${name}`;
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(path.join(root, "runtime"), { recursive: true });
+  const spawns: SpawnRecord[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    let pty!: FakePty;
+    pty = new FakePty(4600 + spawns.length, (data) => {
+      if (data === "\u0004") setImmediate(() => pty.emitExit());
+    });
+    spawns.push({ file, args, options, pty });
+    const idFlag = args.includes("--resume") ? "--resume" : "--session-id";
+    const sessionId = args[args.indexOf(idFlag) + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot: path.join(root, "runtime"),
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    idleTimeoutMs,
+  });
+  const session = await agent.newSession({ cwd, mcpServers: [] });
+  const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "start" }] });
+  await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+  await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "started" });
+  await turn;
+  const started = () => agent.sessions.get(session.sessionId)?.started === true;
+  const transcript = path.join(projectDirectory, `${session.sessionId}.jsonl`);
+  return {
+    agent,
+    sessionId: session.sessionId,
+    transcript,
+    started,
+    close: async () => {
+      await agent.close();
+      await rm(root, { force: true, recursive: true });
+    },
+  };
+}
+
+test("does not suspend a session whose background agent is still writing", async () => {
+  const harness = await createIdleHarness("idle-subagent", 400);
+  try {
+    // The turn is over and nothing was launched inside it: as far as prompts go, the session is idle.
+    // But an agent Claude started on its own is writing, and that is the session working.
+    const directory = subagentsDirectory(harness.transcript);
+    await mkdir(directory, { recursive: true });
+    const steps: string[] = [];
+    for (let index = 0; index < 8; index += 1) {
+      steps.push(JSON.stringify({ type: "assistant", uuid: `step-${index}`, message: { content: [{ type: "text", text: `step ${index}` }] } }));
+      await writeFile(path.join(directory, "agent-a1.jsonl"), `${steps.join("\n")}\n`);
+      // Subagent transcripts are read at most every 200ms, which the idle timeout above leaves room for.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(harness.started(), true, `suspended while the agent was writing, at step ${index}`);
+    }
+    // The agent has gone quiet, and now the idle timeout is what it always was.
+    await waitFor(() => !harness.started(), 2_000);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("does not suspend a session Claude is still working in after its prompt ended", async () => {
+  const harness = await createIdleHarness("idle-own-turn", 400);
+  try {
+    // A task notification woke Claude for a turn of its own; it writes records and calls hooks, and
+    // none of that is a Paseo prompt.
+    const records: string[] = [];
+    for (let index = 0; index < 8; index += 1) {
+      if (index % 2 === 0) {
+        records.push(JSON.stringify({ type: "assistant", uuid: `own-${index}`, message: { content: [{ type: "text", text: `answering, part ${index}` }] } }));
+        await writeFile(harness.transcript, `${records.join("\n")}\n`);
+      } else {
+        await harness.agent.hooks.dispatch({ hook_event_name: "PreToolUse", session_id: harness.sessionId, tool_name: "Bash", tool_input: { command: "ls" } });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(harness.started(), true, `suspended while Claude was working, at step ${index}`);
+    }
+    await waitFor(() => !harness.started(), 2_000);
+  } finally {
+    await harness.close();
   }
 });
 

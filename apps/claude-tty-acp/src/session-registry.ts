@@ -51,7 +51,7 @@ export class ClaudeSession {
   private queue: Promise<void> = Promise.resolve();
   private idleTimer: NodeJS.Timeout | null = null;
   private activityVersion = 0;
-  /** When the session last went quiet, so a deferred or re-read suspension keeps the deadline it earned. */
+  /** When the last prompt ended, so a deferred or re-read suspension keeps the deadline it earned. */
   private idleSince = 0;
 
   constructor(
@@ -219,7 +219,11 @@ export class ClaudeSession {
       this.armSuspension(activityVersion, SUSPENSION_RETRY_MS);
       return;
     }
-    const remaining = this.idleSince + idleTimeoutMs - Date.now();
+    // Idleness is observed, not inferred from the last prompt. Claude keeps working after a turn ends —
+    // a task notification wakes it, it launches the next agent, that agent runs for half an hour — and
+    // none of that is a prompt, so the clock runs from the last thing the session actually did.
+    const quietSince = Math.max(this.idleSince, this.runtime.activityAt);
+    const remaining = quietSince + idleTimeoutMs - Date.now();
     if (remaining > 0) {
       this.armSuspension(activityVersion, remaining);
       return;

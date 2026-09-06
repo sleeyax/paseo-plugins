@@ -561,3 +561,38 @@ test("closes the tool calls a stopped session left running, and leaves the ones 
   assert.equal(updates[1].status, "failed");
   assert.equal(translator.runningSubagents, 0);
 });
+
+test("reads the session's last sign of life from whatever moved last, Claude's own tools included", async () => {
+  const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  assert.equal(translator.activityAt, 0);
+  assert.equal(translator.assistantActivityAt, 0);
+
+  await translator.translate([{ type: "user", uuid: "user-1", message: { content: "<task-notification><task-id>b1</task-id><status>completed</status></task-notification>" } }]);
+  // Nothing is shown for a notification about a command, but the turn Claude was woken with is the session moving.
+  assert.equal(translator.assistantActivityAt, 0);
+  assert.equal(translator.activityAt, 0);
+
+  await translator.translate([{ type: "user", uuid: "user-2", message: { content: "carry on" } }]);
+  const wokenAt = translator.activityAt;
+  assert.ok(wokenAt > 0);
+  assert.equal(translator.assistantActivityAt, 0);
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await translator.translate([
+    { type: "assistant", uuid: "assistant-1", message: { content: [{ type: "tool_use", id: "bash-1", name: "Bash", input: { command: "ls" } }] } },
+  ]);
+  const calledAt = translator.assistantActivityAt;
+  assert.ok(calledAt > wokenAt);
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await translator.translate([{ type: "user", uuid: "user-3", message: { content: [{ type: "tool_result", tool_use_id: "bash-1", content: "done" }] } }]);
+  assert.ok(translator.assistantActivityAt > calledAt, "a tool finishing is Claude's own progress");
+  assert.equal(translator.activityAt, translator.assistantActivityAt);
+
+  // Reading the same records again shows nothing new, and so moves nothing.
+  const settledAt = translator.activityAt;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await translator.translate([{ type: "user", uuid: "user-3", message: { content: [{ type: "tool_result", tool_use_id: "bash-1", content: "done" }] } }]);
+  assert.equal(translator.activityAt, settledAt);
+});

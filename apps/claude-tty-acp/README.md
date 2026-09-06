@@ -112,11 +112,12 @@ Each active session owns an isolated PTY, hook route, transcript reader, permiss
 Sessions run concurrently, work inside a single session stays serialized, and a second adapter process cannot open a session that is already active on the host.
 Locks left behind by dead processes are recovered automatically.
 
-After a foreground turn finishes, the adapter gives the native Claude process one hour of idle time by default.
+Once a session has been quiet for an hour, by default, the adapter stops its native Claude process.
 When that timeout expires it sends Ctrl-D, kills the PTY if it does not exit promptly, and thereby stops any background tasks still owned by that Claude process.
 The logical ACP session, transcript mapping, selected model and mode, and session lock remain intact.
 The next prompt launches `claude --resume <id>` automatically, so the conversation continues without keeping its process alive indefinitely.
-Only foreground ACP prompts reset the timeout; task-completion notifications inside an otherwise idle Claude process do not extend it.
+Quiet is observed rather than inferred from prompts: the clock runs from the last thing the session actually did, whether that was the end of a prompt, a hook Claude called, a record it wrote, a turn it was woken for by a task notification, or a step one of its background agents took.
+A prompt is only what Paseo asked for; Claude goes on working after one — answering for an agent that reported, launching the next — and a suspension measured from the prompt alone stopped exactly that work an hour into it, mid-run.
 
 The timeout is read at each suspension rather than once at startup: `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` if it is set, otherwise `idleTimeoutMs` in `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/claude-tty/settings.json`, which is what the Claude TTY plugin's panel writes.
 Reading it per suspension is what lets a change in that panel reach a session that is already connected, and it is also why an unreadable file or a malformed variable leaves the session running rather than taking the adapter down.

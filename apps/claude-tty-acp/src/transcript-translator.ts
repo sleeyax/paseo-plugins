@@ -93,6 +93,7 @@ export class TranscriptTranslator {
   private readonly subagentsByToolCall = new Map<string, string>();
   private lastSubagentActivity = 0;
   private lastAssistantActivity = 0;
+  private lastActivity = 0;
   private trackingSubagents = false;
   private lastPlan = "";
   private lastUsage = "";
@@ -112,6 +113,15 @@ export class TranscriptTranslator {
   /** When Claude itself last said, thought or ran anything, whichever kind of record it was. */
   get assistantActivityAt(): number {
     return this.lastAssistantActivity;
+  }
+
+  /**
+   * When anything last happened in this session: Claude's own records, a subagent's, or a user turn
+   * Claude was woken with. A replay of records already shown moves nothing, because every update is
+   * deduplicated before it is sent, so this reads as the session's last real sign of life.
+   */
+  get activityAt(): number {
+    return Math.max(this.lastActivity, this.lastAssistantActivity, this.lastSubagentActivity);
   }
 
   /**
@@ -296,6 +306,8 @@ export class TranscriptTranslator {
     const resultKey = `${toolCallId}:result:${createHash("sha256").update(JSON.stringify(block)).digest("hex")}`;
     if (this.emitted.has(resultKey)) return;
     this.emitted.add(resultKey);
+    // A result is Claude's tool finishing, which is as much its own progress as calling it was.
+    this.lastAssistantActivity = Date.now();
     const content = resultContent(block.content);
     this.openToolCalls.delete(toolCallId);
     await this.send({
@@ -536,6 +548,7 @@ export class TranscriptTranslator {
   }
 
   private async send(update: SessionUpdate): Promise<void> {
+    this.lastActivity = Date.now();
     await this.connection.sessionUpdate({ sessionId: this.sessionId, update });
   }
 
