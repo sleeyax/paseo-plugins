@@ -62,7 +62,7 @@ A PID outlives the process that earned it, so a stop first establishes that the 
 
 A lock names the process holding a session; the adapter clears its own on exit and recovers one left by a dead process, so **Release lock** is only for a lock that outlived its process and is still in the way — including one left behind by a stop that had to force the process. Releasing is refused while the recorded process is alive. A session file that cannot be read can be moved aside rather than deleted, so the failure is still there to diagnose.
 
-The adapter's [troubleshooting table](../../apps/claude-tty-acp/README.md#troubleshooting) covers everything that goes wrong once a session is running.
+The adapter's [troubleshooting table](../../apps/claude-tty-acp/README.md#troubleshooting) covers everything that goes wrong once a session is running. Its log is kept at `~/.local/state/claude-tty-acp/logs/claude-tty-acp.log`, because the daemon reads the adapter's stderr and keeps none of it.
 
 The **Danger zone** removes the provider entry and nothing else. Deleting the state directory is a separate opt-in, refused while a session is open, and the source checkout is never touched.
 

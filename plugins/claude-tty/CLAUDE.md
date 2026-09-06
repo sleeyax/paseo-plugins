@@ -3,6 +3,7 @@
 Run `paseo plugin reload claude-tty` after every change, then `paseo plugin logs claude-tty`.
 The reload is the only compile check of the two bundles the daemon builds.
 Do this yourself; never leave it to the user.
+That log is the plugin's; the adapter's is `~/.local/state/claude-tty-acp/logs/claude-tty-acp.log`, because the daemon drops the adapter's stderr, and a running adapter process keeps the code it started with — a rebuilt `dist/` reaches the sessions started after it.
 
 `paseo plugin install <directory>` works against a 0.6 daemon and writes the `plugins` entry itself, but the plugin only loads once `pluginsEnabled` is true in `~/.paseo/config.json` and `paseo reload` has run.
 The v0.7 `paseo plugin add <repo>` form is not usable for this plugin: a Git installation runs no package manager, and the adapter this plugin manages has to be built.

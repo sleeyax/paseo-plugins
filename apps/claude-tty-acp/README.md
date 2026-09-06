@@ -152,7 +152,7 @@ Paseo ──ACP over stdio──► claude-tty-acp ──keystrokes over a PTY�
         hooks over loopback HTTP┘    └transcript JSONL, polled
 ```
 
-The daemon starts one adapter process per provider connection, and that process speaks ACP as newline-delimited JSON on stdout while its structured logs go to stderr.
+The daemon starts one adapter process per provider connection, and that process speaks ACP as newline-delimited JSON on stdout while its structured logs go to stderr — and, because the daemon reads stderr and keeps none of it, to `logs/claude-tty-acp.log` under the state directory as well, where every process on the host appends with its pid and a full file is moved aside once.
 Every session of that connection lives in that one process, and each session owns its own `claude` process in a PTY.
 
 A session starts empty: `session/new` returns an ID immediately and launches nothing, so a provider probe or an untouched draft never spawns Claude.
@@ -317,20 +317,20 @@ Filling the real meter needs Paseo's generic ACP provider to honour `usage_updat
 | `Could not start claude` | Set `CLAUDE_BIN` to an absolute executable path visible to the daemon. |
 | Workspace trust permission appears | Approve only when the displayed folder is a project you created or trust; Claude remembers the choice. |
 | Bypass Permissions disclaimer card appears | Claude has not been told this host accepts the mode. Accept it to start the session, or pick another mode; the answer is remembered for the host. |
-| SessionStart handshake timeout | If no workspace trust or Bypass Permissions card appeared, check Claude organization hook policy, inherited settings, loopback access, and the terminal snapshot in adapter stderr. |
+| SessionStart handshake timeout | If no workspace trust or Bypass Permissions card appeared, check Claude organization hook policy, inherited settings, loopback access, and the terminal snapshot in the adapter log. |
 | Claude opens a login screen | Authenticate as the Paseo daemon user and verify `HOME` or `CLAUDE_CONFIG_DIR`. |
 | Persisted session not found | Select the host that created it and verify `CLAUDE_TTY_ACP_STATE_DIR`. |
 | Session belongs to another cwd | Load it with its original absolute project path. |
 | Session already active | Close the other native agent connection; remove a lock only after verifying its recorded PID is dead. |
 | `A foreground turn is already active` | The interrupted turn had not settled when Paseo started its replacement; send the prompt again. |
 | Turn never finishes in Auto mode | Claude is waiting at a keyboard-only dialog after the classifier denial limit; cancel the turn and prefer Default mode. |
-| PTY exits unexpectedly | Inspect structured adapter stderr and run Claude interactively in the same cwd and environment. |
+| PTY exits unexpectedly | Inspect the adapter log and run Claude interactively in the same cwd and environment. |
 | Corrupt transcript or state | Preserve the file for diagnosis, then move only the named session JSON or transcript aside before retrying. |
 | Commands or plugins missing | Verify the daemon sees the expected `CLAUDE_CONFIG_DIR`, project `.claude` files, and enabled plugin settings. |
 
 ## Development
 
-The executable writes ACP only to stdout and sends structured diagnostics to stderr, so stderr is the place to look when something misbehaves.
+The executable writes ACP only to stdout and sends structured diagnostics to stderr, which the daemon reads and drops, so the place to look when something misbehaves is the copy it keeps: `${XDG_STATE_HOME:-~/.local/state}/claude-tty-acp/logs/claude-tty-acp.log` (or under `CLAUDE_TTY_ACP_STATE_DIR`), one line of JSON per record, with the pid of the adapter process that wrote it.
 
 Check a host without starting ACP:
 
