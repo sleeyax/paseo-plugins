@@ -211,7 +211,8 @@ Paseo reads a session as busy from the turn it has open and from nothing else �
 The hold ends at the first `Stop` hook with nothing left running, which is the end of the turn Claude runs to react to the notification, so the reply about the agent lands inside the turn that launched it.
 A turn that has been waiting on agents that have written nothing for fifteen minutes gives up and ends, because a session that is busy is also a session that is never suspended, and an agent that never reports would hold one open for the rest of its life.
 Giving up is the end of it: those agents stop being counted, so the next turn does not hold for a poll interval and give up on them all over again.
-Where every agent has reported and the wait is only for Claude to answer for the last of them, the bound is a minute — measured against what Claude itself writes as well, since answering for a long report is exactly the work being waited on and none of it is a subagent's.
+Where every agent has reported and the wait is only for Claude to answer for the last of them, the bound is five minutes — measured against what Claude itself writes as well, since answering for a long report is exactly the work being waited on and none of it is a subagent's.
+Five rather than one because Claude writes a response to its transcript only once the whole of it has streamed: a sentence followed by the long prompt of the next agent it dispatches shows nothing for as long as that prompt takes to generate, and a minute was not enough to cover one.
 Cancelling is unaffected: a held turn ends as promptly as any other, which is what keeps Paseo's replacement of a prompt sent mid-turn inside its two-second budget.
 
 ### Hooks carry everything interactive
