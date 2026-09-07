@@ -122,7 +122,7 @@ export function readLaunches(records: readonly Record<string, unknown>[]): Subag
 export function readOutcomes(records: readonly Record<string, unknown>[]): SubagentOutcome[] {
   const outcomes: SubagentOutcome[] = [];
   for (const record of records) {
-    for (const text of messageTexts(record)) {
+    for (const text of notificationTexts(record)) {
       for (const match of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
         const body = match[1] ?? "";
         const agentId = tag(body, "task-id");
@@ -321,6 +321,17 @@ export function promptOf(records: readonly Record<string, unknown>[]): string | 
     }
   }
   return null;
+}
+
+/**
+ * Where an agent's outcome can be written. A notification for one that finished while Claude was
+ * busy is queued rather than delivered as a turn, and the queued command is the only record it
+ * leaves — read the message alone and the panel shows the agent running for good.
+ */
+function notificationTexts(record: Record<string, unknown>): string[] {
+  const queued = asRecord(record.attachment);
+  const prompt = queued?.type === "queued_command" && typeof queued.prompt === "string" ? [queued.prompt] : [];
+  return [...messageTexts(record), ...prompt];
 }
 
 function messageTexts(record: Record<string, unknown>): string[] {

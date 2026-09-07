@@ -359,6 +359,58 @@ test("counts the agents a turn is still waiting on, and ignores the ones history
   assert.ok(translator.subagentActivityAt >= activityBefore);
 });
 
+test("lets go of an agent whose report was queued because Claude was busy when it finished", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const report =
+    '<task-notification><task-id>a1</task-id><tool-use-id>agent-tool</tool-use-id><status>completed</status><summary>Agent "Map the bridge" finished</summary></task-notification>';
+  const queued = {
+    type: "attachment",
+    uuid: "queued",
+    attachment: { type: "queued_command", commandMode: "task-notification", prompt: report },
+  };
+
+  translator.trackRunningSubagents();
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Map the bridge" } }] },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+    },
+  ]);
+  assert.equal(translator.runningSubagents, 1);
+
+  // An agent that finishes while Claude is mid-turn is queued instead of delivered, and this is the
+  // only record it leaves: no user turn ever carries it.
+  await translator.translate([queued]);
+  assert.equal(translator.runningSubagents, 0);
+  assert.equal(translator.subagentSettled("a1"), true);
+  const reported = notifications.map((notification) => notification.update).at(-1);
+  assert.ok(reported?.sessionUpdate === "tool_call_update");
+  assert.equal(reported.status, "completed");
+  assert.deepEqual(reported.content, [{ type: "content", content: { type: "text", text: 'Agent "Map the bridge" finished' } }]);
+
+  // The queue is rewritten at every turn boundary it survives, and the turn that finally delivers
+  // it says the same thing again. Neither is a second report to put on the card.
+  notifications.length = 0;
+  await translator.translate([
+    { ...queued, uuid: "queued-again" },
+    { type: "user", uuid: "delivered", message: { content: report } },
+  ]);
+  assert.deepEqual(notifications, []);
+});
+
 test("does not wait again on an agent whose launch a rewrite replayed", async () => {
   const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
   const translator = new TranscriptTranslator("session", "/work/repo", connection);

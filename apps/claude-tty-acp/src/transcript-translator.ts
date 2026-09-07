@@ -212,7 +212,7 @@ export class TranscriptTranslator {
     const content = message?.content;
     const recordId = stringValue(record.uuid) || stableUuid(JSON.stringify(record));
     if (record.isMeta !== true && record.isSidechain !== true) this.suppressedAssistantText = null;
-    await this.translateNotifications(content, recordId);
+    await this.translateNotifications(content);
     if (typeof content === "string") {
       await this.emitUserText(`${recordId}:text`, recordId, content, record);
       return;
@@ -343,10 +343,12 @@ export class TranscriptTranslator {
   }
 
   /**
-   * The end of an asynchronous agent is reported in the next user turn and nowhere else, and the
-   * text carrying it is scrubbed before the user sees it, so it is read here on the way past.
+   * The end of an asynchronous agent is reported in a notification and nowhere else, and the text
+   * carrying it is scrubbed before the user sees it, so it is read here on the way past. It arrives
+   * as a user turn of its own, or — when the agent finished while Claude was mid-turn — as the
+   * queued command below.
    */
-  private async translateNotifications(content: unknown, recordId: string): Promise<void> {
+  private async translateNotifications(content: unknown): Promise<void> {
     const texts =
       typeof content === "string"
         ? [content]
@@ -358,7 +360,7 @@ export class TranscriptTranslator {
             })
           : [];
     for (const text of texts) {
-      for (const notification of parseTaskNotifications(text)) await this.applyNotification(notification, recordId);
+      for (const notification of parseTaskNotifications(text)) await this.applyNotification(notification);
     }
   }
 
@@ -366,16 +368,17 @@ export class TranscriptTranslator {
    * A notification for a background command rather than an agent names no card here, and is left
    * alone. One for an agent whose launch is no longer in the transcript has no tool call to close,
    * but still says the agent has stopped, which is what lets its transcript stop being followed.
+   *
+   * Only an open card is closed, because one notification is written many times over: queued while
+   * Claude is busy and again as the turn that delivers it, and the queue is rewritten at every turn
+   * boundary it survives. Reading each of those as news would stack the same line onto the card.
    */
-  private async applyNotification(notification: TaskNotification, recordId: string): Promise<void> {
+  private async applyNotification(notification: TaskNotification): Promise<void> {
     const agentId =
       notification.agentId ??
       (notification.toolCallId === null ? null : this.subagentsByToolCall.get(notification.toolCallId) ?? null);
     const card = agentId === null ? undefined : this.subagents.get(agentId);
-    if (card === undefined) return;
-    const key = `${card.agentId}:notification:${recordId}`;
-    if (this.emitted.has(key)) return;
-    this.emitted.add(key);
+    if (card === undefined || card.status !== "in_progress") return;
     card.status = notificationFailed(notification.status) ? "failed" : "completed";
     card.outstanding = false;
     this.lastSubagentActivity = Date.now();
@@ -564,6 +567,14 @@ export class TranscriptTranslator {
     const attachment = objectValue(record.attachment);
     const type = stringValue(attachment?.type);
     if (!attachment || !type) return;
+    // An agent that finishes while Claude is mid-turn has its notification queued rather than
+    // delivered as a turn, and this attachment is the only record the queued one leaves. Without
+    // reading it the agent is waited on until the silence bound gives up, a quarter of an hour
+    // after the session has visibly stopped and gone back to waiting on the user.
+    if (type === "queued_command") {
+      await this.translateNotifications(stringValue(attachment.prompt));
+      return;
+    }
     if (type === "hook_system_message" || type === "hook_non_blocking_error" || type === "hook_cancelled") {
       const text = stringValue(attachment.content) || stringValue(attachment.stderr) || `${stringValue(attachment.hookName) || "Hook"} ${type.replace("hook_", "")}`;
       const key = `${stringValue(record.uuid) || stableUuid(JSON.stringify(record))}:attachment`;

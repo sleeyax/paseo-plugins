@@ -203,7 +203,10 @@ Its steps — what it says, and the tools it calls — are streamed onto the lau
 A card is rendered as plain text and has one line per step, so each is written for that: markdown is read back out of what the subagent says, a path keeps the tail that says which file it is, and a tool call is named by what it was for rather than by whichever argument came first.
 A nested subagent's steps join the card of the agent that launched it, marked as its own.
 
-That tool call stays in progress until Claude reports the agent has stopped, which it does by writing a `<task-notification>` into the next user turn — the only record of it, and one that is otherwise scrubbed out of the text before it is shown.
+That tool call stays in progress until Claude reports the agent has stopped, which it does by writing a `<task-notification>` — the only record of it, and one that is otherwise scrubbed out of the text before it is shown.
+Where that notification is written depends on what the session was doing when the agent finished: an idle session is woken with it as a user turn of its own, and one that is mid-turn has it queued instead, left behind only as a `queued_command` attachment.
+Both are read, because reading the turn alone loses every agent that finished while Claude was working — the case a session doing minutes of unattended work is in most of the time.
+The same notification is written many times over besides — queued, delivered, and rewritten at every turn boundary the queue survives — so it is read as news only while the card it names is still open.
 Anything but a clean finish leaves the call failed.
 An agent Claude stops itself, with `TaskStop`, is closed on that stop instead: a stopped agent writes no report and sends no notification, so nothing else would ever close its card, and it would go on being counted as running until the bound below gave up on it.
 

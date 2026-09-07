@@ -47,6 +47,19 @@ test("reads launches and outcomes out of a session transcript", () => {
   assert.deepEqual(readOutcomes(records), [{ agentId: "a1", status: "failed", summary: "Agent failed" }]);
 });
 
+test("reads the outcome of an agent whose notification was queued while Claude was busy", () => {
+  const report = "<task-notification> <task-id>a1</task-id> <status>completed</status> <summary>Agent finished</summary> </task-notification>";
+  const records = parseRecords(
+    [
+      JSON.stringify({ type: "user", toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1", description: "Audit" } }),
+      // Claude was mid-turn when the agent finished, so its report was queued and no user turn carries it.
+      JSON.stringify({ type: "attachment", attachment: { type: "queued_command", commandMode: "task-notification", prompt: report } }),
+    ].join("\n"),
+  );
+
+  assert.deepEqual(readOutcomes(records), [{ agentId: "a1", status: "completed", summary: "Agent finished" }]);
+});
+
 test("lists running subagents first and names one whose launch is gone after its prompt", () => {
   const files: SubagentFile[] = [
     { agentId: "done", lastActivity: 200, meta: null, prompt: null },
