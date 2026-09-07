@@ -87,6 +87,30 @@ export class InteractionBridge {
     return response.outcome.outcome === "selected" && response.outcome.optionId === "trust-workspace";
   }
 
+  async requestBypassPermissions(): Promise<boolean> {
+    const response = await this.request({
+      toolCall: {
+        toolCallId: `bypass-permissions-${randomUUID()}`,
+        title: "Run Claude Code without asking permission for anything?",
+        kind: "other",
+        status: "pending",
+        rawInput: {
+          workspace: this.cwd,
+          warning: "In Bypass Permissions mode Claude Code runs every command, including destructive ones, without asking.",
+          effect: "Claude Code will remember this answer for every session on this host, in every workspace.",
+        },
+        locations: [{ path: this.cwd }],
+      },
+      options: [
+        // Same reasoning as workspace trust: this decision outlives the session that raised it, so it stays a human one
+        // even under the permission modes that answer allow options on the person's behalf.
+        { optionId: "accept-bypass", name: "Yes, I accept", kind: "reject_once" },
+        { optionId: "deny-bypass", name: "No, exit", kind: "reject_once" },
+      ],
+    });
+    return response.outcome.outcome === "selected" && response.outcome.optionId === "accept-bypass";
+  }
+
   async handlePreToolUse(payload: HookPayload): Promise<HookResponse> {
     const name = stringValue(payload.tool_name) || "Tool";
     const input = objectValue(payload.tool_input) || {};

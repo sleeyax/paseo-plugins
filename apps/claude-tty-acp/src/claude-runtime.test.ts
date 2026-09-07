@@ -1809,3 +1809,174 @@ test("closes a background agent's card when the session it ran in is suspended",
     await rm(root, { force: true, recursive: true });
   }
 });
+
+// Claude's footer is the indicator it keeps for the mode plus " on", and two of the five indicators do not end in "mode".
+// A fresh adapter-launched session has no other readiness signal: the status line suppresses `? for shortcuts`,
+// the token badge needs context the session does not have yet, and the input box still holds its placeholder.
+for (const [modeId, footer] of [
+  ["bypassPermissions", "bypass permissions on"],
+  ["acceptEdits", "accept edits on"],
+] as const) {
+  test(`reads a fresh ${modeId} session as ready from its "${footer}" footer`, async () => {
+    const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-mode-footer-test-"));
+    const spawns: SpawnRecord[] = [];
+    let agent!: ClaudeTtyAgent;
+    const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+      const pty = new FakePty(5200 + spawns.length);
+      spawns.push({ file, args, options, pty });
+      const sessionId = args[args.indexOf("--session-id") + 1];
+      setImmediate(() => {
+        void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId });
+        pty.emitData(freshModeScreen(footer));
+      });
+      return pty;
+    };
+    agent = new ClaudeTtyAgent(createConnection([]), {
+      spawnPty,
+      runtimeRoot,
+      stateDirectory: path.join(runtimeRoot, "state"),
+      startupTimeoutMs: 1_000,
+      readinessTimeoutMs: 1_000,
+      readyQuietMs: 5,
+      submitDelayMs: 0,
+      contextRefreshTimeoutMs: 0,
+    });
+
+    try {
+      const created = await agent.newSession({ cwd: "/work/mode-footer", mcpServers: [] });
+      await agent.setSessionMode({ sessionId: created.sessionId, modeId });
+      const turn = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "go" }] });
+      await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.some((write) => write.startsWith("\u001b[200~")), 3_000);
+      assert.deepEqual(spawns[0]!.args.slice(2, 4), ["--permission-mode", modeId]);
+      await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "done" });
+      assert.deepEqual(await turn, { stopReason: "end_turn" });
+    } finally {
+      await agent.close();
+      await rm(runtimeRoot, { force: true, recursive: true });
+    }
+  });
+}
+
+test("asks through ACP before accepting Claude's bypass permissions disclaimer", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-bypass-test-"));
+  const cwd = "/work/unattended";
+  const permissionRequests: RequestPermissionRequest[] = [];
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const connection = {
+    sessionUpdate: async () => undefined,
+    requestPermission: async (request: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
+      permissionRequests.push(request);
+      return { outcome: { outcome: "selected", optionId: "accept-bypass" } };
+    },
+  } as unknown as AgentSideConnection;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    let accepted = false;
+    const pty = new FakePty(5300, (data) => {
+      if (data === "\u001b[B") setImmediate(() => pty.emitData(bypassPermissionsScreen("accept")));
+      // Claude only reaches its SessionStart hook once the disclaimer has been answered.
+      if (data === "\r" && !accepted) {
+        accepted = true;
+        setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+      }
+    });
+    spawned = pty;
+    setImmediate(() => pty.emitData(bypassPermissionsScreen("exit")));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(connection, {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    bypassPermissionsKeyDelayMs: 0,
+    bypassPermissionsSelectionTimeoutMs: 50,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    await agent.setSessionMode({ sessionId: session.sessionId, modeId: "bypassPermissions" });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => permissionRequests.length === 1 && spawned !== null && spawned.writes.length === 4);
+    assert.equal(permissionRequests[0]!.toolCall.title, "Run Claude Code without asking permission for anything?");
+    assert.deepEqual(permissionRequests[0]!.options, [
+      { optionId: "accept-bypass", name: "Yes, I accept", kind: "reject_once" },
+      { optionId: "deny-bypass", name: "No, exit", kind: "reject_once" },
+    ]);
+    assert.deepEqual((spawned as unknown as FakePty).writes, ["\u001b[B", "\r", "\u001b[200~hello \u001b[201~", "\r"]);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("fails the start rather than run in another mode when the bypass disclaimer is declined", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-bypass-declined-test-"));
+  const pty = new FakePty(5400);
+  const connection = {
+    sessionUpdate: async () => undefined,
+    requestPermission: async (): Promise<RequestPermissionResponse> => ({ outcome: { outcome: "selected", optionId: "deny-bypass" } }),
+  } as unknown as AgentSideConnection;
+  const agent = new ClaudeTtyAgent(connection, {
+    spawnPty: () => {
+      setImmediate(() => pty.emitData(bypassPermissionsScreen("exit")));
+      return pty;
+    },
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    bypassPermissionsKeyDelayMs: 0,
+    bypassPermissionsSelectionTimeoutMs: 50,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/declined", mcpServers: [] });
+    await agent.setSessionMode({ sessionId: session.sessionId, modeId: "bypassPermissions" });
+    await assert.rejects(
+      agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] }),
+      /Bypass Permissions disclaimer/,
+    );
+    assert.equal(pty.killed, true);
+    // Nothing was answered on Claude's behalf.
+    assert.deepEqual(pty.writes, []);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+/** What an adapter-launched session paints once it is up: a status line in place of the hints, and an input box still holding its placeholder. */
+function freshModeScreen(footer: string): string {
+  return [
+    "\u001b[2J\u001b[H",
+    "─".repeat(120),
+    '❯ Try "fix the failing test"',
+    "─".repeat(120),
+    `  ⏵⏵ ${footer} (shift+tab to cycle) · ← for agents`,
+  ].join("\r\n");
+}
+
+function bypassPermissionsScreen(selected: "exit" | "accept"): string {
+  return [
+    "\u001b[2J\u001b[H",
+    "WARNING: Claude Code running in Bypass Permissions mode",
+    "In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous",
+    "commands.",
+    "This mode should only be used in a sandboxed container/VM that has restricted internet access and can easily be",
+    "restored if damaged.",
+    "By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.",
+    "https://code.claude.com/docs/en/security",
+    selected === "exit" ? "❯ No, exit" : "  No, exit",
+    selected === "exit" ? "  Yes, I accept" : "❯ Yes, I accept",
+    "Enter to confirm · Esc to cancel",
+  ].join("\r\n");
+}
