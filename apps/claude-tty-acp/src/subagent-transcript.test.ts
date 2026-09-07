@@ -36,8 +36,8 @@ test("reads a task notification and treats anything but a clean finish as a fail
     "<task-notification> <task-id>a2</task-id> <status>killed</status> <summary>Stopped</summary> </task-notification>",
   ].join("\n");
   assert.deepEqual(parseTaskNotifications(text), [
-    { agentId: "a1", toolCallId: "toolu_1", status: "completed", summary: 'Agent "Audit" finished' },
-    { agentId: "a2", toolCallId: null, status: "killed", summary: "Stopped" },
+    { taskId: "a1", toolCallId: "toolu_1", status: "completed", summary: 'Agent "Audit" finished' },
+    { taskId: "a2", toolCallId: null, status: "killed", summary: "Stopped" },
   ]);
   assert.equal(notificationFailed("completed"), false);
   assert.equal(notificationFailed("killed"), true);

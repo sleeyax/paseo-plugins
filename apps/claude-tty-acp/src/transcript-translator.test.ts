@@ -336,7 +336,7 @@ test("counts the agents a turn is still waiting on, and ignores the ones history
   await translator.translate(launch("history-tool", "history", true));
   assert.equal(translator.runningSubagents, 0);
 
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
   await translator.translate([...launch("async-tool", "async", true), ...launch("sync-tool", "sync", false)]);
   assert.equal(translator.runningSubagents, 1);
 
@@ -359,6 +359,92 @@ test("counts the agents a turn is still waiting on, and ignores the ones history
   assert.ok(translator.subagentActivityAt >= activityBefore);
 });
 
+test("counts the background commands a turn is waiting on, and lets go of one that reports", async () => {
+  const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const launch = (toolCallId: string, taskId: string) => [
+    {
+      type: "assistant",
+      uuid: `launcher-${taskId}`,
+      message: {
+        content: [
+          { type: "tool_use", id: toolCallId, name: "Bash", input: { command: "npm test", description: "Run the tests", run_in_background: true } },
+        ],
+      },
+    },
+    {
+      type: "user",
+      uuid: `launched-${taskId}`,
+      toolUseResult: { stdout: "", stderr: "", backgroundTaskId: taskId },
+      message: { content: [{ type: "tool_result", tool_use_id: toolCallId, content: [] }] },
+    },
+  ];
+  const report = (taskId: string) => [
+    {
+      type: "user",
+      uuid: `notified-${taskId}`,
+      message: {
+        content: `<task-notification> <task-id>${taskId}</task-id> <status>completed</status> <summary>Background command "Run the tests" completed (exit code 0)</summary> </task-notification>`,
+      },
+    },
+  ];
+
+  // A session being loaded replays a transcript whose commands died with the process that ran them.
+  await translator.translate(launch("history-tool", "history"));
+  assert.equal(translator.runningBackgroundShells, 0);
+
+  translator.trackBackgroundWork();
+  await translator.translate(launch("bash-tool", "b1"));
+  assert.equal(translator.runningBackgroundShells, 1);
+  const startedAt = translator.backgroundShellActivityAt;
+  assert.ok(startedAt > 0);
+
+  // The report names the command by its task id, and is the only record that says it has ended.
+  await translator.translate(report("b1"));
+  assert.equal(translator.runningBackgroundShells, 0);
+  assert.ok(translator.backgroundShellActivityAt >= startedAt);
+
+  // A compaction rewrites the transcript, and the reader that notices replays it from the top.
+  await translator.translate(launch("bash-tool", "b1"));
+  assert.equal(translator.runningBackgroundShells, 0);
+});
+
+test("stops counting a background command a turn gave up on, and one whose session has stopped", async () => {
+  const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const launch = (toolCallId: string, taskId: string) => [
+    {
+      type: "assistant",
+      uuid: `launcher-${taskId}`,
+      message: {
+        content: [{ type: "tool_use", id: toolCallId, name: "Bash", input: { command: "npm run dev", run_in_background: true } }],
+      },
+    },
+    {
+      type: "user",
+      uuid: `launched-${taskId}`,
+      toolUseResult: { stdout: "", stderr: "", backgroundTaskId: taskId },
+      message: { content: [{ type: "tool_result", tool_use_id: toolCallId, content: [] }] },
+    },
+  ];
+
+  translator.trackBackgroundWork();
+  await translator.translate(launch("server-tool", "b1"));
+  assert.equal(translator.runningBackgroundShells, 1);
+
+  // A command that never reports — a server, say — is given up on once and not waited on again.
+  translator.abandonBackgroundWork();
+  assert.equal(translator.runningBackgroundShells, 0);
+  await translator.translate(launch("server-tool", "b1"));
+  assert.equal(translator.runningBackgroundShells, 0);
+
+  // A command is a child of the Claude process, so a stop is the end of it and of the wait for it.
+  await translator.translate(launch("suite-tool", "b2"));
+  assert.equal(translator.runningBackgroundShells, 1);
+  await translator.settleOpenToolCalls();
+  assert.equal(translator.runningBackgroundShells, 0);
+});
+
 test("lets go of an agent whose report was queued because Claude was busy when it finished", async () => {
   const notifications: SessionNotification[] = [];
   const connection = {
@@ -375,7 +461,7 @@ test("lets go of an agent whose report was queued because Claude was busy when i
     attachment: { type: "queued_command", commandMode: "task-notification", prompt: report },
   };
 
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
   await translator.translate([
     {
       type: "assistant",
@@ -419,7 +505,7 @@ test("lets go of an agent whose queued report was written as blocks", async () =
   } as unknown as AgentSideConnection;
   const translator = new TranscriptTranslator("session", "/work/repo", connection);
 
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
   await translator.translate([
     {
       type: "assistant",
@@ -543,7 +629,7 @@ test("does not wait again on an agent whose launch a rewrite replayed", async ()
     },
   ];
 
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
   await translator.translate(launch);
   assert.equal(translator.runningSubagents, 1);
 
@@ -578,12 +664,12 @@ test("does not wait again on an agent a turn gave up on when a rewrite replays i
     },
   ];
 
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
   await translator.translate(launch);
   assert.equal(translator.runningSubagents, 1);
 
   // The turn waited its bound out on an agent that never reported, and stopped counting it.
-  translator.abandonRunningSubagents();
+  translator.abandonBackgroundWork();
   assert.equal(translator.runningSubagents, 0);
 
   await translator.translate(launch);
@@ -773,7 +859,7 @@ test("stops counting an agent the session stopped, which never reports and never
     },
   } as AgentSideConnection;
   const translator = new TranscriptTranslator("session", "/work/repo", connection);
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
 
   await translator.translate([
     {
@@ -829,7 +915,7 @@ test("leaves an agent running when the stop that named it failed", async () => {
     },
   } as AgentSideConnection;
   const translator = new TranscriptTranslator("session", "/work/repo", connection);
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
 
   await translator.translate([
     {

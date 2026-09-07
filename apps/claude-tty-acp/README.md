@@ -223,6 +223,14 @@ Where every agent has reported and the wait is only for Claude to answer for the
 Five rather than one because Claude writes a response to its transcript only once the whole of it has streamed: a sentence followed by the long prompt of the next agent it dispatches shows nothing for as long as that prompt takes to generate, and a minute was not enough to cover one.
 Cancelling is unaffected: a held turn ends as promptly as any other, which is what keeps Paseo's replacement of a prompt sent mid-turn inside its two-second budget.
 
+A command Claude runs in the background holds the turn open the same way, for the same reason.
+It is dispatched exactly as an asynchronous agent is — the tool answers with the id of a task still running, Claude goes idle, and it is woken by a `<task-notification>` when the command ends — so a turn that ends at the `Stop` in between leaves everything Claude does from the report onwards outside any turn, which is a session that reads as ready while it works.
+Claude records the id its report will name in `backgroundTaskId` beside the launching tool result, and the notification carries it as the `<task-id>`, so the two are joined the way an agent's launch and report are.
+The command has no card of its own: its tool call is the launch, which finished, and everything it does goes to a file the adapter only learns the name of when the report arrives.
+That is also why its bound is a flat thirty minutes from the moment the turn was held rather than a silence — a running command shows nothing at all — restarted whenever another is started or reported.
+Thirty because backgrounding is what Claude does with a command precisely when it takes a while: of the background commands that have reported across these transcripts the median took four minutes and the longest genuine wait was a twenty-one minute code review, while the ones that ran for hours were servers and poll loops, which never report at all and are what the bound is there to let go of.
+Each kind of work is bounded on its own and the turn ends only once every one of them has run out, so a command's thirty minutes are not cut short by the agents beside it having gone quiet first.
+
 ### An adapter does not outlive its workspace
 
 The daemon closes the connection when it archives or deletes an agent — archiving a workspace archives each of its agents first — and that is what normally stops this process.
