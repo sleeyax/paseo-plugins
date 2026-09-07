@@ -191,6 +191,11 @@ Claude appends its own JSONL transcript under its projects directory, and the ad
 A translator turns each record into an ACP session update — user and agent chunks, thinking, tool calls with diffs and file locations, `TodoWrite` into a plan, token usage into a context-window update — and dedupes by record key so re-reads and history replay never emit the same thing twice.
 Loading a persisted session runs that translator over the whole file to rebuild the conversation, and still launches nothing until the next prompt.
 
+A message typed while Claude is working is the one thing that is not written as a turn.
+Claude queues it and takes it at the end of the turn it was in, and the queue is the whole record: the `queued_command` attachment Claude writes when the message arrives is never followed by a user turn carrying it, and the message reaches the transcript nowhere else.
+So the attachment is read as the message, keyed by the id the queue gave the item rather than by the record it was written in, because the queue is written out again for as long as the item is in it.
+Without that, a reloaded session is rebuilt as Claude answering a question nobody is shown asking.
+
 ### Subagents come out of their own transcripts
 
 A session's transcript says only that a subagent was launched, and one launched asynchronously answers its launcher the moment it starts.

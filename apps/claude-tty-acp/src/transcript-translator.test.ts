@@ -410,6 +410,64 @@ test("lets go of an agent whose report was queued because Claude was busy when i
   assert.deepEqual(notifications, []);
 });
 
+test("puts a message queued while Claude was working into the conversation, once", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const typed = {
+    type: "attachment",
+    uuid: "queued-typed",
+    attachment: {
+      type: "queued_command",
+      commandMode: "prompt",
+      origin: { kind: "human" },
+      source_uuid: "typed-1",
+      prompt: "I interrupt you, what happens<system-reminder>hidden</system-reminder>",
+    },
+  };
+
+  await translator.translate([
+    typed,
+    // A message with an attachment on it is queued as blocks rather than as one string.
+    {
+      type: "attachment",
+      uuid: "queued-blocks",
+      attachment: { type: "queued_command", commandMode: "prompt", source_uuid: "typed-2", prompt: [{ type: "text", text: "the codex one" }] },
+    },
+    // An agent's report is queued the same way, and is not the user saying anything.
+    {
+      type: "attachment",
+      uuid: "queued-report",
+      attachment: {
+        type: "queued_command",
+        commandMode: "task-notification",
+        prompt: "<task-notification><task-id>a1</task-id><status>completed</status><summary>done</summary></task-notification>",
+      },
+    },
+  ]);
+
+  assert.deepEqual(
+    notifications.map((notification) => notification.update).map((update) => ({
+      sessionUpdate: update.sessionUpdate,
+      content: "content" in update ? update.content : null,
+    })),
+    [
+      { sessionUpdate: "user_message_chunk", content: { type: "text", text: "I interrupt you, what happens" } },
+      { sessionUpdate: "user_message_chunk", content: { type: "text", text: "the codex one" } },
+    ],
+  );
+
+  // The queue is written out again under a record of its own each time it survives a turn, and the
+  // item in it is the same one, which the id the queue gave it is what says.
+  notifications.length = 0;
+  await translator.translate([{ ...typed, uuid: "queued-again" }]);
+  assert.deepEqual(notifications, []);
+});
+
 test("does not wait again on an agent whose launch a rewrite replayed", async () => {
   const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
   const translator = new TranscriptTranslator("session", "/work/repo", connection);
