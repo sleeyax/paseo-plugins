@@ -146,6 +146,11 @@ export class TranscriptTranslator {
     return this.lastSubagentActivity;
   }
 
+  /** The agents still being waited on, for the log of a turn that stopped waiting for them. */
+  get outstandingSubagents(): string[] {
+    return [...new Set([...this.subagents.values()].filter((card) => card.outstanding).map((card) => card.agentId))];
+  }
+
   /**
    * Stops counting the agents a turn has given up waiting on. Their cards keep saying they are
    * working, which is still true — nothing has reported — and they are closed when the process is.

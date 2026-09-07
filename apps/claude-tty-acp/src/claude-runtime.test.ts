@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -2185,3 +2185,81 @@ function bypassPermissionsScreen(selected: "exit" | "accept"): string {
     "Enter to confirm · Esc to cancel",
   ].join("\r\n");
 }
+
+test("gives up on a silent agent even while Claude itself keeps working", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-busy-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/agents-busy";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  const updates: SessionNotification[] = [];
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    let pty!: FakePty;
+    pty = new FakePty(4100, (data) => {
+      if (data === "\u0004") setImmediate(() => pty.emitExit());
+    });
+    spawned = pty;
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection(updates), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    subagentPollMs: 10,
+    subagentSilenceMs: 120,
+    idleTimeoutMs: 0,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "launch an agent" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    const file = path.join(projectDirectory, `${session.sessionId}.jsonl`);
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "launcher",
+        message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Fix the findings" } }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched",
+        toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+      }),
+    ];
+    await writeFile(file, `${lines.join("\n")}\n`);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
+
+    // The agent never writes again. Claude does, all the way through the bound: on the old reading
+    // that kept pushing the agent's silence back, and the turn was held for as long as Claude was busy.
+    const startedAt = Date.now();
+    let busy = 0;
+    const writing = setInterval(() => {
+      busy += 1;
+      void appendFile(file, `${JSON.stringify({ type: "assistant", uuid: `busy-${busy}`, message: { content: [{ type: "text", text: "still going" }] } })}\n`);
+    }, 40);
+    try {
+      assert.deepEqual(await turn, { stopReason: "end_turn" });
+    } finally {
+      clearInterval(writing);
+    }
+    assert.ok(busy > 0, "Claude wrote nothing during the bound, so the test proved nothing");
+    assert.ok(Date.now() - startedAt < 2_000, `the turn waited ${Date.now() - startedAt}ms on an agent that had gone quiet`);
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
