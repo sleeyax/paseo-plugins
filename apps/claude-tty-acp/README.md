@@ -217,6 +217,13 @@ Where every agent has reported and the wait is only for Claude to answer for the
 Five rather than one because Claude writes a response to its transcript only once the whole of it has streamed: a sentence followed by the long prompt of the next agent it dispatches shows nothing for as long as that prompt takes to generate, and a minute was not enough to cover one.
 Cancelling is unaffected: a held turn ends as promptly as any other, which is what keeps Paseo's replacement of a prompt sent mid-turn inside its two-second budget.
 
+### An adapter does not outlive its workspace
+
+The daemon closes the connection when it is done with an adapter, and that is what normally stops this process.
+A workspace that is archived is the case that does not cover: Paseo archives one by deleting its directory, and an adapter left standing in a directory that has gone can do nothing for anyone — Claude cannot be started there — while nothing closes the adapter itself, so it holds its memory until the machine is rebooted.
+The adapter therefore checks its own working directory every minute and stops once it has been missing twice running: twice rather than once so a workspace replaced at the same path, which is what reusing one looks like on disk, is not read as the end of the session.
+A directory that cannot be read for any other reason is still there, and no session is stopped over a failure to look.
+
 ### Hooks carry everything interactive
 
 The adapter runs a single loopback HTTP server whose URL carries a per-process secret and a per-session route, and the generated hook client posts each hook payload to it and hands the JSON answer back to Claude.
