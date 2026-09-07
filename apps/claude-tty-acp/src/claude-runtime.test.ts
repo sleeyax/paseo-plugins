@@ -493,14 +493,16 @@ async function createIdleHarness(name: string, idleTimeoutMs: number) {
 }
 
 test("does not suspend a session whose background agent is still writing", async () => {
-  const harness = await createIdleHarness("idle-subagent", 400);
+  const harness = await createIdleHarness("idle-subagent", 800);
   try {
     // The turn is over and nothing was launched inside it: as far as prompts go, the session is idle.
     // But an agent Claude started on its own is writing, and that is the session working.
     const directory = subagentsDirectory(harness.transcript);
     await mkdir(directory, { recursive: true });
     const steps: string[] = [];
-    for (let index = 0; index < 8; index += 1) {
+    // Twice the timeout's worth of steps, so a session that did not count them would be suspended
+    // halfway through; four times the read interval between them, so a box under load is not.
+    for (let index = 0; index < 16; index += 1) {
       steps.push(JSON.stringify({ type: "assistant", uuid: `step-${index}`, message: { content: [{ type: "text", text: `step ${index}` }] } }));
       await writeFile(path.join(directory, "agent-a1.jsonl"), `${steps.join("\n")}\n`);
       // Subagent transcripts are read at most every 200ms, which the idle timeout above leaves room for.
@@ -508,19 +510,19 @@ test("does not suspend a session whose background agent is still writing", async
       assert.equal(harness.started(), true, `suspended while the agent was writing, at step ${index}`);
     }
     // The agent has gone quiet, and now the idle timeout is what it always was.
-    await waitFor(() => !harness.started(), 2_000);
+    await waitFor(() => !harness.started(), 3_000);
   } finally {
     await harness.close();
   }
 });
 
 test("does not suspend a session Claude is still working in after its prompt ended", async () => {
-  const harness = await createIdleHarness("idle-own-turn", 400);
+  const harness = await createIdleHarness("idle-own-turn", 800);
   try {
     // A task notification woke Claude for a turn of its own; it writes records and calls hooks, and
     // none of that is a Paseo prompt.
     const records: string[] = [];
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 16; index += 1) {
       if (index % 2 === 0) {
         records.push(JSON.stringify({ type: "assistant", uuid: `own-${index}`, message: { content: [{ type: "text", text: `answering, part ${index}` }] } }));
         await writeFile(harness.transcript, `${records.join("\n")}\n`);
@@ -530,7 +532,7 @@ test("does not suspend a session Claude is still working in after its prompt end
       await new Promise((resolve) => setTimeout(resolve, 100));
       assert.equal(harness.started(), true, `suspended while Claude was working, at step ${index}`);
     }
-    await waitFor(() => !harness.started(), 2_000);
+    await waitFor(() => !harness.started(), 3_000);
   } finally {
     await harness.close();
   }
