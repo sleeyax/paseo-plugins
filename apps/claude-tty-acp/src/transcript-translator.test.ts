@@ -597,3 +597,96 @@ test("reads the session's last sign of life from whatever moved last, Claude's o
   await translator.translate([{ type: "user", uuid: "user-3", message: { content: [{ type: "tool_result", tool_use_id: "bash-1", content: "done" }] } }]);
   assert.equal(translator.activityAt, settledAt);
 });
+
+test("stops counting an agent the session stopped, which never reports and never would", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  translator.trackRunningSubagents();
+
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Fix the regressions" } }] },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "a8feac8dac4f2bf65" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+    },
+  ]);
+  assert.equal(translator.runningSubagents, 1);
+
+  notifications.length = 0;
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "stopper",
+      message: { content: [{ type: "tool_use", id: "stop-tool", name: "TaskStop", input: { task_id: "a8feac8dac4f2bf65" } }] },
+    },
+    {
+      type: "user",
+      uuid: "stopped",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "stop-tool",
+            content: [{ type: "text", text: '{"task_id":"a8feac8dac4f2bf65"}' }],
+          },
+        ],
+      },
+    },
+  ]);
+
+  assert.equal(translator.runningSubagents, 0);
+  const card = notifications
+    .map((notification) => notification.update)
+    .find((update) => update.sessionUpdate === "tool_call_update" && update.toolCallId === "agent-tool");
+  assert.ok(card?.sessionUpdate === "tool_call_update");
+  assert.equal(card.status, "failed");
+  assert.match(JSON.stringify(card.content), /Claude stopped this agent\./);
+});
+
+test("leaves an agent running when the stop that named it failed", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  translator.trackRunningSubagents();
+
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Keep working" } }] },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "still-running" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+    },
+    {
+      type: "assistant",
+      uuid: "stopper",
+      message: { content: [{ type: "tool_use", id: "stop-tool", name: "TaskStop", input: { task_id: "still-running" } }] },
+    },
+    {
+      type: "user",
+      uuid: "stop-failed",
+      message: { content: [{ type: "tool_result", tool_use_id: "stop-tool", is_error: true, content: [] }] },
+    },
+  ]);
+
+  assert.equal(translator.runningSubagents, 1);
+});

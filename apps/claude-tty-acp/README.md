@@ -205,6 +205,7 @@ A nested subagent's steps join the card of the agent that launched it, marked as
 
 That tool call stays in progress until Claude reports the agent has stopped, which it does by writing a `<task-notification>` into the next user turn — the only record of it, and one that is otherwise scrubbed out of the text before it is shown.
 Anything but a clean finish leaves the call failed.
+An agent Claude stops itself, with `TaskStop`, is closed on that stop instead: a stopped agent writes no report and sends no notification, so nothing else would ever close its card, and it would go on being counted as running until the bound below gave up on it.
 
 The session's turn is held open for as long as any of those agents is still running.
 Paseo reads a session as busy from the turn it has open and from nothing else — an ACP agent has no other way to say so — and Claude goes idle the moment it launches a background agent, so without this a session with ten minutes of work ahead of it reads as ready, and the answer Claude writes when the agent reports arrives outside any turn at all.

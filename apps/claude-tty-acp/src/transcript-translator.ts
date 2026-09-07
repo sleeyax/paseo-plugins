@@ -61,8 +61,14 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 /** The tools that hand work to a subagent, whose own transcript is where that work then happens. */
 const AGENT_TOOLS = new Set(["Agent", "Task"]);
 
+/** The tool Claude stops one of its own agents with, naming it by the id its launch reported. */
+const STOP_AGENT_TOOL = "TaskStop";
+
 /** The last step on the card of a subagent whose session stopped before it said how it went. */
 const UNREPORTED_AGENT = "Claude stopped before this agent reported back.";
+
+/** The last step on the card of a subagent the session it runs in stopped on purpose. */
+const STOPPED_AGENT = "Claude stopped this agent.";
 
 /**
  * A subagent and the tool call standing for it. Nested subagents share their spawner's card, so one
@@ -91,6 +97,8 @@ export class TranscriptTranslator {
   private readonly openToolCalls = new Set<string>();
   private readonly subagents = new Map<string, SubagentCard>();
   private readonly subagentsByToolCall = new Map<string, string>();
+  /** The agent each `TaskStop` call names, kept until its result says the stop went through. */
+  private readonly stoppedAgentsByToolCall = new Map<string, string>();
   private lastSubagentActivity = 0;
   private lastAssistantActivity = 0;
   private lastActivity = 0;
@@ -273,6 +281,11 @@ export class TranscriptTranslator {
       return;
     }
     if (AGENT_TOOLS.has(name)) this.agentCalls.add(toolCallId);
+    // Read before the guard below, so a replay of the transcript maps the call to its agent again.
+    if (name === STOP_AGENT_TOOL) {
+      const stopped = stringValue(input.task_id);
+      if (stopped) this.stoppedAgentsByToolCall.set(toolCallId, stopped);
+    }
     if (this.emittedTools.has(toolCallId)) return;
     this.emittedTools.add(toolCallId);
     this.openToolCalls.add(toolCallId);
@@ -304,6 +317,10 @@ export class TranscriptTranslator {
       // settled on that, or a session stopping later would rewrite the report as a failure.
       this.settleSubagentCard(launch.agentId, block.is_error === true);
     }
+    // A stopped agent writes no report and sends no notification, so nothing else ever closes its
+    // card: it would go on being counted as running and hold every later turn open to the bound.
+    const stopped = this.stoppedAgentsByToolCall.get(toolCallId);
+    if (stopped !== undefined && block.is_error !== true) await this.stopSubagentCard(stopped);
     const resultKey = `${toolCallId}:result:${createHash("sha256").update(JSON.stringify(block)).digest("hex")}`;
     if (this.emitted.has(resultKey)) return;
     this.emitted.add(resultKey);
@@ -424,6 +441,20 @@ export class TranscriptTranslator {
     if (card.toolCallId === toolCallId) return;
     card.toolCallId = toolCallId;
     this.subagentsByToolCall.set(toolCallId, agentId);
+    await this.publishSubagent(card);
+  }
+
+  /**
+   * Closes the card of an agent this session stopped itself. Its steps stay on the card — the work
+   * up to the stop is what there is to show — with a last line saying how it ended.
+   */
+  private async stopSubagentCard(agentId: string): Promise<void> {
+    const card = this.subagents.get(agentId);
+    if (card === undefined || card.status !== "in_progress") return;
+    card.status = "failed";
+    card.outstanding = false;
+    card.log.append(STOPPED_AGENT);
+    this.lastSubagentActivity = Date.now();
     await this.publishSubagent(card);
   }
 
