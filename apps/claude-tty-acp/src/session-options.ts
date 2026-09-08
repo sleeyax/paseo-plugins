@@ -57,6 +57,14 @@ export function assertModelId(value: string): void {
   if (!MODEL_IDS.includes(value)) throw new Error(`Unsupported Claude model ${value}`);
 }
 
+/**
+ * A mode a persisted session names but this build does not offer — an adapter rolled back past the release that added it, most likely.
+ * The session opens in the mode that asks about everything rather than not opening at all, which is the safe direction to be wrong in.
+ */
+export function offeredModeId(value: string): ModeId {
+  return (MODE_IDS as readonly string[]).includes(value) ? (value as ModeId) : "default";
+}
+
 export function assertModeId(value: string): asserts value is ModeId {
   if (!(MODE_IDS as readonly string[]).includes(value)) throw new Error(`Unsupported Claude mode ${value}`);
 }

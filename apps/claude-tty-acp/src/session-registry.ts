@@ -4,7 +4,7 @@ import type { AgentSideConnection, ContentBlock, PromptResponse } from "@agentcl
 import { ClaudeRuntime, type RuntimeDependencies } from "./claude-runtime.ts";
 import { discoverCommands } from "./commands.ts";
 import { HookServer } from "./hook-server.ts";
-import { assertModeId, assertModelId, INHERIT_MODEL_ID, migrateModelId, modeState, modelState } from "./session-options.ts";
+import { assertModeId, assertModelId, INHERIT_MODEL_ID, migrateModelId, modeState, modelState, offeredModeId } from "./session-options.ts";
 import { SessionLock } from "./session-lock.ts";
 import { type PersistedSession, StateStore } from "./state-store.ts";
 import { TranscriptReader } from "./transcript-reader.ts";
@@ -304,14 +304,15 @@ export class SessionRegistry {
     if (!state) throw new Error(`Persisted ACP session ${sessionId} was not found on this host`);
     const model = migrateModelId(state.model);
     assertModelId(model);
-    assertModeId(state.mode);
+    const mode = offeredModeId(state.mode);
+    if (mode !== state.mode) writeLog({ level: "warn", message: `Opened the session in ${mode} mode: this adapter does not offer the ${state.mode} mode it was left in`, sessionId });
     if (path.normalize(cwd) !== path.normalize(state.cwd)) throw new Error(`ACP session ${sessionId} belongs to ${state.cwd}, not ${cwd}`);
     const session = this.createSession({
       id: state.acpSessionId,
       claudeSessionId: state.claudeSessionId,
       cwd: state.cwd,
       model,
-      mode: state.mode,
+      mode,
       persisted: true,
     });
     try {
