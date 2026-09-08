@@ -399,6 +399,9 @@ export class ClaudeRuntime {
   }
 
   private async failedStartup(message: string): Promise<never> {
+    // The message carries the terminal snapshot, and it has only ever travelled to Paseo as an error.
+    // A handshake that failed is the thing nobody can reconstruct afterwards, so the log keeps it too.
+    writeLog({ level: "error", message, sessionId: this.sessionId });
     this.hookRegistration?.unregister();
     this.hookRegistration = null;
     this.ready = null;
