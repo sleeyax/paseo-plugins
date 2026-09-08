@@ -59,6 +59,9 @@ const CONTEXT_WAIT_MISS_LIMIT = 3;
 const CONTEXT_WAIT_RETRY_TURNS = 4;
 const WORKSPACE_TRUST_KEY_DELAY_MS = 500;
 const WORKSPACE_TRUST_SELECTION_TIMEOUT_MS = 3_000;
+// Claude puts its bypass permissions disclaimer up the same way it puts the trust screen up, and it settles no faster.
+const BYPASS_PERMISSIONS_KEY_DELAY_MS = 500;
+const BYPASS_PERMISSIONS_SELECTION_TIMEOUT_MS = 3_000;
 // Claude asks how to resume a long or old conversation before it opens one, and answers that dialog the same way it answers the trust screen.
 const STALE_RESUME_KEY_DELAY_MS = 200;
 const STALE_RESUME_SELECTION_TIMEOUT_MS = 3_000;
@@ -91,6 +94,8 @@ export type RuntimeDependencies = {
   transcriptPollIntervalMs?: number;
   workspaceTrustKeyDelayMs?: number;
   workspaceTrustSelectionTimeoutMs?: number;
+  bypassPermissionsKeyDelayMs?: number;
+  bypassPermissionsSelectionTimeoutMs?: number;
   staleResumeKeyDelayMs?: number;
   staleResumeSelectionTimeoutMs?: number;
   readyQuietMs?: number;
@@ -126,6 +131,8 @@ export class ClaudeRuntime {
   private readonly transcriptPollIntervalMs: number | undefined;
   private readonly workspaceTrustKeyDelayMs: number;
   private readonly workspaceTrustSelectionTimeoutMs: number;
+  private readonly bypassPermissionsKeyDelayMs: number;
+  private readonly bypassPermissionsSelectionTimeoutMs: number;
   private readonly staleResumeKeyDelayMs: number;
   private readonly staleResumeSelectionTimeoutMs: number;
   private readonly readyQuietMs: number;
@@ -194,6 +201,8 @@ export class ClaudeRuntime {
     this.transcriptPollIntervalMs = dependencies.transcriptPollIntervalMs;
     this.workspaceTrustKeyDelayMs = dependencies.workspaceTrustKeyDelayMs ?? WORKSPACE_TRUST_KEY_DELAY_MS;
     this.workspaceTrustSelectionTimeoutMs = dependencies.workspaceTrustSelectionTimeoutMs ?? WORKSPACE_TRUST_SELECTION_TIMEOUT_MS;
+    this.bypassPermissionsKeyDelayMs = dependencies.bypassPermissionsKeyDelayMs ?? BYPASS_PERMISSIONS_KEY_DELAY_MS;
+    this.bypassPermissionsSelectionTimeoutMs = dependencies.bypassPermissionsSelectionTimeoutMs ?? BYPASS_PERMISSIONS_SELECTION_TIMEOUT_MS;
     this.staleResumeKeyDelayMs = dependencies.staleResumeKeyDelayMs ?? STALE_RESUME_KEY_DELAY_MS;
     this.staleResumeSelectionTimeoutMs = dependencies.staleResumeSelectionTimeoutMs ?? STALE_RESUME_SELECTION_TIMEOUT_MS;
     this.readyQuietMs = dependencies.readyQuietMs ?? READY_QUIET_MS;
@@ -272,10 +281,11 @@ export class ClaudeRuntime {
   cancel(): void {
     // The wait for Claude's last context reading outlives the turn, so this is set before the turn check or a stop during it is dropped.
     this.contextWaitCancelled = true;
+    // A card Claude raises on its way up is waiting before there is a turn to cancel, and letting go of the request is the only thing that ends that wait.
+    this.interactions.cancelPending();
     const turn = this.turn;
     if (!turn) return;
     this.cancelRequested = true;
-    this.interactions.cancelPending();
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
     if (!this.pty) {
       this.cancelTimer = null;
@@ -784,6 +794,7 @@ export class ClaudeRuntime {
     const trustPrompt = this.trustPrompt.promise.then(() => "trust-prompt" as const);
     let deadline = Date.now() + this.startupTimeoutMs;
     let trustHandled = false;
+    let bypassHandled = false;
     while (true) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new Error(this.startupTimeoutMessage());
@@ -796,6 +807,16 @@ export class ClaudeRuntime {
       if (result === "ready") return;
       if (!this.staleResumeAnswered && isStaleResumeScreen(this.screen.snapshot())) {
         await this.keepFullSession();
+        deadline = Date.now() + this.startupTimeoutMs;
+        continue;
+      }
+      // Claude only raises the disclaimer for the mode that is gated on it, and a resumed session repaints a conversation that may quote the dialog it is asking about.
+      if (!bypassHandled && this.mode === "bypassPermissions" && isBypassPermissionsScreen(this.screen.snapshot())) {
+        bypassHandled = true;
+        const accepted = await this.interactions.requestBypassPermissions();
+        if (!accepted) throw new Error("Claude asks for the Bypass Permissions disclaimer before it will start in that mode, and it was not accepted in Paseo.");
+        await this.acceptBypassPermissions();
+        // As with workspace trust: the window that was running covered a handshake, not a person reading a warning.
         deadline = Date.now() + this.startupTimeoutMs;
         continue;
       }
@@ -812,6 +833,22 @@ export class ClaudeRuntime {
 
   private startupTimeoutMessage(): string {
     return `Claude did not complete the SessionStart hook handshake within ${this.startupTimeoutMs}ms. Check Claude hook policy and the terminal output:\n${this.screen.snapshot()}`;
+  }
+
+  private async acceptBypassPermissions(): Promise<void> {
+    const answer = await this.answerStartupMenu({
+      onScreen: isBypassPermissionsScreen,
+      selected: isBypassPermissionsAccepted,
+      keyDelayMs: this.bypassPermissionsKeyDelayMs,
+      timeoutMs: this.bypassPermissionsSelectionTimeoutMs,
+      exited: "Claude exited before the Bypass Permissions disclaimer could be accepted",
+    });
+    if (answer === "gone") {
+      writeLog({ level: "warn", message: "Claude's Bypass Permissions disclaimer was answered before the adapter could take it", sessionId: this.sessionId });
+    }
+    if (answer === "stuck") {
+      throw new Error(`Claude did not select "Yes, I accept" on its Bypass Permissions disclaimer after it was accepted in Paseo. Terminal output:\n${this.screen.snapshot()}`);
+    }
   }
 
   private async confirmWorkspaceTrust(): Promise<void> {
@@ -903,8 +940,16 @@ function inputBoxHolds(screen: string, echo: string): boolean {
 
 // Registering a status line makes Claude drop most footer hints, `? for shortcuts` among them, so that alternative cannot match in an adapter-launched session.
 // The mode indicator carries readiness in its place and is present in every mode, `manual mode on` in the default one; the token badge is absent until a session has context, and the bare prompt marker does not match while the input box still holds its placeholder.
+// Each indicator is spelled out because the footer is the indicator Claude keeps for the mode plus ` on`, and half of them do not end in `mode`: `accept edits on`, `bypass permissions on` and `don't ask on` are what those sessions print.
+// `don't ask` is here although the mode selector does not offer it, because Paseo's Default mode sends no `--permission-mode` and leaves the session in whatever `permissions.defaultMode` Claude's settings name.
+const MODE_INDICATORS = ["auto mode", "plan mode", "manual mode", "accept edits", "bypass permissions", "don't ask"];
+const READY_SCREEN = new RegExp(
+  `\\?\\s+for shortcuts|\\d+(?:\\.\\d+)?[km]?/\\d+(?:\\.\\d+)?[km]? tokens|(?:${MODE_INDICATORS.join("|")}) on|(^|\\n)\\s*❯\\s*($|\\n)`,
+  "i",
+);
+
 function isReadyScreen(screen: string): boolean {
-  return /\?\s+for shortcuts|\d+(?:\.\d+)?[km]?\/\d+(?:\.\d+)?[km]? tokens|(?:auto|plan|accept edits|manual) mode on|(^|\n)\s*❯\s*($|\n)/i.test(screen);
+  return READY_SCREEN.test(screen);
 }
 
 function isWorkspaceTrustScreen(screen: string): boolean {
@@ -915,6 +960,24 @@ function isWorkspaceTrustScreen(screen: string): boolean {
     /Yes,\s*I trust this folder/i.test(screen) &&
     /Enter to confirm/i.test(screen)
   );
+}
+
+/**
+ * Claude gates bypass permissions on a one-time acknowledgement kept per host, in
+ * `skipDangerousModePermissionPrompt`, and puts this dialog in front of the first session that asks
+ * for the mode without it. Nothing else on the startup path carries this title next to these options.
+ */
+function isBypassPermissionsScreen(screen: string): boolean {
+  return (
+    /WARNING: Claude Code running in Bypass Permissions mode/i.test(screen) &&
+    /No,\s*exit/i.test(screen) &&
+    /Yes,\s*I accept/i.test(screen) &&
+    /Enter to confirm/i.test(screen)
+  );
+}
+
+function isBypassPermissionsAccepted(screen: string): boolean {
+  return /(?:^|\n)[ \t]*❯[ \t]*Yes,[ \t]*I accept[ \t]*(?:$|\n)/i.test(screen);
 }
 
 // Claude shows this before it opens a conversation it considers long or old, and nothing else on its startup path offers these four lines together.

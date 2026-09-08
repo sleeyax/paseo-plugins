@@ -128,7 +128,11 @@ A suspension waits for its session to be genuinely idle. It stands aside while a
 The model selector offers Claude Code's rolling aliases — `inherit`, `opus`, `fable`, `sonnet`, `haiku` — plus the full catalog that Paseo's native Claude provider exposes, including explicit releases and 1M-context variants.
 Claude Code has no supported way to list models without opening an interactive session, so that catalog is versioned with the adapter while the aliases keep following Claude's.
 
-The mode selector offers Default, Accept Edits, Plan, and Auto.
+The mode selector offers Default, Accept Edits, Plan, Auto, and Bypass Permissions.
+
+Bypass Permissions is last and named for what it does: nothing stops a command before it runs, which is why it is a mode a person picks per session rather than a default.
+Claude gates it behind a disclaimer it keeps once per host, so the first session that asks for the mode raises a card in Paseo carrying the same warning; accepting it answers Claude's dialog, declining it fails the session start rather than quietly running in another mode.
+Because Claude remembers the answer, the card appears once on a host and never again — including for the scheduled, unattended sessions the mode exists for.
 
 Changing either control before launch changes startup flags.
 Changing one while idle restarts and resumes Claude with deterministic flags, and changing one during a turn is rejected.
@@ -310,7 +314,8 @@ Filling the real meter needs Paseo's generic ACP provider to honour `usage_updat
 | --- | --- |
 | `Could not start claude` | Set `CLAUDE_BIN` to an absolute executable path visible to the daemon. |
 | Workspace trust permission appears | Approve only when the displayed folder is a project you created or trust; Claude remembers the choice. |
-| SessionStart handshake timeout | If no workspace trust card appeared, check Claude organization hook policy, inherited settings, loopback access, and the terminal snapshot in adapter stderr. |
+| Bypass Permissions disclaimer card appears | Claude has not been told this host accepts the mode. Accept it to start the session, or pick another mode; the answer is remembered for the host. |
+| SessionStart handshake timeout | If no workspace trust or Bypass Permissions card appeared, check Claude organization hook policy, inherited settings, loopback access, and the terminal snapshot in adapter stderr. |
 | Claude opens a login screen | Authenticate as the Paseo daemon user and verify `HOME` or `CLAUDE_CONFIG_DIR`. |
 | Persisted session not found | Select the host that created it and verify `CLAUDE_TTY_ACP_STATE_DIR`. |
 | Session belongs to another cwd | Load it with its original absolute project path. |

@@ -18,6 +18,14 @@ type PermissionChoice = {
   suggestion?: PermissionSuggestion;
 };
 
+type Consent = {
+  id: string;
+  title: string;
+  details: Record<string, unknown>;
+  accept: { optionId: string; name: string };
+  decline: { optionId: string; name: string };
+};
+
 type InteractionOutcome =
   | { decision: "allow"; input: Record<string, unknown> }
   | { decision: "deny"; reason: string };
@@ -64,27 +72,27 @@ export class InteractionBridge {
     this.pendingRequests.clear();
   }
 
-  async requestWorkspaceTrust(): Promise<boolean> {
-    const response = await this.request({
-      toolCall: {
-        toolCallId: `workspace-trust-${randomUUID()}`,
-        title: "Is this a project you created or one you trust?",
-        kind: "other",
-        status: "pending",
-        rawInput: {
-          workspace: this.cwd,
-          effect: "Claude Code will remember this workspace as trusted.",
-        },
-        locations: [{ path: this.cwd }],
-      },
-      options: [
-        // Paseo's automatic permission modes accept allow options without showing a card.
-        // A workspace trust decision must always remain an explicit human choice.
-        { optionId: "trust-workspace", name: "Yes, trust this folder", kind: "reject_once" },
-        { optionId: "deny-workspace", name: "No, exit", kind: "reject_once" },
-      ],
+  requestWorkspaceTrust(): Promise<boolean> {
+    return this.requestConsent({
+      id: "workspace-trust",
+      title: "Is this a project you created or one you trust?",
+      details: { effect: "Claude Code will remember this workspace as trusted." },
+      accept: { optionId: "trust-workspace", name: "Yes, trust this folder" },
+      decline: { optionId: "deny-workspace", name: "No, exit" },
     });
-    return response.outcome.outcome === "selected" && response.outcome.optionId === "trust-workspace";
+  }
+
+  requestBypassPermissions(): Promise<boolean> {
+    return this.requestConsent({
+      id: "bypass-permissions",
+      title: "Run Claude Code without asking permission for anything?",
+      details: {
+        warning: "In Bypass Permissions mode Claude Code runs every command, including destructive ones, without asking.",
+        effect: "Claude Code will remember this answer for every session on this host, in every workspace.",
+      },
+      accept: { optionId: "accept-bypass", name: "Yes, I accept" },
+      decline: { optionId: "deny-bypass", name: "No, exit" },
+    });
   }
 
   async handlePreToolUse(payload: HookPayload): Promise<HookResponse> {
@@ -226,6 +234,28 @@ export class InteractionBridge {
     });
     if (response.outcome.outcome === "selected" && response.outcome.optionId === "approve-plan") return { decision: "allow", input };
     return { decision: "deny", reason: "The user did not approve leaving plan mode." };
+  }
+
+  /**
+   * A card for a decision Claude asks for before a session runs, and keeps once it is answered.
+   * Both options are declining ones because the answer outlives the session that raised it, and Paseo's automatic permission modes accept allow options without showing anybody a card.
+   */
+  private async requestConsent(consent: Consent): Promise<boolean> {
+    const response = await this.request({
+      toolCall: {
+        toolCallId: `${consent.id}-${randomUUID()}`,
+        title: consent.title,
+        kind: "other",
+        status: "pending",
+        rawInput: { workspace: this.cwd, ...consent.details },
+        locations: [{ path: this.cwd }],
+      },
+      options: [
+        { ...consent.accept, kind: "reject_once" },
+        { ...consent.decline, kind: "reject_once" },
+      ],
+    });
+    return response.outcome.outcome === "selected" && response.outcome.optionId === consent.accept.optionId;
   }
 
   private request(params: { toolCall: ToolCallUpdate; options: PermissionOption[] }): Promise<RequestPermissionResponse> {

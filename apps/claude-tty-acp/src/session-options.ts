@@ -25,7 +25,7 @@ export const MODELS: ModelInfo[] = [
 ];
 
 export const MODEL_IDS = MODELS.map((model) => model.modelId);
-export const MODE_IDS = ["default", "acceptEdits", "plan", "auto"] as const;
+export const MODE_IDS = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"] as const;
 
 export type ModeId = (typeof MODE_IDS)[number];
 
@@ -44,6 +44,7 @@ export function modeState(currentModeId: string): SessionModeState {
       { id: "acceptEdits", name: "Accept Edits", description: "Automatically accept file edits" },
       { id: "plan", name: "Plan", description: "Explore and plan without making changes" },
       { id: "auto", name: "Auto", description: "Let Claude Code handle permissions automatically" },
+      { id: "bypassPermissions", name: "Bypass Permissions", description: "Never ask - for unattended agents" },
     ],
   };
 }
@@ -54,6 +55,14 @@ export function migrateModelId(value: string): string {
 
 export function assertModelId(value: string): void {
   if (!MODEL_IDS.includes(value)) throw new Error(`Unsupported Claude model ${value}`);
+}
+
+/**
+ * A mode a persisted session names but this build does not offer — an adapter rolled back past the release that added it, most likely.
+ * The session opens in the mode that asks about everything rather than not opening at all, which is the safe direction to be wrong in.
+ */
+export function offeredModeId(value: string): ModeId {
+  return (MODE_IDS as readonly string[]).includes(value) ? (value as ModeId) : "default";
 }
 
 export function assertModeId(value: string): asserts value is ModeId {

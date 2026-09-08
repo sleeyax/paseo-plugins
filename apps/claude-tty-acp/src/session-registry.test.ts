@@ -63,3 +63,32 @@ test("loads sessions persisted before the model id rename", async () => {
     await rm(root, { force: true, recursive: true });
   }
 });
+
+// An adapter rolled back past the release that added the mode leaves the session naming one this build does not offer.
+test("opens a session left in a mode this adapter no longer offers", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "session-registry-test-"));
+  const sessionId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const store = new StateStore(root);
+  const registry = new SessionRegistry(
+    { sessionUpdate: async () => undefined } as unknown as AgentSideConnection,
+    new HookServer(),
+    { claudeConfigDir: root },
+    store,
+  );
+  try {
+    await store.save({
+      version: 1,
+      acpSessionId: sessionId,
+      claudeSessionId: sessionId,
+      cwd: root,
+      model: "inherit",
+      mode: "modeFromALaterAdapter",
+      lastActivity: 1,
+    });
+    const session = await registry.load(sessionId, root);
+    assert.equal(session.modes.currentModeId, "default");
+  } finally {
+    await registry.clear();
+    await rm(root, { force: true, recursive: true });
+  }
+});
