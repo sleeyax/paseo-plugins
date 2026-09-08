@@ -8,6 +8,10 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogRecord = {
   level: LogLevel;
   message: string;
+  // Every record is stamped with these, so a record that names a process of its own names it something else.
+  app?: never;
+  time?: never;
+  pid?: never;
   [key: string]: unknown;
 };
 

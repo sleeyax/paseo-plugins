@@ -395,7 +395,7 @@ export class ClaudeRuntime {
     await this.waitForTerminalReady();
     await this.transcript.start();
     this.resumeNextLaunch = true;
-    writeLog({ level: "info", message: "Started interactive Claude session", sessionId: this.sessionId, pid: this.pty?.pid, cwd: this.cwd });
+    writeLog({ level: "info", message: "Started interactive Claude session", sessionId: this.sessionId, claudePid: this.pty?.pid, cwd: this.cwd });
   }
 
   private async failedStartup(message: string): Promise<never> {
