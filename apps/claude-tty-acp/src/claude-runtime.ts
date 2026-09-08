@@ -149,7 +149,8 @@ export class ClaudeRuntime {
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
   private readonly claudeConfigDir: string | undefined;
-  private readonly initialTranscriptFilePath: string | undefined;
+  /** The transcript the watcher is reading now, so a SessionStart naming that same file leaves it, and its offset, alone. */
+  private transcriptFilePath!: string;
   private resumeNextLaunch: boolean;
   private model: string;
   private mode: string;
@@ -194,7 +195,6 @@ export class ClaudeRuntime {
     this.connection = connection;
     this.hooks = hooks;
     this.claudeConfigDir = dependencies.claudeConfigDir;
-    this.initialTranscriptFilePath = dependencies.transcriptFilePath;
     this.resumeNextLaunch = dependencies.resume === true;
     this.model = dependencies.model ?? INHERIT_MODEL_ID;
     this.mode = dependencies.mode ?? "default";
@@ -666,7 +666,7 @@ export class ClaudeRuntime {
       await this.onClaudeSessionChange?.(nextClaudeSessionId);
       return;
     }
-    if (transcriptFilePath && transcriptFilePath !== this.initialTranscriptFilePath) {
+    if (transcriptFilePath && transcriptFilePath !== this.transcriptFilePath) {
       await this.transcript.close();
       this.transcript = this.createTranscriptWatcher(this.currentClaudeSessionId, transcriptFilePath);
     }
@@ -674,6 +674,7 @@ export class ClaudeRuntime {
 
   private createTranscriptWatcher(claudeSessionId: string, filePath?: string): TranscriptWatcher {
     const reader = new TranscriptReader(claudeSessionId, this.cwd, { configDir: this.claudeConfigDir, filePath });
+    this.transcriptFilePath = reader.filePath;
     return new TranscriptWatcher(
       reader,
       this.translator,
