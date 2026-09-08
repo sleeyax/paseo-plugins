@@ -17,7 +17,8 @@ export type LogRecord = {
 
 /**
  * One file is shared by every adapter process on the host, so a record carries its pid. When the
- * file reaches this size it is moved aside once, so the log holds the last two of these at most.
+ * file reaches this size it is moved aside, so the log holds the last two of these at most; two
+ * processes crossing the threshold together move it aside twice, which costs the older of them.
  */
 const MAX_LOG_FILE_BYTES = 5 * 1024 * 1024;
 
