@@ -29,11 +29,19 @@ export function logFilePath(env: NodeJS.ProcessEnv = process.env): string {
  * Stderr is where the daemon reads the adapter's logs — and drops them, so nothing of what a
  * session did survives the moment anyone asks. The server keeps a copy on disk; the diagnose
  * command and the tests do not, since neither is a session anyone will need to reconstruct.
+ * Returns null when the directory to keep it in cannot be made, because a host that cannot hold
+ * the log still has to be able to run sessions.
  */
-export function enableLogFile(filePath = logFilePath(), maxBytes = MAX_LOG_FILE_BYTES): string {
-  mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  logFile = { path: filePath, maxBytes };
+export function enableLogFile(filePath = logFilePath(), maxBytes = MAX_LOG_FILE_BYTES): string | null {
   reportedFileFailure = false;
+  try {
+    mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  } catch (error) {
+    logFile = null;
+    reportFileFailure(filePath, error);
+    return null;
+  }
+  logFile = { path: filePath, maxBytes };
   return filePath;
 }
 
@@ -54,12 +62,16 @@ function appendToLogFile(file: { path: string; maxBytes: number }, line: string)
     // has rotated the file lands in the new one instead of the one moved aside.
     appendFileSync(file.path, line, { mode: 0o600 });
   } catch (error) {
-    // The file is a courtesy; losing it must never take a session down, and saying so once is enough.
-    if (reportedFileFailure) return;
-    reportedFileFailure = true;
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`${JSON.stringify({ app: APP_NAME, time: new Date().toISOString(), pid: process.pid, level: "warn", message: "Could not write the adapter log file", file: file.path, error: message })}\n`);
+    reportFileFailure(file.path, error);
   }
+}
+
+/** The file is a courtesy; losing it must never take a session down, and saying so once is enough. */
+function reportFileFailure(filePath: string, error: unknown): void {
+  if (reportedFileFailure) return;
+  reportedFileFailure = true;
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`${JSON.stringify({ app: APP_NAME, time: new Date().toISOString(), pid: process.pid, level: "warn", message: "Could not write the adapter log file", file: filePath, error: message })}\n`);
 }
 
 function currentSize(filePath: string): number {

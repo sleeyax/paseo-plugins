@@ -7,7 +7,9 @@ import { cleanupAbandonedRuntimeDirectories } from "./runtime-directories.ts";
 
 export async function runAcpServer(): Promise<void> {
   // The daemon reads stderr and keeps none of it, so the server also writes its log to disk.
-  writeLog({ level: "info", message: "Writing the adapter log to a file as well", file: enableLogFile() });
+  // A host that cannot hold the file has already said so on stderr, and still serves its sessions.
+  const logFile = enableLogFile();
+  if (logFile) writeLog({ level: "info", message: "Writing the adapter log to a file as well", file: logFile });
   await cleanupAbandonedRuntimeDirectories();
   // Only reported here; each suspension reads the value again so a change in Paseo reaches sessions that are already connected.
   writeLog({ level: "info", message: "Resolved the idle timeout", idleTimeoutMs: await readIdleTimeout(), settingsFile: settingsFilePath() });
