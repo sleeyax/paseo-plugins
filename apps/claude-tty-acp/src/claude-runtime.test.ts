@@ -1919,6 +1919,50 @@ test("asks through ACP before accepting Claude's bypass permissions disclaimer",
   }
 });
 
+// A resumed session repaints its conversation before its input box exists, and a conversation about the disclaimer carries every string the dialog does.
+test("leaves a session in another mode alone when its screen only quotes the disclaimer", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-quoted-disclaimer-test-"));
+  const permissionRequests: RequestPermissionRequest[] = [];
+  let agent!: ClaudeTtyAgent;
+  const pty = new FakePty(5500);
+  const connection = {
+    sessionUpdate: async () => undefined,
+    requestPermission: async (request: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
+      permissionRequests.push(request);
+      return { outcome: { outcome: "selected", optionId: "accept-bypass" } };
+    },
+  } as unknown as AgentSideConnection;
+  agent = new ClaudeTtyAgent(connection, {
+    spawnPty: (_file: string, args: string[]) => {
+      const sessionId = args[args.indexOf("--session-id") + 1]!;
+      setImmediate(() => pty.emitData(bypassPermissionsScreen("exit")));
+      // Late enough that the startup loop reads the quoted dialog off the screen before Claude reports itself started.
+      setTimeout(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }), 150);
+      return pty;
+    },
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 2_000,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/quoted", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => pty.writes.length === 2, 3_000);
+    assert.deepEqual(permissionRequests, []);
+    // Nothing was answered on Claude's behalf: no menu keys, only the prompt.
+    assert.deepEqual(pty.writes, ["\u001b[200~hello \u001b[201~", "\r"]);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
 test("fails the start rather than run in another mode when the bypass disclaimer is declined", async () => {
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-bypass-declined-test-"));
   const pty = new FakePty(5400);

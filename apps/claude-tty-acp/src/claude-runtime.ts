@@ -809,7 +809,8 @@ export class ClaudeRuntime {
         deadline = Date.now() + this.startupTimeoutMs;
         continue;
       }
-      if (!bypassHandled && isBypassPermissionsScreen(this.screen.snapshot())) {
+      // Claude only raises the disclaimer for the mode that is gated on it, and a resumed session repaints a conversation that may quote the dialog it is asking about.
+      if (!bypassHandled && this.mode === "bypassPermissions" && isBypassPermissionsScreen(this.screen.snapshot())) {
         bypassHandled = true;
         const accepted = await this.interactions.requestBypassPermissions();
         if (!accepted) throw new Error("Claude asks for the Bypass Permissions disclaimer before it will start in that mode, and it was not accepted in Paseo.");
