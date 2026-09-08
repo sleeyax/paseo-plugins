@@ -585,12 +585,11 @@ test("reads the session's last sign of life from whatever moved last, Claude's o
   const calledAt = translator.assistantActivityAt;
   assert.ok(calledAt > wokenAt);
 
+  const beforeResult = translator.activityAt;
   await new Promise((resolve) => setTimeout(resolve, 5));
   await translator.translate([{ type: "user", uuid: "user-3", message: { content: [{ type: "tool_result", tool_use_id: "bash-1", content: "done" }] } }]);
   assert.ok(translator.assistantActivityAt > calledAt, "a tool finishing is Claude's own progress");
-  // Not equal to it: sending the update that shows the result stamps the session a moment later,
-  // and whether that moment is the same millisecond is the clock's business, not this test's.
-  assert.ok(translator.activityAt >= translator.assistantActivityAt, "the session carries Claude's own progress");
+  assert.ok(translator.activityAt > beforeResult, "and the session moved with it");
 
   // Reading the same records again shows nothing new, and so moves nothing.
   const settledAt = translator.activityAt;
