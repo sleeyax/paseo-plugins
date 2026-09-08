@@ -13,6 +13,10 @@ type PendingTool = {
   input: Record<string, unknown>;
 };
 
+// An entry waits only for the PermissionRequest that follows its PreToolUse a moment later, and every entry is dropped at the start of a prompt.
+// Claude works between prompts too — the turn a task notification wakes it for, the agents it launches there — and none of that is a prompt, so a session left to work holds one tool input per call it makes until its process stops.
+const MAX_PENDING_TOOLS = 100;
+
 type PermissionChoice = {
   response: RequestPermissionResponse;
   suggestion?: PermissionSuggestion;
@@ -99,6 +103,7 @@ export class InteractionBridge {
     const name = stringValue(payload.tool_name) || "Tool";
     const input = objectValue(payload.tool_input) || {};
     const toolUseId = stringValue(payload.tool_use_id) || `tool-${randomUUID()}`;
+    if (this.pendingTools.length >= MAX_PENDING_TOOLS) this.pendingTools.shift();
     this.pendingTools.push({ id: toolUseId, name, input });
     const interaction = this.interactionFor(name, input, toolUseId);
     if (interaction) return preToolResponse(await interaction);
