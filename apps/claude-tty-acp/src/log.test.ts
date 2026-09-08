@@ -103,9 +103,18 @@ test("reports a file that goes unwritable under it without failing the record", 
     await chmod(directory, 0o500);
     assert.doesNotThrow(() => writeLog({ level: "info", message: "after" }));
 
-    const warnings = written.map((line) => JSON.parse(line)).filter((record) => record.message === "Could not write the adapter log file");
-    assert.equal(warnings.length, 1);
-    assert.equal(warnings[0]!.file, file);
+    const warnings = () => written.map((line) => JSON.parse(line)).filter((record) => record.message === "Could not write the adapter log file");
+    assert.equal(warnings().length, 1);
+    assert.equal(warnings()[0]!.file, file);
+
+    // A spell of failure is reported once, and the next one is reported again: a file that comes
+    // back and goes away later has two failures to tell about, not one and then silence.
+    await chmod(directory, 0o700);
+    writeLog({ level: "info", message: "recovered" });
+    await rm(file);
+    await chmod(directory, 0o500);
+    writeLog({ level: "info", message: "gone again" });
+    assert.equal(warnings().length, 2);
   } finally {
     process.stderr.write = stderr;
     disableLogFile();

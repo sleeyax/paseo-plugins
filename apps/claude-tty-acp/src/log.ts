@@ -66,16 +66,27 @@ export function writeLog(record: LogRecord): void {
 
 function appendToLogFile(file: { path: string; maxBytes: number }, line: string): void {
   try {
-    if (currentSize(file.path) >= file.maxBytes) renameSync(file.path, `${file.path}.1`);
+    rotateIfFull(file);
     // Opened for every line rather than held open, so a process that goes on logging after another
     // has rotated the file lands in the new one instead of the one moved aside.
     appendFileSync(file.path, line, { mode: 0o600 });
+    reportedFileFailure = false;
   } catch (error) {
     reportFileFailure(file.path, error);
   }
 }
 
-/** The file is a courtesy; losing it must never take a session down, and saying so once is enough. */
+function rotateIfFull(file: { path: string; maxBytes: number }): void {
+  if (currentSize(file.path) < file.maxBytes) return;
+  try {
+    renameSync(file.path, `${file.path}.1`);
+  } catch (error) {
+    // Another process crossed the threshold first and took the file with it, which is this one's work done.
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+  }
+}
+
+/** The file is a courtesy; losing it must never take a session down, and saying so once a spell is enough. */
 function reportFileFailure(filePath: string | undefined, error: unknown): void {
   if (reportedFileFailure) return;
   reportedFileFailure = true;
