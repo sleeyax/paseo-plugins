@@ -37,17 +37,21 @@ export function logFilePath(env: NodeJS.ProcessEnv = process.env): string {
  * Returns null when the directory to keep it in cannot be made, because a host that cannot hold
  * the log still has to be able to run sessions.
  */
-export function enableLogFile(filePath = logFilePath(), maxBytes = MAX_LOG_FILE_BYTES): string | null {
+export function enableLogFile(filePath?: string, maxBytes = MAX_LOG_FILE_BYTES): string | null {
   reportedFileFailure = false;
+  // Resolved inside the guard, not as a default argument: naming the file reads the environment and
+  // the passwd database, which is one of the ways a host that cannot hold the log says so.
+  let resolved: string | undefined;
   try {
-    mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+    resolved = filePath ?? logFilePath();
+    mkdirSync(path.dirname(resolved), { recursive: true, mode: 0o700 });
   } catch (error) {
     logFile = null;
-    reportFileFailure(filePath, error);
+    reportFileFailure(resolved, error);
     return null;
   }
-  logFile = { path: filePath, maxBytes };
-  return filePath;
+  logFile = { path: resolved, maxBytes };
+  return resolved;
 }
 
 export function disableLogFile(): void {
@@ -72,7 +76,7 @@ function appendToLogFile(file: { path: string; maxBytes: number }, line: string)
 }
 
 /** The file is a courtesy; losing it must never take a session down, and saying so once is enough. */
-function reportFileFailure(filePath: string, error: unknown): void {
+function reportFileFailure(filePath: string | undefined, error: unknown): void {
   if (reportedFileFailure) return;
   reportedFileFailure = true;
   const message = error instanceof Error ? error.message : String(error);
