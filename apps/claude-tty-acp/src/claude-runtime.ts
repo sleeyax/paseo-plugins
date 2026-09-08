@@ -938,8 +938,9 @@ function inputBoxHolds(screen: string, echo: string): boolean {
 
 // Registering a status line makes Claude drop most footer hints, `? for shortcuts` among them, so that alternative cannot match in an adapter-launched session.
 // The mode indicator carries readiness in its place and is present in every mode, `manual mode on` in the default one; the token badge is absent until a session has context, and the bare prompt marker does not match while the input box still holds its placeholder.
-// Each indicator is spelled out because the footer is the indicator Claude keeps for the mode plus ` on`, and two of the five do not end in `mode`: `accept edits on` and `bypass permissions on` are what those sessions print.
-const MODE_INDICATORS = ["auto mode", "plan mode", "manual mode", "accept edits", "bypass permissions"];
+// Each indicator is spelled out because the footer is the indicator Claude keeps for the mode plus ` on`, and half of them do not end in `mode`: `accept edits on`, `bypass permissions on` and `don't ask on` are what those sessions print.
+// `don't ask` is here although the mode selector does not offer it, because Paseo's Default mode sends no `--permission-mode` and leaves the session in whatever `permissions.defaultMode` Claude's settings name.
+const MODE_INDICATORS = ["auto mode", "plan mode", "manual mode", "accept edits", "bypass permissions", "don't ask"];
 const READY_SCREEN = new RegExp(
   `\\?\\s+for shortcuts|\\d+(?:\\.\\d+)?[km]?/\\d+(?:\\.\\d+)?[km]? tokens|(?:${MODE_INDICATORS.join("|")}) on|(^|\\n)\\s*❯\\s*($|\\n)`,
   "i",

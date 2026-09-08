@@ -1810,14 +1810,16 @@ test("closes a background agent's card when the session it ran in is suspended",
   }
 });
 
-// Claude's footer is the indicator it keeps for the mode plus " on", and two of the five indicators do not end in "mode".
+// Claude's footer is the indicator it keeps for the mode plus " on", and half of the indicators do not end in "mode".
 // A fresh adapter-launched session has no other readiness signal: the status line suppresses `? for shortcuts`,
 // the token badge needs context the session does not have yet, and the input box still holds its placeholder.
+// The Default mode sends no flag, so that session starts in the mode Claude's own settings name, "don't ask" among them.
 for (const [modeId, footer] of [
   ["bypassPermissions", "bypass permissions on"],
   ["acceptEdits", "accept edits on"],
+  [undefined, "don't ask on"],
 ] as const) {
-  test(`reads a fresh ${modeId} session as ready from its "${footer}" footer`, async () => {
+  test(`reads a fresh ${modeId ?? "settings-default"} session as ready from its "${footer}" footer`, async () => {
     const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-mode-footer-test-"));
     const spawns: SpawnRecord[] = [];
     let agent!: ClaudeTtyAgent;
@@ -1844,10 +1846,11 @@ for (const [modeId, footer] of [
 
     try {
       const created = await agent.newSession({ cwd: "/work/mode-footer", mcpServers: [] });
-      await agent.setSessionMode({ sessionId: created.sessionId, modeId });
+      if (modeId) await agent.setSessionMode({ sessionId: created.sessionId, modeId });
       const turn = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "go" }] });
       await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.some((write) => write.startsWith("\u001b[200~")), 3_000);
-      assert.deepEqual(spawns[0]!.args.slice(2, 4), ["--permission-mode", modeId]);
+      const modeArgs = spawns[0]!.args.includes("--permission-mode") ? spawns[0]!.args.slice(2, 4) : [];
+      assert.deepEqual(modeArgs, modeId ? ["--permission-mode", modeId] : []);
       await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "done" });
       assert.deepEqual(await turn, { stopReason: "end_turn" });
     } finally {
