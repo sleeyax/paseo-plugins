@@ -538,6 +538,23 @@ test("does not suspend a session Claude is still working in after its prompt end
   }
 });
 
+test("counts a hook Claude called as the session working, with nothing yet written for it", async () => {
+  const harness = await createIdleHarness("idle-hooks-only", 800);
+  try {
+    // Claude writes a response to its transcript only once the whole of it has streamed, so a long
+    // tool call shows nothing on disk while it is generated. The hooks are all there is to go on,
+    // and this session writes no record at all: the transcript stays exactly as the turn left it.
+    for (let index = 0; index < 16; index += 1) {
+      await harness.agent.hooks.dispatch({ hook_event_name: "PreToolUse", session_id: harness.sessionId, tool_name: "Bash", tool_input: { command: `echo ${index}` } });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(harness.started(), true, `suspended while Claude was calling hooks, at step ${index}`);
+    }
+    await waitFor(() => !harness.started(), 3_000);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("delivers the assistant text before an interactive hook prompts", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-flush-test-"));
   const configDirectory = path.join(root, "claude");
