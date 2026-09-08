@@ -117,8 +117,9 @@ export class TranscriptTranslator {
 
   /**
    * When anything last happened in this session: Claude's own records, a subagent's, or a user turn
-   * Claude was woken with. A replay of records already shown moves nothing, because every update is
-   * deduplicated before it is sent, so this reads as the session's last real sign of life.
+   * Claude was woken with. Claude's own are deduplicated before they are sent, so replaying them
+   * moves nothing; a subagent's launch and steps are stamped as they are read, replay or not, and a
+   * replay follows a compaction, which is itself the session working.
    */
   get activityAt(): number {
     return Math.max(this.lastActivity, this.lastAssistantActivity, this.lastSubagentActivity);
