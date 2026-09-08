@@ -29,8 +29,14 @@ const SUBMIT_DELAY_MS = 150;
  * reports would otherwise leave the session busy — and unsuspendable — for the rest of its life.
  */
 const SUBAGENT_SILENCE_MS = 15 * 60_000;
-/** How long the last agent to report is given to wake Claude for the turn that answers for it. */
-const SUBAGENT_WAKE_MS = 60_000;
+/**
+ * How long the last agent to report is given to wake Claude for the turn that answers for it, and
+ * how long Claude may then go without writing anything before the turn stops waiting for it. Claude
+ * writes a response to its transcript only once the whole of it has streamed, so a text followed by
+ * a long tool call — the prompt of the next agent it dispatches, say — shows nothing for as long as
+ * that call takes to generate, and a minute was not enough to cover one.
+ */
+const SUBAGENT_WAKE_MS = 5 * 60_000;
 const SUBAGENT_POLL_MS = 5_000;
 // Claude drops the submit key while it is still settling a paste, so the prompt is re-submitted until its input box lets go of it.
 const SUBMIT_ATTEMPTS = 6;
@@ -143,7 +149,8 @@ export class ClaudeRuntime {
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
   private readonly claudeConfigDir: string | undefined;
-  private readonly initialTranscriptFilePath: string | undefined;
+  /** The transcript the watcher is reading now, so a SessionStart naming that same file leaves it, and its offset, alone. */
+  private transcriptFilePath!: string;
   private resumeNextLaunch: boolean;
   private model: string;
   private mode: string;
@@ -170,6 +177,8 @@ export class ClaudeRuntime {
   private subagentHold: NodeJS.Timeout | null = null;
   private heldAssistantMessage: string | undefined;
   private heldAt = 0;
+  /** When Claude last called a hook, which it does only while it is doing something. */
+  private lastHookAt = 0;
   private intentionalExit: Deferred<void> | null = null;
 
   constructor(
@@ -186,7 +195,6 @@ export class ClaudeRuntime {
     this.connection = connection;
     this.hooks = hooks;
     this.claudeConfigDir = dependencies.claudeConfigDir;
-    this.initialTranscriptFilePath = dependencies.transcriptFilePath;
     this.resumeNextLaunch = dependencies.resume === true;
     this.model = dependencies.model ?? INHERIT_MODEL_ID;
     this.mode = dependencies.mode ?? "default";
@@ -225,6 +233,16 @@ export class ClaudeRuntime {
   /** A permission or question card is on screen in Paseo and nobody has answered it yet. */
   get interactionPending(): boolean {
     return this.interactions.pending;
+  }
+
+  /**
+   * When this session last showed any sign of life, whether or not a prompt was open: a hook Claude
+   * called, a record it or one of its agents wrote, or a notification it was woken with. A turn is
+   * only what Paseo asked for; Claude goes on working after one — launching agents, answering for
+   * them — and that work is what this reports.
+   */
+  get activityAt(): number {
+    return Math.max(this.translator.activityAt, this.lastHookAt);
   }
 
   async prompt(content: ContentBlock[]): Promise<PromptResponse> {
@@ -377,10 +395,13 @@ export class ClaudeRuntime {
     await this.waitForTerminalReady();
     await this.transcript.start();
     this.resumeNextLaunch = true;
-    writeLog({ level: "info", message: "Started interactive Claude session", sessionId: this.sessionId, pid: this.pty?.pid, cwd: this.cwd });
+    writeLog({ level: "info", message: "Started interactive Claude session", sessionId: this.sessionId, claudePid: this.pty?.pid, cwd: this.cwd });
   }
 
   private async failedStartup(message: string): Promise<never> {
+    // The message carries the terminal snapshot, and it has only ever travelled to Paseo as an error.
+    // A handshake that failed is the thing nobody can reconstruct afterwards, so the log keeps it too.
+    writeLog({ level: "error", message, sessionId: this.sessionId });
     this.hookRegistration?.unregister();
     this.hookRegistration = null;
     this.ready = null;
@@ -397,6 +418,7 @@ export class ClaudeRuntime {
   }
 
   private async handleHook(payload: HookPayload): Promise<HookResponse> {
+    this.lastHookAt = Date.now();
     switch (payload.hook_event_name) {
       // Hooks arrive over their own channel, ahead of the transcript the watcher is still polling.
       // Draining first keeps the prompt from landing before the assistant text that explains it.
@@ -644,7 +666,7 @@ export class ClaudeRuntime {
       await this.onClaudeSessionChange?.(nextClaudeSessionId);
       return;
     }
-    if (transcriptFilePath && transcriptFilePath !== this.initialTranscriptFilePath) {
+    if (transcriptFilePath && transcriptFilePath !== this.transcriptFilePath) {
       await this.transcript.close();
       this.transcript = this.createTranscriptWatcher(this.currentClaudeSessionId, transcriptFilePath);
     }
@@ -652,6 +674,7 @@ export class ClaudeRuntime {
 
   private createTranscriptWatcher(claudeSessionId: string, filePath?: string): TranscriptWatcher {
     const reader = new TranscriptReader(claudeSessionId, this.cwd, { configDir: this.claudeConfigDir, filePath });
+    this.transcriptFilePath = reader.filePath;
     return new TranscriptWatcher(
       reader,
       this.translator,

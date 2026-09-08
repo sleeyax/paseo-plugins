@@ -268,3 +268,45 @@ test("renders a question the permission pipeline asks about on its own", async (
 async function waitFor(predicate: () => boolean): Promise<void> {
   while (!predicate()) await new Promise((resolve) => setImmediate(resolve));
 }
+
+test("keeps the tools waiting for a permission bounded, so a session working between prompts does not grow one", async () => {
+  const requests: RequestPermissionRequest[] = [];
+  const bridge = new InteractionBridge(
+    "session",
+    "/work/repo",
+    connectionWith(async (request) => {
+      requests.push(request);
+      return selected("allow-once");
+    }),
+  );
+  // Claude runs tools that raise no card, and only a prompt empties what they leave behind.
+  // A session woken by a task notification is never prompted, so the count here is the run, not the turn.
+  for (let index = 0; index < 150; index += 1) {
+    await bridge.handlePreToolUse({
+      hook_event_name: "PreToolUse",
+      session_id: "session",
+      tool_use_id: `tool-${index}`,
+      tool_name: "Bash",
+      tool_input: { command: `echo ${index}` },
+    });
+  }
+
+  // The newest is still there to correlate with, which is the only one a PermissionRequest ever asks for.
+  await bridge.handlePermissionRequest({
+    hook_event_name: "PermissionRequest",
+    session_id: "session",
+    tool_name: "Bash",
+    tool_input: { command: "echo 149" },
+  });
+  assert.equal(requests[0]?.toolCall.toolCallId, "tool-149");
+
+  // The oldest has been let go of rather than held for the life of the process.
+  await bridge.handlePermissionRequest({
+    hook_event_name: "PermissionRequest",
+    session_id: "session",
+    tool_name: "Bash",
+    tool_input: { command: "echo 0" },
+  });
+  assert.notEqual(requests[1]?.toolCall.toolCallId, "tool-0");
+  assert.match(requests[1]!.toolCall.toolCallId, /^permission-/);
+});

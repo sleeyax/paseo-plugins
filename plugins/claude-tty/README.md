@@ -34,9 +34,9 @@ Everything is host-local: selecting another host in Paseo shows that host's own 
 
 ## Settings
 
-The **Suspend idle Claude** setting controls how long a native Claude process remains alive after its last foreground turn. It defaults to one hour, and you can choose 15 minutes through 8 hours, or **Never**.
+The **Suspend idle Claude** setting controls how long a native Claude process remains alive after the session last did anything. It defaults to one hour, and you can choose 15 minutes through 8 hours, or **Never**.
 
-Suspending stops the PTY and any background tasks it owns, but does not close or archive the Paseo agent. The adapter keeps the persisted session mapping, and the next prompt automatically launches `claude --resume` with the same Claude session, model, and mode. Background task notifications do not reset the timer.
+Suspending stops the PTY and any background tasks it owns, but does not close or archive the Paseo agent. The adapter keeps the persisted session mapping, and the next prompt automatically launches `claude --resume` with the same Claude session, model, and mode. The timer runs from the last thing the session actually did, not from the last prompt: a turn Claude runs on its own after a task notification, the agents it launches, and the hooks it calls all count, so a session working unattended is not stopped mid-run.
 
 A session waiting on a subagent is not suspended at all. The adapter holds the turn open until every agent it launched has reported, which is also what makes Paseo show the session as busy while they work, and a suspension stands aside for an active turn and tries again later. A turn whose agents have written nothing for fifteen minutes stops waiting, so a stuck agent cannot keep a session alive indefinitely. Background commands are not agents and hold nothing open.
 
@@ -62,7 +62,7 @@ A PID outlives the process that earned it, so a stop first establishes that the 
 
 A lock names the process holding a session; the adapter clears its own on exit and recovers one left by a dead process, so **Release lock** is only for a lock that outlived its process and is still in the way — including one left behind by a stop that had to force the process. Releasing is refused while the recorded process is alive. A session file that cannot be read can be moved aside rather than deleted, so the failure is still there to diagnose.
 
-The adapter's [troubleshooting table](../../apps/claude-tty-acp/README.md#troubleshooting) covers everything that goes wrong once a session is running.
+The adapter's [troubleshooting table](../../apps/claude-tty-acp/README.md#troubleshooting) covers everything that goes wrong once a session is running. Its log is kept at `${XDG_STATE_HOME:-~/.local/state}/claude-tty-acp/logs/claude-tty-acp.log`, or under `CLAUDE_TTY_ACP_STATE_DIR` where that is set, because the daemon reads the adapter's stderr and keeps none of it.
 
 The **Danger zone** removes the provider entry and nothing else. Deleting the state directory is a separate opt-in, refused while a session is open, and the source checkout is never touched.
 

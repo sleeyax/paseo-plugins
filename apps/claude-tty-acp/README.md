@@ -112,11 +112,12 @@ Each active session owns an isolated PTY, hook route, transcript reader, permiss
 Sessions run concurrently, work inside a single session stays serialized, and a second adapter process cannot open a session that is already active on the host.
 Locks left behind by dead processes are recovered automatically.
 
-After a foreground turn finishes, the adapter gives the native Claude process one hour of idle time by default.
+Once a session has been quiet for an hour, by default, the adapter stops its native Claude process.
 When that timeout expires it sends Ctrl-D, kills the PTY if it does not exit promptly, and thereby stops any background tasks still owned by that Claude process.
 The logical ACP session, transcript mapping, selected model and mode, and session lock remain intact.
 The next prompt launches `claude --resume <id>` automatically, so the conversation continues without keeping its process alive indefinitely.
-Only foreground ACP prompts reset the timeout; task-completion notifications inside an otherwise idle Claude process do not extend it.
+Quiet is observed rather than inferred from prompts: the clock runs from the last thing the session actually did, whether that was the end of a prompt, a hook Claude called, a record it wrote, a turn it was woken for by a task notification, or a step one of its background agents took.
+A prompt is only what Paseo asked for; Claude goes on working after one — answering for an agent that reported, launching the next — and a suspension measured from the prompt alone stopped exactly that work an hour into it, mid-run.
 
 The timeout is read at each suspension rather than once at startup: `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` if it is set, otherwise `idleTimeoutMs` in `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/claude-tty/settings.json`, which is what the Claude TTY plugin's panel writes.
 Reading it per suspension is what lets a change in that panel reach a session that is already connected, and it is also why an unreadable file or a malformed variable leaves the session running rather than taking the adapter down.
@@ -151,7 +152,7 @@ Paseo ──ACP over stdio──► claude-tty-acp ──keystrokes over a PTY�
         hooks over loopback HTTP┘    └transcript JSONL, polled
 ```
 
-The daemon starts one adapter process per provider connection, and that process speaks ACP as newline-delimited JSON on stdout while its structured logs go to stderr.
+The daemon starts one adapter process per provider connection, and that process speaks ACP as newline-delimited JSON on stdout while its structured logs go to stderr — and, because the daemon reads stderr and keeps none of it, to `logs/claude-tty-acp.log` under the state directory as well, where every process on the host appends with its pid and a full file is moved aside once.
 Every session of that connection lives in that one process, and each session owns its own `claude` process in a PTY.
 
 A session starts empty: `session/new` returns an ID immediately and launches nothing, so a provider probe or an untouched draft never spawns Claude.
@@ -210,7 +211,8 @@ Paseo reads a session as busy from the turn it has open and from nothing else �
 The hold ends at the first `Stop` hook with nothing left running, which is the end of the turn Claude runs to react to the notification, so the reply about the agent lands inside the turn that launched it.
 A turn that has been waiting on agents that have written nothing for fifteen minutes gives up and ends, because a session that is busy is also a session that is never suspended, and an agent that never reports would hold one open for the rest of its life.
 Giving up is the end of it: those agents stop being counted, so the next turn does not hold for a poll interval and give up on them all over again.
-Where every agent has reported and the wait is only for Claude to answer for the last of them, the bound is a minute — measured against what Claude itself writes as well, since answering for a long report is exactly the work being waited on and none of it is a subagent's.
+Where every agent has reported and the wait is only for Claude to answer for the last of them, the bound is five minutes — measured against what Claude itself writes as well, since answering for a long report is exactly the work being waited on and none of it is a subagent's.
+Five rather than one because Claude writes a response to its transcript only once the whole of it has streamed: a sentence followed by the long prompt of the next agent it dispatches shows nothing for as long as that prompt takes to generate, and a minute was not enough to cover one.
 Cancelling is unaffected: a held turn ends as promptly as any other, which is what keeps Paseo's replacement of a prompt sent mid-turn inside its two-second budget.
 
 ### Hooks carry everything interactive
@@ -315,20 +317,20 @@ Filling the real meter needs Paseo's generic ACP provider to honour `usage_updat
 | `Could not start claude` | Set `CLAUDE_BIN` to an absolute executable path visible to the daemon. |
 | Workspace trust permission appears | Approve only when the displayed folder is a project you created or trust; Claude remembers the choice. |
 | Bypass Permissions disclaimer card appears | Claude has not been told this host accepts the mode. Accept it to start the session, or pick another mode; the answer is remembered for the host. |
-| SessionStart handshake timeout | If no workspace trust or Bypass Permissions card appeared, check Claude organization hook policy, inherited settings, loopback access, and the terminal snapshot in adapter stderr. |
+| SessionStart handshake timeout | If no workspace trust or Bypass Permissions card appeared, check Claude organization hook policy, inherited settings, loopback access, and the terminal snapshot in the adapter log. |
 | Claude opens a login screen | Authenticate as the Paseo daemon user and verify `HOME` or `CLAUDE_CONFIG_DIR`. |
 | Persisted session not found | Select the host that created it and verify `CLAUDE_TTY_ACP_STATE_DIR`. |
 | Session belongs to another cwd | Load it with its original absolute project path. |
 | Session already active | Close the other native agent connection; remove a lock only after verifying its recorded PID is dead. |
 | `A foreground turn is already active` | The interrupted turn had not settled when Paseo started its replacement; send the prompt again. |
 | Turn never finishes in Auto mode | Claude is waiting at a keyboard-only dialog after the classifier denial limit; cancel the turn and prefer Default mode. |
-| PTY exits unexpectedly | Inspect structured adapter stderr and run Claude interactively in the same cwd and environment. |
+| PTY exits unexpectedly | Inspect the adapter log and run Claude interactively in the same cwd and environment. |
 | Corrupt transcript or state | Preserve the file for diagnosis, then move only the named session JSON or transcript aside before retrying. |
 | Commands or plugins missing | Verify the daemon sees the expected `CLAUDE_CONFIG_DIR`, project `.claude` files, and enabled plugin settings. |
 
 ## Development
 
-The executable writes ACP only to stdout and sends structured diagnostics to stderr, so stderr is the place to look when something misbehaves.
+The executable writes ACP only to stdout and sends structured diagnostics to stderr, which the daemon reads and drops, so the place to look when something misbehaves is the copy it keeps: `${XDG_STATE_HOME:-~/.local/state}/claude-tty-acp/logs/claude-tty-acp.log` (or under `CLAUDE_TTY_ACP_STATE_DIR`), one line of JSON per record, with the pid of the adapter process that wrote it.
 
 Check a host without starting ACP:
 
