@@ -281,10 +281,11 @@ export class ClaudeRuntime {
   cancel(): void {
     // The wait for Claude's last context reading outlives the turn, so this is set before the turn check or a stop during it is dropped.
     this.contextWaitCancelled = true;
+    // A card Claude raises on its way up is waiting before there is a turn to cancel, and letting go of the request is the only thing that ends that wait.
+    this.interactions.cancelPending();
     const turn = this.turn;
     if (!turn) return;
     this.cancelRequested = true;
-    this.interactions.cancelPending();
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
     if (!this.pty) {
       this.cancelTimer = null;

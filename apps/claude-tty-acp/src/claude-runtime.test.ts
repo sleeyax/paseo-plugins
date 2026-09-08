@@ -2001,6 +2001,45 @@ test("fails the start rather than run in another mode when the bypass disclaimer
   }
 });
 
+// The card Claude's disclaimer raises is waiting before the session has a turn, and an unattended session is the one with nobody to answer it.
+test("lets a cancelled session go when nobody answers the bypass disclaimer", { timeout: 10_000 }, async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-bypass-cancel-test-"));
+  const pty = new FakePty(5600);
+  let asked = false;
+  const connection = {
+    sessionUpdate: async () => undefined,
+    requestPermission: (): Promise<RequestPermissionResponse> => {
+      asked = true;
+      return new Promise<RequestPermissionResponse>(() => undefined);
+    },
+  } as unknown as AgentSideConnection;
+  const agent = new ClaudeTtyAgent(connection, {
+    spawnPty: () => {
+      setImmediate(() => pty.emitData(bypassPermissionsScreen("exit")));
+      return pty;
+    },
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/unanswered", mcpServers: [] });
+    await agent.setSessionMode({ sessionId: session.sessionId, modeId: "bypassPermissions" });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => asked, 3_000);
+    await agent.cancel({ sessionId: session.sessionId });
+    await assert.rejects(turn, /Bypass Permissions disclaimer/);
+    assert.equal(pty.killed, true);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
 /** What an adapter-launched session paints once it is up: a status line in place of the hints, and an input box still holding its placeholder. */
 function freshModeScreen(footer: string): string {
   return [
