@@ -30,11 +30,8 @@ const SUBMIT_DELAY_MS = 150;
  */
 const SUBAGENT_SILENCE_MS = 15 * 60_000;
 /**
- * How long the last agent to report is given to wake Claude for the turn that answers for it, and
- * how long Claude may then go without writing anything before the turn stops waiting for it. Claude
- * writes a response to its transcript only once the whole of it has streamed, so a text followed by
- * a long tool call — the prompt of the next agent it dispatches, say — shows nothing for as long as
- * that call takes to generate, and a minute was not enough to cover one.
+ * How long a held turn goes on after the last thing Claude wrote, whatever it is still waiting on, since a report wakes Claude for an answer that belongs inside the turn.
+ * Claude writes a response to its transcript only once the whole of it has streamed, so a text followed by a long tool call — the prompt of the next agent it dispatches, say — shows nothing for as long as that call takes to generate, and a minute was not enough to cover one.
  */
 const SUBAGENT_WAKE_MS = 5 * 60_000;
 /**

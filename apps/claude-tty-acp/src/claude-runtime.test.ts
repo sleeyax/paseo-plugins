@@ -2539,7 +2539,7 @@ test("goes on waiting on a silent agent while Claude itself is still working", a
     transcriptPollIntervalMs: 10,
     subagentPollMs: 10,
     subagentSilenceMs: 120,
-    subagentWakeMs: 200,
+    subagentWakeMs: 500,
     idleTimeoutMs: 0,
   });
 
@@ -2575,7 +2575,7 @@ test("goes on waiting on a silent agent while Claude itself is still working", a
       busy += 1;
       void appendFile(file, `${JSON.stringify({ type: "assistant", uuid: `busy-${busy}`, message: { content: [{ type: "text", text: "still going" }] } })}\n`);
     }, 40);
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
     clearInterval(writing);
     assert.ok(busy > 0, "Claude wrote nothing during the bound, so the test proved nothing");
     assert.equal(settled, false);
