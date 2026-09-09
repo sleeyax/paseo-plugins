@@ -192,9 +192,8 @@ A translator turns each record into an ACP session update — user and agent chu
 Loading a persisted session runs that translator over the whole file to rebuild the conversation, and still launches nothing until the next prompt.
 
 A message typed while Claude is working is the one thing that is not written as a turn.
-Claude queues it and takes it at the end of the turn it was in, and the queue is the whole record: the `queued_command` attachment Claude writes when the message arrives is never followed by a user turn carrying it, and the message reaches the transcript nowhere else.
-So the attachment is read as the message, keyed by the id the queue gave the item rather than by the record it was written in, because the queue is written out again for as long as the item is in it.
-Without that, a reloaded session is rebuilt as Claude answering a question nobody is shown asking.
+Claude absorbs it mid-turn, at its next tool result, and writes a `queued_command` attachment there: no user turn ever carries the message, and it reaches the transcript nowhere else, so that attachment is the only record of it.
+It is read as the message, keyed by the id the queue gave the item rather than by the record it was written in, since a queue rewritten under a new record names the same item and says nothing new.
 
 ### Subagents come out of their own transcripts
 

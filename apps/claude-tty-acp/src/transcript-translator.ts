@@ -564,15 +564,8 @@ export class TranscriptTranslator {
   }
 
   /**
-   * Anything that arrived while Claude was working, which it takes at the end of the turn it was in
-   * rather than there and then. Claude writes the queue itself and nothing else: what is queued
-   * here is never written again as the turn that delivers it, so this attachment is the whole
-   * record of it.
-   *
-   * An agent's report is queued the same way and read for what it says about the agent. A message
-   * of the user's own is queued as a prompt, and is put in the conversation, because a session
-   * reloaded later is rebuilt from its transcript — and without this it is rebuilt as Claude
-   * answering a question nobody is shown asking.
+   * A message queued while Claude was working is absorbed mid-turn, at Claude's next tool result, and this attachment is the only record of it, so it is emitted as the user turn it never gets.
+   * An agent's report is queued the same way and is read only for what it says about the agent.
    */
   private async translateQueued(attachment: TranscriptRecord, record: TranscriptRecord): Promise<void> {
     await this.translateNotifications(attachment.prompt);
