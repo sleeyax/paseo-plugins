@@ -346,17 +346,7 @@ export class TranscriptTranslator {
    * It arrives as a user turn of its own, or as the queued command below.
    */
   private async translateNotifications(content: unknown): Promise<void> {
-    const texts =
-      typeof content === "string"
-        ? [content]
-        : Array.isArray(content)
-          ? content.flatMap((value) => {
-              const block = objectValue(value);
-              const text = block?.type === "text" ? stringValue(block.text) : null;
-              return text ? [text] : [];
-            })
-          : [];
-    for (const text of texts) {
+    for (const text of contentTexts(content)) {
       for (const notification of parseTaskNotifications(text)) await this.applyNotification(notification);
     }
   }
@@ -562,15 +552,30 @@ export class TranscriptTranslator {
     const attachment = objectValue(record.attachment);
     const type = stringValue(attachment?.type);
     if (!attachment || !type) return;
-    // The shape a notification queued while Claude was busy is left behind in, and the only record it leaves.
     if (type === "queued_command") {
-      await this.translateNotifications(stringValue(attachment.prompt));
+      await this.translateQueued(attachment, record);
       return;
     }
     if (type === "hook_system_message" || type === "hook_non_blocking_error" || type === "hook_cancelled") {
       const text = stringValue(attachment.content) || stringValue(attachment.stderr) || `${stringValue(attachment.hookName) || "Hook"} ${type.replace("hook_", "")}`;
       const key = `${stringValue(record.uuid) || stableUuid(JSON.stringify(record))}:attachment`;
       await this.emitContent("agent_message_chunk", key, key, { type: "text", text });
+    }
+  }
+
+  /**
+   * A message queued while Claude was working is absorbed mid-turn, at Claude's next tool result, and this attachment is the only record of it, so it is emitted as the user turn it never gets.
+   * An agent's report is queued the same way and is read only for what it says about the agent.
+   */
+  private async translateQueued(attachment: TranscriptRecord, record: TranscriptRecord): Promise<void> {
+    await this.translateNotifications(attachment.prompt);
+    if (stringValue(attachment.commandMode) !== "prompt") return;
+    // The queue's own id for the item, so a queue written out again under a new record says nothing new.
+    const messageId = stringValue(attachment.source_uuid) || stringValue(record.uuid) || stableUuid(JSON.stringify(record));
+    const texts = contentTexts(attachment.prompt);
+    for (let index = 0; index < texts.length; index += 1) {
+      const text = cleanUserText(texts[index] ?? "");
+      if (text) await this.emitContent("user_message_chunk", `${messageId}:${index}:queued`, messageId, { type: "text", text });
     }
   }
 
@@ -613,6 +618,17 @@ function objectValue(value: unknown): TranscriptRecord | null {
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+/** What a record says, written either as one string or as the blocks a richer message has. */
+function contentTexts(content: unknown): string[] {
+  if (typeof content === "string") return [content];
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((value) => {
+    const block = objectValue(value);
+    const text = block?.type === "text" ? stringValue(block.text) : null;
+    return text ? [text] : [];
+  });
 }
 
 function firstNumber(...values: unknown[]): number | null {

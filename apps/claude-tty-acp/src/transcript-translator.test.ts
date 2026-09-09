@@ -410,6 +410,122 @@ test("lets go of an agent whose report was queued because Claude was busy when i
   assert.deepEqual(notifications, []);
 });
 
+test("lets go of an agent whose queued report was written as blocks", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+
+  translator.trackRunningSubagents();
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Map the bridge" } }] },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+    },
+  ]);
+  assert.equal(translator.runningSubagents, 1);
+
+  notifications.length = 0;
+  await translator.translate([
+    {
+      type: "attachment",
+      uuid: "queued",
+      attachment: {
+        type: "queued_command",
+        commandMode: "task-notification",
+        prompt: [
+          {
+            type: "text",
+            text: '<task-notification><task-id>a1</task-id><tool-use-id>agent-tool</tool-use-id><status>completed</status><summary>Agent "Map the bridge" finished</summary></task-notification>',
+          },
+        ],
+      },
+    },
+  ]);
+
+  assert.equal(translator.runningSubagents, 0);
+  assert.equal(translator.subagentSettled("a1"), true);
+  const reported = notifications.map((notification) => notification.update).at(-1);
+  assert.ok(reported?.sessionUpdate === "tool_call_update");
+  assert.equal(reported.status, "completed");
+  assert.deepEqual(reported.content, [{ type: "content", content: { type: "text", text: 'Agent "Map the bridge" finished' } }]);
+  assert.equal(notifications.some((notification) => notification.update.sessionUpdate === "user_message_chunk"), false);
+});
+
+test("puts a message queued while Claude was working into the conversation, once", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const typed = {
+    type: "attachment",
+    uuid: "queued-typed",
+    attachment: {
+      type: "queued_command",
+      commandMode: "prompt",
+      origin: { kind: "human" },
+      source_uuid: "typed-1",
+      prompt: "I interrupt you, what happens<system-reminder>hidden</system-reminder>",
+    },
+  };
+  const unkeyed = {
+    type: "attachment",
+    uuid: "queued-unkeyed",
+    attachment: { type: "queued_command", commandMode: "prompt", prompt: "and one more thing" },
+  };
+
+  await translator.translate([
+    typed,
+    // Some Claude versions write the prompt as blocks rather than as one string.
+    {
+      type: "attachment",
+      uuid: "queued-blocks",
+      attachment: { type: "queued_command", commandMode: "prompt", source_uuid: "typed-2", prompt: [{ type: "text", text: "the codex one" }] },
+    },
+    // An agent's report is queued the same way, and is not the user saying anything.
+    {
+      type: "attachment",
+      uuid: "queued-report",
+      attachment: {
+        type: "queued_command",
+        commandMode: "task-notification",
+        prompt: "<task-notification><task-id>a1</task-id><status>completed</status><summary>done</summary></task-notification>",
+      },
+    },
+    // A prompt the queue gave no id of its own is keyed off the record that carries it.
+    unkeyed,
+  ]);
+
+  assert.deepEqual(
+    notifications.map((notification) => notification.update).map((update) => ({
+      sessionUpdate: update.sessionUpdate,
+      content: "content" in update ? update.content : null,
+    })),
+    [
+      { sessionUpdate: "user_message_chunk", content: { type: "text", text: "I interrupt you, what happens" } },
+      { sessionUpdate: "user_message_chunk", content: { type: "text", text: "the codex one" } },
+      { sessionUpdate: "user_message_chunk", content: { type: "text", text: "and one more thing" } },
+    ],
+  );
+
+  notifications.length = 0;
+  await translator.translate([{ ...typed, uuid: "queued-again" }, unkeyed]);
+  assert.deepEqual(notifications, []);
+});
+
 test("does not wait again on an agent whose launch a rewrite replayed", async () => {
   const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
   const translator = new TranscriptTranslator("session", "/work/repo", connection);
