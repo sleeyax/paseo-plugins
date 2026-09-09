@@ -1579,8 +1579,7 @@ test("gives up on a background command that never reports, and does not wait on 
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return spawned;
   };
-  // A poll this slow is what makes the difference visible: a turn that still counted the abandoned
-  // command would hold for a whole interval before giving up on it a second time.
+  // A slow poll makes a second hold measurable.
   agent = new ClaudeTtyAgent(createConnection([]), {
     spawnPty,
     runtimeRoot,

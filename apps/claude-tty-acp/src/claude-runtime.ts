@@ -38,13 +38,9 @@ const SUBAGENT_SILENCE_MS = 15 * 60_000;
  */
 const SUBAGENT_WAKE_MS = 5 * 60_000;
 /**
- * How long a turn waits on a background command that has not reported. A command shows nothing
- * while it runs — its output goes to a file whose name only the report carries — so this is a flat
- * bound from the moment the turn was held rather than a silence, and it is longer than an agent's
- * because a command is what Claude backgrounds precisely when it takes a while. Of the background
- * commands that reported across this box's transcripts the median took four minutes and the longest
- * genuine wait was a twenty-one minute code review; the ones that ran for hours were servers and
- * poll loops, which never report at all and are exactly what the bound is here to let go of.
+ * How long a turn waits on a background command that has not reported.
+ * The adapter does not follow the file a command writes its output to, so a running one shows nothing to measure a silence against: this is a flat bound from the moment the turn was held, started again whenever a command is launched or reports.
+ * Thirty minutes because backgrounding is what Claude does with a command precisely when it takes a while, and the ones that run for longer than that are servers and poll loops, which never report at all and are exactly what the bound is here to let go of.
  */
 const BACKGROUND_SHELL_MS = 30 * 60_000;
 const SUBAGENT_POLL_MS = 5_000;
@@ -452,11 +448,9 @@ export class ClaudeRuntime {
           this.finishTurn({ response: { stopReason: "cancelled" } });
           break;
         }
-        // Claude goes idle the moment it launches a background agent or a background command, but
-        // the work it launched has not happened yet. The turn is the only thing that tells Paseo a
-        // session is busy, so it is held open until every one of them has reported — and Claude has
-        // answered for them, since the notification that closes one wakes Claude for a turn of its
-        // own that ends in another Stop.
+        // Claude goes idle the moment it launches a background agent or a background command, but the work it launched has not happened yet.
+        // A command is dispatched exactly as an asynchronous agent is: the tool answers at the launch, Claude idles, and a <task-notification> wakes it when the work ends.
+        // The turn is the only thing that tells Paseo a session is busy, so it is held open until every one of them has reported — and Claude has answered for them, since the notification that closes one wakes Claude for a turn of its own that ends in another Stop.
         this.heldAssistantMessage = asString(payload.last_assistant_message);
         if (this.turn && this.outstandingBackgroundWork > 0) {
           this.holdForBackgroundWork();
@@ -620,9 +614,8 @@ export class ClaudeRuntime {
   }
 
   /**
-   * A hold that is simply over ends at the Stop hook. This is only the way out of one that is not,
-   * and each kind of work waited on has a bound of its own: the turn ends when every one of them has
-   * run out, never while one is still inside its own.
+   * A hold that is simply over ends at the Stop hook.
+   * This is only the way out of one that is not, and each kind of work waited on has a bound of its own: the turn ends when every one of them has run out, never while one is still inside its own.
    */
   private reviewBackgroundHold(): void {
     if (!this.turn) {
@@ -662,27 +655,17 @@ export class ClaudeRuntime {
     });
   }
 
-  /**
-   * An agent still running shows it by writing, and nothing Claude does says whether it is alive, so this reads only the agents and the hold itself — otherwise a session that stays busy keeps resetting the bound on an agent that has long since gone.
-   */
+  /** An agent still running shows it by writing, and nothing Claude does says whether it is alive, so this reads only the agents and the hold itself. */
   private agentProgressAt(): number {
     return Math.max(this.translator.subagentActivityAt, this.heldAt);
   }
 
-  /**
-   * A background command shows nothing at all between its launch and its report, so its bound runs
-   * from the hold, and starting or finishing one starts it again: either is the session being given
-   * fresh reason to wait.
-   */
+  /** When a background command was last launched or reported, or the hold began, whichever is latest. */
   private shellProgressAt(): number {
     return Math.max(this.translator.backgroundShellActivityAt, this.heldAt);
   }
 
-  /**
-   * Claude answering for work that has reported is exactly what the wake bound waits for, so
-   * anything Claude writes counts towards it: what it says, what it thinks, and the tools it runs
-   * on the way.
-   */
+  /** Claude answering for work that has reported is exactly what the wake bound waits for, so anything Claude writes counts towards it: what it says, what it thinks, and the tools it runs on the way. */
   private answerProgressAt(): number {
     return Math.max(
       this.translator.subagentActivityAt,

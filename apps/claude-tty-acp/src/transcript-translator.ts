@@ -86,11 +86,7 @@ type SubagentCard = {
   abandoned: boolean;
 };
 
-/**
- * A command Claude started in the background. It has no card of its own — its tool call is closed
- * by the result that reports the launch — so all that is kept for one is whether a report is still
- * owed for it, which is what keeps the turn that started it open.
- */
+/** A command Claude started in the background, which has no card of its own: its tool call is closed by the result that reports the launch. */
 type BackgroundShell = {
   outstanding: boolean;
 };
@@ -160,19 +156,12 @@ export class TranscriptTranslator {
     return this.lastSubagentActivity;
   }
 
-  /**
-   * Background commands that were started while a turn was in flight and have not reported. A
-   * command runs on its own the way an asynchronous agent does — Claude is idle while it runs and
-   * is woken by its report — so it keeps the turn open for the same reason.
-   */
+  /** The background commands that were started while a turn was in flight and have not reported. */
   get runningBackgroundShells(): number {
     return [...this.backgroundShells.values()].filter((shell) => shell.outstanding).length;
   }
 
-  /**
-   * When a background command was last started or reported. A running one writes only to a file
-   * this never learns the name of, so those two are the whole of what it ever shows.
-   */
+  /** When a background command was last launched or reported. */
   get backgroundShellActivityAt(): number {
     return this.lastBackgroundShellActivity;
   }
@@ -208,10 +197,8 @@ export class TranscriptTranslator {
   }
 
   /**
-   * Called as a prompt starts. Loading a persisted session replays its whole transcript first, and
-   * an agent or a background command launched in a session that has since been closed left its
-   * launch behind without the notification that would have ended it: history says it is running
-   * when nothing is.
+   * Called as a prompt starts.
+   * Loading a persisted session replays its whole transcript first, and an agent or a background command launched in a session that has since been closed left its launch behind without the notification that would have ended it: history says it is running when nothing is.
    */
   trackBackgroundWork(): void {
     this.trackingBackgroundWork = true;
@@ -414,10 +401,8 @@ export class TranscriptTranslator {
   }
 
   /**
-   * A replayed launch does not start a background command over: one that has already reported, or
-   * that a turn gave up waiting on, is recorded here as settled and is not waited on again. Nor is
-   * one whose launch is only history — a session being loaded replays commands that stopped with
-   * the process that ran them.
+   * A replayed launch does not start a background command over: one that has already reported, or that a turn gave up waiting on, is recorded here as settled and is not waited on again.
+   * Nor is one whose launch is only history — a session being loaded replays commands that stopped with the process that ran them.
    */
   private trackBackgroundShell(taskId: string, toolCallId: string): void {
     if (this.backgroundShells.has(taskId)) return;
@@ -547,8 +532,7 @@ export class TranscriptTranslator {
    * that process has stopped nothing is coming, and a card left open goes on saying it is working.
    */
   async settleOpenToolCalls(): Promise<void> {
-    // A background command is a child of the process that has stopped, so its report is not coming
-    // either — and unlike an agent it has no card left open to say so on.
+    // A background command is a child of the process that has stopped, so its report is not coming either — and unlike an agent it has no card left open to say so on.
     for (const shell of this.backgroundShells.values()) shell.outstanding = false;
     for (const card of new Set(this.subagents.values())) {
       if (card.status !== "in_progress") continue;

@@ -36,11 +36,7 @@ export function launchedAgent(toolUseResult: unknown): { agentId: string; runnin
   return { agentId, running: record?.status === "async_launched" };
 }
 
-/**
- * The background shell a `Bash` result started, taken from the same metadata. A command run in the
- * background answers the moment it starts and reports its end in a notification, exactly as an
- * asynchronous agent does, so its id is what a turn waiting on it has to hold.
- */
+/** The id a background `Bash` result carries, which its notification will name. */
 export function launchedBackgroundShell(toolUseResult: unknown): { taskId: string } | null {
   const record = asRecord(toolUseResult);
   const taskId = record?.backgroundTaskId;
