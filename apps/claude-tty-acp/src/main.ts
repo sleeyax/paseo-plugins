@@ -16,15 +16,22 @@ export async function runAcpServer(): Promise<void> {
   const input = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>;
   const output = Writable.toWeb(process.stdout) as WritableStream<Uint8Array>;
   let agent: ClaudeTtyAgent | null = null;
-  const connection = new AgentSideConnection((activeConnection) => {
-    agent = new ClaudeTtyAgent(activeConnection);
-    return agent;
-  }, ndJsonStream(output, input));
 
   const shutdown = async (signal: string): Promise<void> => {
     writeLog({ level: "info", message: "Stopping ACP adapter", signal });
     await agent?.close();
   };
+
+  const connection = new AgentSideConnection((activeConnection) => {
+    agent = new ClaudeTtyAgent(activeConnection, {
+      // Nothing else will end the process: the connection is still open.
+      onWorkspacesRemoved: () => {
+        writeLog({ level: "warn", message: "Stopping the adapter: the directory of every session it holds is gone" });
+        void shutdown("workspace_removed").finally(() => process.exit(0));
+      },
+    });
+    return agent;
+  }, ndJsonStream(output, input));
 
   const handleSignal = (signal: NodeJS.Signals): void => {
     void shutdown(signal).finally(() => process.exit(0));

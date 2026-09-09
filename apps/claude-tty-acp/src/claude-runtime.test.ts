@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { AgentSideConnection, RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from "@agentclientprotocol/sdk";
 import type { IPty, IPtyForkOptions } from "node-pty";
 import { ClaudeTtyAgent } from "./agent.ts";
+import { StateStore } from "./state-store.ts";
 import { subagentsDirectory } from "./subagent-transcript.ts";
 import { escapeProjectDirName } from "./transcript-reader.ts";
 
@@ -2185,3 +2186,169 @@ function bypassPermissionsScreen(selected: "exit" | "accept"): string {
     "Enter to confirm · Esc to cancel",
   ].join("\r\n");
 }
+
+test("gives up on a silent agent even while Claude itself keeps working", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-busy-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/agents-busy";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  const updates: SessionNotification[] = [];
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    let pty!: FakePty;
+    pty = new FakePty(4100, (data) => {
+      if (data === "\u0004") setImmediate(() => pty.emitExit());
+    });
+    spawned = pty;
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection(updates), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    subagentPollMs: 10,
+    subagentSilenceMs: 120,
+    idleTimeoutMs: 0,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "launch an agent" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    const file = path.join(projectDirectory, `${session.sessionId}.jsonl`);
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "launcher",
+        message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Fix the findings" } }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched",
+        toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+      }),
+    ];
+    await writeFile(file, `${lines.join("\n")}\n`);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
+
+    // The agent never writes again.
+    // Claude does, all the way through the bound.
+    const startedAt = Date.now();
+    let busy = 0;
+    const writing = setInterval(() => {
+      busy += 1;
+      void appendFile(file, `${JSON.stringify({ type: "assistant", uuid: `busy-${busy}`, message: { content: [{ type: "text", text: "still going" }] } })}\n`);
+    }, 40);
+    try {
+      assert.deepEqual(await turn, { stopReason: "end_turn" });
+    } finally {
+      clearInterval(writing);
+    }
+    assert.ok(busy > 0, "Claude wrote nothing during the bound, so the test proved nothing");
+    assert.ok(Date.now() - startedAt < 2_000, `the turn waited ${Date.now() - startedAt}ms on an agent that had gone quiet`);
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("stops the adapter once the directory of every session it holds is gone", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-workspaces-test-"));
+  const runtimeRoot = path.join(root, "runtime");
+  const stateDirectory = path.join(root, "state");
+  const created = path.join(root, "created");
+  const loaded = path.join(root, "loaded");
+  await mkdir(runtimeRoot, { recursive: true });
+  await mkdir(created);
+  await mkdir(loaded);
+  const acpSessionId = "55555555-5555-4555-8555-555555555555";
+  await new StateStore(stateDirectory).save({
+    version: 1,
+    acpSessionId,
+    claudeSessionId: "66666666-6666-4666-8666-666666666666",
+    cwd: loaded,
+    model: "inherit",
+    mode: "default",
+    lastActivity: 1,
+  });
+  let removed = 0;
+  const spawnPty = (): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => new FakePty(1);
+  const agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory,
+    claudeConfigDir: path.join(root, "claude"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    onWorkspacesRemoved: () => {
+      removed += 1;
+    },
+    workspaceCheckIntervalMs: 10,
+  });
+
+  try {
+    await agent.newSession({ cwd: created, mcpServers: [] });
+    await agent.loadSession({ sessionId: acpSessionId, cwd: loaded, mcpServers: [] });
+
+    await rm(created, { force: true, recursive: true });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(removed, 0, "stopped an adapter that still had a session to serve");
+
+    await rm(loaded, { force: true, recursive: true });
+    await waitFor(() => removed === 1, 2_000);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(removed, 1, "stopped the adapter more than once");
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("lets go of the directories of a closed adapter's sessions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-workspaces-closed-test-"));
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = path.join(root, "workspace");
+  await mkdir(runtimeRoot, { recursive: true });
+  await mkdir(cwd);
+  let removed = 0;
+  const spawnPty = (): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => new FakePty(1);
+  const agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    onWorkspacesRemoved: () => {
+      removed += 1;
+    },
+    workspaceCheckIntervalMs: 10,
+  });
+
+  try {
+    await agent.newSession({ cwd, mcpServers: [] });
+    await agent.close();
+
+    await rm(cwd, { force: true, recursive: true });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(removed, 0, "stopped a process whose adapter was already closed");
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});

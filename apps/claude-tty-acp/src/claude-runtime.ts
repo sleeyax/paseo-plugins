@@ -602,13 +602,15 @@ export class ClaudeRuntime {
     // A hold that is simply over ends at the Stop hook. This is only the way out of one that is not:
     // agents that have stopped writing, or a last agent whose report never woke Claude to answer it.
     const agents = this.translator.runningSubagents;
-    const silent = Date.now() - this.progressAt();
+    const silent = Date.now() - this.progressAt(agents);
     if (silent < (agents > 0 ? this.subagentSilenceMs : this.subagentWakeMs)) return;
     writeLog({
       level: "warn",
       message: agents > 0 ? "Ending a turn whose background agents have gone quiet" : "Ending a turn Claude never answered its agents in",
       sessionId: this.sessionId,
       agents,
+      // Which ones, because a turn held by an agent that has already gone is the hard one to read back.
+      agentIds: this.translator.outstandingSubagents,
       silentMs: silent,
     });
     // The turn has stopped waiting on these agents, so nothing else goes on counting them either:
@@ -621,11 +623,12 @@ export class ClaudeRuntime {
   }
 
   /**
-   * When the held turn last showed a sign of life. Claude answering for an agent that has reported
-   * is exactly what the wake bound is waiting for, and none of it is credited to a subagent, so
-   * anything Claude writes counts: what it says, what it thinks, and the tools it runs on the way.
+   * When the held turn last showed a sign of life, which is a different sign for each of the two bounds.
+   * Claude answering for an agent that has reported is exactly what the wake bound waits for, so anything Claude writes counts towards it: what it says, what it thinks, and the tools it runs on the way.
+   * An agent still running shows it by writing, and nothing Claude does says whether it is alive, so the silence bound reads only the agents and the hold itself — otherwise a session that stays busy keeps resetting the bound on an agent that has long since gone.
    */
-  private progressAt(): number {
+  private progressAt(agents: number): number {
+    if (agents > 0) return Math.max(this.translator.subagentActivityAt, this.heldAt);
     return Math.max(this.translator.subagentActivityAt, this.translator.assistantActivityAt, this.heldAt);
   }
 

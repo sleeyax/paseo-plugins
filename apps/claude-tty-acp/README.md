@@ -203,17 +203,29 @@ Its steps — what it says, and the tools it calls — are streamed onto the lau
 A card is rendered as plain text and has one line per step, so each is written for that: markdown is read back out of what the subagent says, a path keeps the tail that says which file it is, and a tool call is named by what it was for rather than by whichever argument came first.
 A nested subagent's steps join the card of the agent that launched it, marked as its own.
 
-That tool call stays in progress until Claude reports the agent has stopped, which it does by writing a `<task-notification>` into the next user turn — the only record of it, and one that is otherwise scrubbed out of the text before it is shown.
+That tool call stays in progress until Claude reports the agent has stopped, which it does by writing a `<task-notification>` — the only record of it, and one that is otherwise scrubbed out of the text before it is shown.
+Where that notification is written depends on what the session was doing when the agent finished: an idle session is woken with it as a user turn of its own, and one that is mid-turn has it queued instead, left behind only as a `queued_command` attachment.
+Both are read, since reading the turn alone loses every agent that finished while Claude was working, and the same notification is written many times over — queued, delivered, and rewritten at every turn boundary the queue survives — so it is read as news only while the card it names is still open.
 Anything but a clean finish leaves the call failed.
+An agent Claude stops itself, with `TaskStop`, is closed on that stop instead: a stopped agent writes no report and sends no notification, so nothing else would ever close its card, and it would go on being counted as running until the bound below gave up on it.
 
 The session's turn is held open for as long as any of those agents is still running.
 Paseo reads a session as busy from the turn it has open and from nothing else — an ACP agent has no other way to say so — and Claude goes idle the moment it launches a background agent, so without this a session with ten minutes of work ahead of it reads as ready, and the answer Claude writes when the agent reports arrives outside any turn at all.
 The hold ends at the first `Stop` hook with nothing left running, which is the end of the turn Claude runs to react to the notification, so the reply about the agent lands inside the turn that launched it.
 A turn that has been waiting on agents that have written nothing for fifteen minutes gives up and ends, because a session that is busy is also a session that is never suspended, and an agent that never reports would hold one open for the rest of its life.
+Those fifteen minutes are measured from the agents alone: an agent that is still running shows it by writing, nothing Claude does says whether it is, and a session that stays busy elsewhere would otherwise keep pushing the bound back on an agent that had long since gone.
 Giving up is the end of it: those agents stop being counted, so the next turn does not hold for a poll interval and give up on them all over again.
 Where every agent has reported and the wait is only for Claude to answer for the last of them, the bound is five minutes — measured against what Claude itself writes as well, since answering for a long report is exactly the work being waited on and none of it is a subagent's.
 Five rather than one because Claude writes a response to its transcript only once the whole of it has streamed: a sentence followed by the long prompt of the next agent it dispatches shows nothing for as long as that prompt takes to generate, and a minute was not enough to cover one.
 Cancelling is unaffected: a held turn ends as promptly as any other, which is what keeps Paseo's replacement of a prompt sent mid-turn inside its two-second budget.
+
+### An adapter does not outlive its workspace
+
+The daemon closes the connection when it archives or deletes an agent — archiving a workspace archives each of its agents first — and that is what normally stops this process.
+An adapter that close never reached has nothing left to end it, and a directory that is no longer there is the visible symptom: Paseo archives a workspace by deleting its directory, and an adapter left standing in one that has gone can do nothing for anyone — Claude cannot be started there — so it holds its memory until the machine is rebooted.
+The adapter therefore checks the directory of every session it holds once a minute, and stops once all of them are missing at the same time, each having been missing twice running: twice rather than once so a workspace replaced at the same path, which is what reusing one looks like on disk, is not read as the end of the session.
+Every directory is watched for as long as its session lives, so one that comes back counts as there again and keeps the adapter standing.
+A directory that cannot be read for any other reason is still there, and no session is stopped over a failure to look.
 
 ### Hooks carry everything interactive
 

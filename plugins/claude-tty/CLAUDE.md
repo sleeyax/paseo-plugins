@@ -85,11 +85,11 @@ An "open" button built on `addClientSide` and an agent panel was tried and remov
 
 ## A subagent is not a session, and its work is in another file
 
-Claude writes a subagent's turns to `<projects>/<claude session id>/subagents/agent-<agent id>.jsonl`, never into the session's own transcript, which carries only the launch and — for an asynchronous agent — a `<task-notification>` in a later user turn saying it stopped.
+Claude writes a subagent's turns to `<projects>/<claude session id>/subagents/agent-<agent id>.jsonl`, never into the session's own transcript, which carries only the launch and — for an asynchronous agent — a `<task-notification>` saying it stopped.
 So both files are read: the session's for the launch metadata Claude leaves beside the tool result (`toolUseResult.agentId`, and `status: "async_launched"` for one that has only started), and the subagent's for anything it actually did.
 Claude also writes an `agent-<agent id>.meta.json` beside each transcript carrying the description, the tool use that launched it and its `spawnDepth`, which is the only thing that names a subagent another subagent launched, because the session's transcript never sees one.
 An asynchronous launch answers its launcher immediately, so a tool result is not proof the agent finished; the notification is.
-Claude writes that notification into the turn it wakes for after the agent reports, so a session whose process stops first never writes one:
+Claude writes that notification into the turn it wakes for when the agent reports to an idle session, and into a `queued_command` attachment when it reports to one that is mid-turn, so both are read; a session whose process stops first writes neither:
 a launch left open in a finished transcript says only that nobody was there to hear the end of it, never that the agent is still working.
 
 The panel lists only open sessions, because a subagent is a loop inside its session's Claude process and stops with it, and it is not an ACP session or a Paseo agent, so the paragraph above about opening an agent applies to it twice over.

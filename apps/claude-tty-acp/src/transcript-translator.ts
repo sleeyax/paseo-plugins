@@ -61,8 +61,14 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 /** The tools that hand work to a subagent, whose own transcript is where that work then happens. */
 const AGENT_TOOLS = new Set(["Agent", "Task"]);
 
+/** The tool Claude stops one of its own agents with, naming it by the id its launch reported. */
+const STOP_AGENT_TOOL = "TaskStop";
+
 /** The last step on the card of a subagent whose session stopped before it said how it went. */
 const UNREPORTED_AGENT = "Claude stopped before this agent reported back.";
+
+/** The last step on the card of a subagent the session it runs in stopped on purpose. */
+const STOPPED_AGENT = "Claude stopped this agent.";
 
 /**
  * A subagent and the tool call standing for it. Nested subagents share their spawner's card, so one
@@ -91,6 +97,8 @@ export class TranscriptTranslator {
   private readonly openToolCalls = new Set<string>();
   private readonly subagents = new Map<string, SubagentCard>();
   private readonly subagentsByToolCall = new Map<string, string>();
+  /** The agent each `TaskStop` call names, kept for the life of the session because a replay reads the call again and needs it again. */
+  private readonly stoppedAgentsByToolCall = new Map<string, string>();
   private lastSubagentActivity = 0;
   private lastAssistantActivity = 0;
   private lastActivity = 0;
@@ -130,12 +138,17 @@ export class TranscriptTranslator {
    * their spawner's card, so they are counted once, as the one piece of work the session launched.
    */
   get runningSubagents(): number {
-    return new Set([...this.subagents.values()].filter((card) => card.outstanding)).size;
+    return this.outstandingSubagents.length;
   }
 
   /** When any subagent last did anything, which is all there is to say whether one is still alive. */
   get subagentActivityAt(): number {
     return this.lastSubagentActivity;
+  }
+
+  /** The agents still being waited on, for the log of a turn that stopped waiting for them. */
+  get outstandingSubagents(): string[] {
+    return [...new Set([...this.subagents.values()].filter((card) => card.outstanding).map((card) => card.agentId))];
   }
 
   /**
@@ -199,7 +212,7 @@ export class TranscriptTranslator {
     const content = message?.content;
     const recordId = stringValue(record.uuid) || stableUuid(JSON.stringify(record));
     if (record.isMeta !== true && record.isSidechain !== true) this.suppressedAssistantText = null;
-    await this.translateNotifications(content, recordId);
+    await this.translateNotifications(content);
     if (typeof content === "string") {
       await this.emitUserText(`${recordId}:text`, recordId, content, record);
       return;
@@ -273,6 +286,11 @@ export class TranscriptTranslator {
       return;
     }
     if (AGENT_TOOLS.has(name)) this.agentCalls.add(toolCallId);
+    // Read before the guard below, so a replay of the transcript maps the call to its agent again.
+    if (name === STOP_AGENT_TOOL) {
+      const stopped = stringValue(input.task_id);
+      if (stopped) this.stoppedAgentsByToolCall.set(toolCallId, stopped);
+    }
     if (this.emittedTools.has(toolCallId)) return;
     this.emittedTools.add(toolCallId);
     this.openToolCalls.add(toolCallId);
@@ -304,6 +322,9 @@ export class TranscriptTranslator {
       // settled on that, or a session stopping later would rewrite the report as a failure.
       this.settleSubagentCard(launch.agentId, block.is_error === true);
     }
+    // A stopped agent writes no report and sends no notification, so nothing else ever closes its card: it would go on being counted as running and hold every later turn open to the bound.
+    const stopped = this.stoppedAgentsByToolCall.get(toolCallId);
+    if (stopped !== undefined && block.is_error !== true) await this.stopSubagentCard(stopped);
     const resultKey = `${toolCallId}:result:${createHash("sha256").update(JSON.stringify(block)).digest("hex")}`;
     if (this.emitted.has(resultKey)) return;
     this.emitted.add(resultKey);
@@ -321,10 +342,10 @@ export class TranscriptTranslator {
   }
 
   /**
-   * The end of an asynchronous agent is reported in the next user turn and nowhere else, and the
-   * text carrying it is scrubbed before the user sees it, so it is read here on the way past.
+   * The end of an asynchronous agent is reported in a notification and nowhere else, and the text carrying it is scrubbed before the user sees it, so it is read here on the way past.
+   * It arrives as a user turn of its own, or as the queued command below.
    */
-  private async translateNotifications(content: unknown, recordId: string): Promise<void> {
+  private async translateNotifications(content: unknown): Promise<void> {
     const texts =
       typeof content === "string"
         ? [content]
@@ -336,24 +357,23 @@ export class TranscriptTranslator {
             })
           : [];
     for (const text of texts) {
-      for (const notification of parseTaskNotifications(text)) await this.applyNotification(notification, recordId);
+      for (const notification of parseTaskNotifications(text)) await this.applyNotification(notification);
     }
   }
 
   /**
-   * A notification for a background command rather than an agent names no card here, and is left
-   * alone. One for an agent whose launch is no longer in the transcript has no tool call to close,
-   * but still says the agent has stopped, which is what lets its transcript stop being followed.
+   * A notification for a background command rather than an agent names no card here, and is left alone.
+   * One for an agent whose launch is no longer in the transcript has no tool call to close, but still says the agent has stopped, which is what lets its transcript stop being followed.
+   *
+   * Only an open card is closed, because one notification is written many times over: queued while Claude is busy and again as the turn that delivers it, and the queue is rewritten at every turn boundary it survives.
+   * Reading each of those as news would stack the same line onto the card.
    */
-  private async applyNotification(notification: TaskNotification, recordId: string): Promise<void> {
+  private async applyNotification(notification: TaskNotification): Promise<void> {
     const agentId =
       notification.agentId ??
       (notification.toolCallId === null ? null : this.subagentsByToolCall.get(notification.toolCallId) ?? null);
     const card = agentId === null ? undefined : this.subagents.get(agentId);
-    if (card === undefined) return;
-    const key = `${card.agentId}:notification:${recordId}`;
-    if (this.emitted.has(key)) return;
-    this.emitted.add(key);
+    if (card === undefined || card.status !== "in_progress") return;
     card.status = notificationFailed(notification.status) ? "failed" : "completed";
     card.outstanding = false;
     this.lastSubagentActivity = Date.now();
@@ -424,6 +444,20 @@ export class TranscriptTranslator {
     if (card.toolCallId === toolCallId) return;
     card.toolCallId = toolCallId;
     this.subagentsByToolCall.set(toolCallId, agentId);
+    await this.publishSubagent(card);
+  }
+
+  /**
+   * Closes the card of an agent this session stopped itself.
+   * Its steps stay on the card — the work up to the stop is what there is to show — with a last line saying how it ended.
+   */
+  private async stopSubagentCard(agentId: string): Promise<void> {
+    const card = this.subagents.get(agentId);
+    if (card === undefined || card.status !== "in_progress") return;
+    card.status = "failed";
+    card.outstanding = false;
+    card.log.append(STOPPED_AGENT);
+    this.lastSubagentActivity = Date.now();
     await this.publishSubagent(card);
   }
 
@@ -528,6 +562,11 @@ export class TranscriptTranslator {
     const attachment = objectValue(record.attachment);
     const type = stringValue(attachment?.type);
     if (!attachment || !type) return;
+    // The shape a notification queued while Claude was busy is left behind in, and the only record it leaves.
+    if (type === "queued_command") {
+      await this.translateNotifications(stringValue(attachment.prompt));
+      return;
+    }
     if (type === "hook_system_message" || type === "hook_non_blocking_error" || type === "hook_cancelled") {
       const text = stringValue(attachment.content) || stringValue(attachment.stderr) || `${stringValue(attachment.hookName) || "Hook"} ${type.replace("hook_", "")}`;
       const key = `${stringValue(record.uuid) || stableUuid(JSON.stringify(record))}:attachment`;

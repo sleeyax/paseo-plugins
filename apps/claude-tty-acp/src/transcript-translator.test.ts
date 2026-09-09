@@ -359,6 +359,57 @@ test("counts the agents a turn is still waiting on, and ignores the ones history
   assert.ok(translator.subagentActivityAt >= activityBefore);
 });
 
+test("lets go of an agent whose report was queued because Claude was busy when it finished", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const report =
+    '<task-notification><task-id>a1</task-id><tool-use-id>agent-tool</tool-use-id><status>completed</status><summary>Agent "Map the bridge" finished</summary></task-notification>';
+  const queued = {
+    type: "attachment",
+    uuid: "queued",
+    attachment: { type: "queued_command", commandMode: "task-notification", prompt: report },
+  };
+
+  translator.trackRunningSubagents();
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Map the bridge" } }] },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+    },
+  ]);
+  assert.equal(translator.runningSubagents, 1);
+
+  // An agent that finishes while Claude is mid-turn is queued instead of delivered, and this is the only record it leaves: no user turn ever carries it.
+  await translator.translate([queued]);
+  assert.equal(translator.runningSubagents, 0);
+  assert.equal(translator.subagentSettled("a1"), true);
+  const reported = notifications.map((notification) => notification.update).at(-1);
+  assert.ok(reported?.sessionUpdate === "tool_call_update");
+  assert.equal(reported.status, "completed");
+  assert.deepEqual(reported.content, [{ type: "content", content: { type: "text", text: 'Agent "Map the bridge" finished' } }]);
+
+  // The queue is rewritten at every turn boundary it survives, and the turn that finally delivers it says the same thing again.
+  // Neither is a second report to put on the card.
+  notifications.length = 0;
+  await translator.translate([
+    { ...queued, uuid: "queued-again" },
+    { type: "user", uuid: "delivered", message: { content: report } },
+  ]);
+  assert.deepEqual(notifications, []);
+});
+
 test("does not wait again on an agent whose launch a rewrite replayed", async () => {
   const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
   const translator = new TranscriptTranslator("session", "/work/repo", connection);
@@ -596,4 +647,97 @@ test("reads the session's last sign of life from whatever moved last, Claude's o
   await new Promise((resolve) => setTimeout(resolve, 5));
   await translator.translate([{ type: "user", uuid: "user-3", message: { content: [{ type: "tool_result", tool_use_id: "bash-1", content: "done" }] } }]);
   assert.equal(translator.activityAt, settledAt);
+});
+
+test("stops counting an agent the session stopped, which never reports and never would", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  translator.trackRunningSubagents();
+
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Fix the regressions" } }] },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "a8feac8dac4f2bf65" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+    },
+  ]);
+  assert.equal(translator.runningSubagents, 1);
+
+  notifications.length = 0;
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "stopper",
+      message: { content: [{ type: "tool_use", id: "stop-tool", name: "TaskStop", input: { task_id: "a8feac8dac4f2bf65" } }] },
+    },
+    {
+      type: "user",
+      uuid: "stopped",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "stop-tool",
+            content: [{ type: "text", text: '{"task_id":"a8feac8dac4f2bf65"}' }],
+          },
+        ],
+      },
+    },
+  ]);
+
+  assert.equal(translator.runningSubagents, 0);
+  const card = notifications
+    .map((notification) => notification.update)
+    .find((update) => update.sessionUpdate === "tool_call_update" && update.toolCallId === "agent-tool");
+  assert.ok(card?.sessionUpdate === "tool_call_update");
+  assert.equal(card.status, "failed");
+  assert.match(JSON.stringify(card.content), /Claude stopped this agent\./);
+});
+
+test("leaves an agent running when the stop that named it failed", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  translator.trackRunningSubagents();
+
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Keep working" } }] },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "still-running" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+    },
+    {
+      type: "assistant",
+      uuid: "stopper",
+      message: { content: [{ type: "tool_use", id: "stop-tool", name: "TaskStop", input: { task_id: "still-running" } }] },
+    },
+    {
+      type: "user",
+      uuid: "stop-failed",
+      message: { content: [{ type: "tool_result", tool_use_id: "stop-tool", is_error: true, content: [] }] },
+    },
+  ]);
+
+  assert.equal(translator.runningSubagents, 1);
 });
