@@ -632,11 +632,10 @@ export class ClaudeRuntime {
     const agents = this.translator.runningSubagents;
     const shells = this.translator.runningBackgroundShells;
     const now = Date.now();
-    // Agents that have stopped writing, a command that never reported, or a last report that never
-    // woke Claude to answer it — in that order, because that is the order they are given up on in.
+    // Nothing is given up on while Claude is still writing, whatever it is that woke it: an answer cut off by the poll that follows the report it answers is the very thing the hold is for.
+    if (now - this.answerProgressAt() < this.subagentWakeMs) return;
     if (agents > 0 && now - this.agentProgressAt() < this.subagentSilenceMs) return;
     if (shells > 0 && now - this.shellProgressAt() < this.backgroundShellMs) return;
-    if (agents === 0 && shells === 0 && now - this.answerProgressAt() < this.subagentWakeMs) return;
     // The bound that ran out, which is the one the message below is about.
     const silent = now - (agents > 0 ? this.agentProgressAt() : shells > 0 ? this.shellProgressAt() : this.answerProgressAt());
     writeLog({

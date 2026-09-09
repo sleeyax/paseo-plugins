@@ -1592,6 +1592,7 @@ test("gives up on a background command that never reports, and does not wait on 
     contextRefreshTimeoutMs: 0,
     transcriptPollIntervalMs: 10,
     subagentPollMs: 1_000,
+    subagentWakeMs: 10,
     backgroundShellMs: 10,
   });
 
@@ -1659,6 +1660,7 @@ test("goes on waiting for a background command after giving up on the agents bes
     transcriptPollIntervalMs: 10,
     subagentPollMs: 10,
     subagentSilenceMs: 10,
+    subagentWakeMs: 300,
     backgroundShellMs: 5_000,
   });
 
@@ -1698,18 +1700,20 @@ test("goes on waiting for a background command after giving up on the agents bes
       settled = true;
     });
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
-    // The agent writes nothing and is well past its bound, but the command is still inside its own.
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    // The agent writes nothing and is well past its bound, as is the wake bound, but the command is still inside its own.
+    await new Promise((resolve) => setTimeout(resolve, 400));
     assert.equal(settled, false);
 
     const notification =
       '<task-notification> <task-id>b1</task-id> <status>completed</status> <summary>Background command completed (exit code 0)</summary> </task-notification>';
+    const reportedAt = Date.now();
     await writeFile(
       transcript,
       `${[...launch, JSON.stringify({ type: "user", uuid: "notified", message: { content: notification } })].join("\n")}\n`,
     );
-    // With nothing left inside a bound, the turn ends on the agent it had already waited out.
+    // The report is what wakes Claude, so the turn ends on the agent it had already waited out only once the wake bound has run out too.
     assert.deepEqual(await turn, { stopReason: "end_turn" });
+    assert.ok(Date.now() - reportedAt >= 250, `the turn ended ${Date.now() - reportedAt}ms after the report, inside the wake bound`);
   } finally {
     await agent.close();
     await rm(root, { force: true, recursive: true });
@@ -2046,6 +2050,7 @@ test("stops counting the agents a turn gave up on, so a later turn does not wait
     transcriptPollIntervalMs: 10,
     subagentPollMs: 1_000,
     subagentSilenceMs: 10,
+    subagentWakeMs: 10,
   });
 
   try {
@@ -2117,6 +2122,7 @@ test("closes a background agent's card when the session it ran in is suspended",
     transcriptPollIntervalMs: 10,
     subagentPollMs: 10,
     subagentSilenceMs: 30,
+    subagentWakeMs: 30,
     idleTimeoutMs: 20,
   });
 
@@ -2416,7 +2422,7 @@ function bypassPermissionsScreen(selected: "exit" | "accept"): string {
   ].join("\r\n");
 }
 
-test("gives up on a silent agent even while Claude itself keeps working", async () => {
+test("goes on waiting on a silent agent while Claude itself is still working", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-busy-test-"));
   const configDirectory = path.join(root, "claude");
   const runtimeRoot = path.join(root, "runtime");
@@ -2449,6 +2455,7 @@ test("gives up on a silent agent even while Claude itself keeps working", async 
     transcriptPollIntervalMs: 10,
     subagentPollMs: 10,
     subagentSilenceMs: 120,
+    subagentWakeMs: 200,
     idleTimeoutMs: 0,
   });
 
@@ -2473,21 +2480,25 @@ test("gives up on a silent agent even while Claude itself keeps working", async 
     await writeFile(file, `${lines.join("\n")}\n`);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
 
-    // The agent never writes again.
-    // Claude does, all the way through the bound.
-    const startedAt = Date.now();
+    // The agent never writes again, well past its bound.
+    // Claude does, all the way through it.
+    let settled = false;
+    void turn.then(() => {
+      settled = true;
+    });
     let busy = 0;
     const writing = setInterval(() => {
       busy += 1;
       void appendFile(file, `${JSON.stringify({ type: "assistant", uuid: `busy-${busy}`, message: { content: [{ type: "text", text: "still going" }] } })}\n`);
     }, 40);
-    try {
-      assert.deepEqual(await turn, { stopReason: "end_turn" });
-    } finally {
-      clearInterval(writing);
-    }
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    clearInterval(writing);
     assert.ok(busy > 0, "Claude wrote nothing during the bound, so the test proved nothing");
-    assert.ok(Date.now() - startedAt < 2_000, `the turn waited ${Date.now() - startedAt}ms on an agent that had gone quiet`);
+    assert.equal(settled, false);
+
+    const quietAt = Date.now();
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+    assert.ok(Date.now() - quietAt < 2_000, `the turn waited ${Date.now() - quietAt}ms after Claude had gone quiet as well`);
   } finally {
     await agent.close();
     await rm(root, { force: true, recursive: true });
