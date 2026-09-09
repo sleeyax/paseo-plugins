@@ -217,11 +217,20 @@ The session's turn is held open for as long as any of those agents is still runn
 Paseo reads a session as busy from the turn it has open and from nothing else — an ACP agent has no other way to say so — and Claude goes idle the moment it launches a background agent, so without this a session with ten minutes of work ahead of it reads as ready, and the answer Claude writes when the agent reports arrives outside any turn at all.
 The hold ends at the first `Stop` hook with nothing left running, which is the end of the turn Claude runs to react to the notification, so the reply about the agent lands inside the turn that launched it.
 A turn that has been waiting on agents that have written nothing for fifteen minutes gives up and ends, because a session that is busy is also a session that is never suspended, and an agent that never reports would hold one open for the rest of its life.
-Those fifteen minutes are measured from the agents alone: an agent that is still running shows it by writing, nothing Claude does says whether it is, and a session that stays busy elsewhere would otherwise keep pushing the bound back on an agent that had long since gone.
+Those fifteen minutes are measured from the agents alone: an agent that is still running shows it by writing, and nothing Claude does says whether it is.
 Giving up is the end of it: those agents stop being counted, so the next turn does not hold for a poll interval and give up on them all over again.
-Where every agent has reported and the wait is only for Claude to answer for the last of them, the bound is five minutes — measured against what Claude itself writes as well, since answering for a long report is exactly the work being waited on and none of it is a subagent's.
+Whichever bound has run out, the turn does not end while Claude is still writing: a report wakes Claude for the answer that belongs inside the turn, and that answer is given five minutes of its own, measured against anything Claude writes.
 Five rather than one because Claude writes a response to its transcript only once the whole of it has streamed: a sentence followed by the long prompt of the next agent it dispatches shows nothing for as long as that prompt takes to generate, and a minute was not enough to cover one.
 Cancelling is unaffected: a held turn ends as promptly as any other, which is what keeps Paseo's replacement of a prompt sent mid-turn inside its two-second budget.
+
+A command Claude runs in the background holds the turn open the same way, for the same reason.
+It is dispatched exactly as an asynchronous agent is — the tool answers with the id of a task still running, Claude goes idle, and it is woken by a `<task-notification>` when the command ends — so a turn that ends at the `Stop` in between leaves everything Claude does from the report onwards outside any turn, which is a session that reads as ready while it works.
+Claude records the id its report will name in `backgroundTaskId` beside the launching tool result, and the notification carries it as the `<task-id>`, so the two are joined the way an agent's launch and report are.
+The command has no card of its own: its tool call is the launch, which finished, and everything it does goes to a file the adapter does not follow.
+A `TaskStop` naming its id ends the wait for it as it ends an agent's, since a stop names either through the one `task_id`.
+That is also why its bound is a flat thirty minutes from the moment the turn was held rather than a silence: a running command shows nothing to measure a silence against, and the bound starts again whenever a command is launched or reports.
+Thirty because backgrounding is what Claude does with a command precisely when it takes a while: on the sessions this was measured on the median command took four minutes and the longest genuine wait was a twenty-one minute code review, while the ones that ran for hours were servers and poll loops, which never report at all and are what the bound is there to let go of.
+Each kind of work is bounded on its own and the turn ends only once every one of them has run out, so a command's thirty minutes are not cut short by the agents beside it having gone quiet first.
 
 ### An adapter does not outlive its workspace
 

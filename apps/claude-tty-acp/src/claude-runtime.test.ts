@@ -1487,6 +1487,323 @@ test("keeps the turn open while a background agent runs, so the session reads as
   }
 });
 
+test("keeps the turn open while a background command runs, so the session reads as busy", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-shell-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/shells";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawned = new FakePty(4300);
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return spawned;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "run the suite in the background" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    const transcript = path.join(projectDirectory, `${session.sessionId}.jsonl`);
+    const launch = [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "launcher",
+        message: {
+          content: [
+            { type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "npm test", description: "Run the tests", run_in_background: true } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched",
+        toolUseResult: { stdout: "", stderr: "", backgroundTaskId: "b1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "bash-tool", content: [] }] },
+      }),
+    ];
+    await writeFile(transcript, `${launch.join("\n")}\n`);
+
+    // Claude goes idle as soon as it has backgrounded the command, and the command is still running.
+    let settled = false;
+    void turn.then(() => {
+      settled = true;
+    });
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "RUNNING" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(settled, false);
+
+    const notification =
+      '<task-notification> <task-id>b1</task-id> <tool-use-id>bash-tool</tool-use-id> <status>completed</status> <summary>Background command "Run the tests" completed (exit code 0)</summary> </task-notification>';
+    await writeFile(
+      transcript,
+      `${[...launch, JSON.stringify({ type: "user", uuid: "notified", message: { content: notification } })].join("\n")}\n`,
+    );
+    // The report wakes Claude for a turn of its own, which ends in the Stop that ends this one.
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "The suite passed." });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("gives up on a background command that never reports, and does not wait on it again", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-shell-bound-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/shells-bound";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawned = new FakePty(4400);
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return spawned;
+  };
+  // A slow poll makes a second hold measurable.
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    subagentPollMs: 1_000,
+    subagentWakeMs: 10,
+    backgroundShellMs: 10,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const first = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "start the dev server" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    await writeFile(
+      path.join(projectDirectory, `${session.sessionId}.jsonl`),
+      `${[
+        JSON.stringify({
+          type: "assistant",
+          uuid: "launcher",
+          message: { content: [{ type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "npm run dev", run_in_background: true } }] },
+        }),
+        JSON.stringify({
+          type: "user",
+          uuid: "launched",
+          toolUseResult: { stdout: "", stderr: "", backgroundTaskId: "b1" },
+          message: { content: [{ type: "tool_result", tool_use_id: "bash-tool", content: [] }] },
+        }),
+      ].join("\n")}\n`,
+    );
+    // A server never finishes, so it never reports, and the turn waits its bound out on it.
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "SERVING" });
+    assert.deepEqual(await first, { stopReason: "end_turn" });
+
+    const second = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "never mind the server" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 4);
+    const startedAt = Date.now();
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "Never mind." });
+    assert.deepEqual(await second, { stopReason: "end_turn" });
+    assert.ok(Date.now() - startedAt < 500, `the next turn waited ${Date.now() - startedAt}ms on an abandoned command`);
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("goes on waiting for a background command after giving up on the agents beside it", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-shell-outlives-agent-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/shells-and-agents";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawned = new FakePty(4500);
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return spawned;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    subagentPollMs: 10,
+    subagentSilenceMs: 10,
+    subagentWakeMs: 300,
+    backgroundShellMs: 5_000,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "review it and run the suite" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    const transcript = path.join(projectDirectory, `${session.sessionId}.jsonl`);
+    const launch = [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "launcher",
+        message: {
+          content: [
+            { type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Review the branch" } },
+            { type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "npm test", run_in_background: true } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched-agent",
+        toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched-shell",
+        toolUseResult: { stdout: "", stderr: "", backgroundTaskId: "b1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "bash-tool", content: [] }] },
+      }),
+    ];
+    await writeFile(transcript, `${launch.join("\n")}\n`);
+
+    let settled = false;
+    void turn.then(() => {
+      settled = true;
+    });
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
+    // The agent writes nothing and is well past its bound, as is the wake bound, but the command is still inside its own.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(settled, false);
+
+    const notification =
+      '<task-notification> <task-id>b1</task-id> <status>completed</status> <summary>Background command completed (exit code 0)</summary> </task-notification>';
+    const reportedAt = Date.now();
+    await writeFile(
+      transcript,
+      `${[...launch, JSON.stringify({ type: "user", uuid: "notified", message: { content: notification } })].join("\n")}\n`,
+    );
+    // The report is what wakes Claude, so the turn ends on the agent it had already waited out only once the wake bound has run out too.
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+    assert.ok(Date.now() - reportedAt >= 250, `the turn ended ${Date.now() - reportedAt}ms after the report, inside the wake bound`);
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("goes on waiting for an agent inside its bound after giving up on the command beside it", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-agent-outlives-shell-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/agents-and-shells";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawned = new FakePty(4600);
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return spawned;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    subagentPollMs: 10,
+    subagentSilenceMs: 5_000,
+    subagentWakeMs: 100,
+    backgroundShellMs: 10,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "review it and serve it" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    const transcript = path.join(projectDirectory, `${session.sessionId}.jsonl`);
+    const launch = [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "launcher",
+        message: {
+          content: [
+            { type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Review the branch" } },
+            { type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "npm run dev", run_in_background: true } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched-agent",
+        toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched-shell",
+        toolUseResult: { stdout: "", stderr: "", backgroundTaskId: "b1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "bash-tool", content: [] }] },
+      }),
+    ];
+    await writeFile(transcript, `${launch.join("\n")}\n`);
+
+    let settled = false;
+    void turn.then(() => {
+      settled = true;
+    });
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
+    // The command is a server, which never reports and is well past its bound, but the agent is still inside its own.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(settled, false);
+
+    const notification =
+      '<task-notification> <task-id>a1</task-id> <tool-use-id>agent-tool</tool-use-id> <status>completed</status> <summary>Agent "Review the branch" finished</summary> </task-notification>';
+    await writeFile(
+      transcript,
+      `${[...launch, JSON.stringify({ type: "user", uuid: "notified", message: { content: notification } })].join("\n")}\n`,
+    );
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test("a turn waiting on a background agent still cancels at once", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-cancel-test-"));
   const configDirectory = path.join(root, "claude");
@@ -1817,6 +2134,7 @@ test("stops counting the agents a turn gave up on, so a later turn does not wait
     transcriptPollIntervalMs: 10,
     subagentPollMs: 1_000,
     subagentSilenceMs: 10,
+    subagentWakeMs: 10,
   });
 
   try {
@@ -1888,6 +2206,7 @@ test("closes a background agent's card when the session it ran in is suspended",
     transcriptPollIntervalMs: 10,
     subagentPollMs: 10,
     subagentSilenceMs: 30,
+    subagentWakeMs: 30,
     idleTimeoutMs: 20,
   });
 
@@ -2187,7 +2506,7 @@ function bypassPermissionsScreen(selected: "exit" | "accept"): string {
   ].join("\r\n");
 }
 
-test("gives up on a silent agent even while Claude itself keeps working", async () => {
+test("goes on waiting on a silent agent while Claude itself is still working", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-busy-test-"));
   const configDirectory = path.join(root, "claude");
   const runtimeRoot = path.join(root, "runtime");
@@ -2220,6 +2539,7 @@ test("gives up on a silent agent even while Claude itself keeps working", async 
     transcriptPollIntervalMs: 10,
     subagentPollMs: 10,
     subagentSilenceMs: 120,
+    subagentWakeMs: 500,
     idleTimeoutMs: 0,
   });
 
@@ -2244,21 +2564,25 @@ test("gives up on a silent agent even while Claude itself keeps working", async 
     await writeFile(file, `${lines.join("\n")}\n`);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
 
-    // The agent never writes again.
-    // Claude does, all the way through the bound.
-    const startedAt = Date.now();
+    // The agent never writes again, well past its bound.
+    // Claude does, all the way through it.
+    let settled = false;
+    void turn.then(() => {
+      settled = true;
+    });
     let busy = 0;
     const writing = setInterval(() => {
       busy += 1;
       void appendFile(file, `${JSON.stringify({ type: "assistant", uuid: `busy-${busy}`, message: { content: [{ type: "text", text: "still going" }] } })}\n`);
     }, 40);
-    try {
-      assert.deepEqual(await turn, { stopReason: "end_turn" });
-    } finally {
-      clearInterval(writing);
-    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    clearInterval(writing);
     assert.ok(busy > 0, "Claude wrote nothing during the bound, so the test proved nothing");
-    assert.ok(Date.now() - startedAt < 2_000, `the turn waited ${Date.now() - startedAt}ms on an agent that had gone quiet`);
+    assert.equal(settled, false);
+
+    const quietAt = Date.now();
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+    assert.ok(Date.now() - quietAt < 2_000, `the turn waited ${Date.now() - quietAt}ms after Claude had gone quiet as well`);
   } finally {
     await agent.close();
     await rm(root, { force: true, recursive: true });

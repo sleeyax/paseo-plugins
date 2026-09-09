@@ -36,8 +36,17 @@ export function launchedAgent(toolUseResult: unknown): { agentId: string; runnin
   return { agentId, running: record?.status === "async_launched" };
 }
 
+/** The id a background `Bash` result carries, which its notification will name. */
+export function launchedBackgroundShell(toolUseResult: unknown): { taskId: string } | null {
+  const record = asRecord(toolUseResult);
+  const taskId = record?.backgroundTaskId;
+  if (typeof taskId !== "string" || taskId === "") return null;
+  return { taskId };
+}
+
 export type TaskNotification = {
-  agentId: string | null;
+  /** The `<task-id>` the report names, which is an agent's id or a background shell's. */
+  taskId: string | null;
   toolCallId: string | null;
   status: string | null;
   summary: string | null;
@@ -45,14 +54,14 @@ export type TaskNotification = {
 
 /**
  * Claude reports a background task's outcome by writing a `<task-notification>` into a user turn or a queued command.
- * It is the only record that says an asynchronous agent has stopped, so it is read before the block is scrubbed out of the text the user sees.
+ * It is the only record that says an asynchronous agent or a background command has stopped, so it is read before the block is scrubbed out of the text the user sees.
  */
 export function parseTaskNotifications(text: string): TaskNotification[] {
   const notifications: TaskNotification[] = [];
   for (const match of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
     const body = match[1] ?? "";
     notifications.push({
-      agentId: tag(body, "task-id"),
+      taskId: tag(body, "task-id"),
       toolCallId: tag(body, "tool-use-id"),
       status: tag(body, "status"),
       summary: tag(body, "summary"),

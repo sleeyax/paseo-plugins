@@ -30,13 +30,16 @@ const SUBMIT_DELAY_MS = 150;
  */
 const SUBAGENT_SILENCE_MS = 15 * 60_000;
 /**
- * How long the last agent to report is given to wake Claude for the turn that answers for it, and
- * how long Claude may then go without writing anything before the turn stops waiting for it. Claude
- * writes a response to its transcript only once the whole of it has streamed, so a text followed by
- * a long tool call — the prompt of the next agent it dispatches, say — shows nothing for as long as
- * that call takes to generate, and a minute was not enough to cover one.
+ * How long a held turn goes on after the last thing Claude wrote, whatever it is still waiting on, since a report wakes Claude for an answer that belongs inside the turn.
+ * Claude writes a response to its transcript only once the whole of it has streamed, so a text followed by a long tool call — the prompt of the next agent it dispatches, say — shows nothing for as long as that call takes to generate, and a minute was not enough to cover one.
  */
 const SUBAGENT_WAKE_MS = 5 * 60_000;
+/**
+ * How long a turn waits on a background command that has not reported.
+ * The adapter does not follow the file a command writes its output to, so a running one shows nothing to measure a silence against: this is a flat bound from the moment the turn was held, started again whenever a command is launched or reports.
+ * Thirty minutes because backgrounding is what Claude does with a command precisely when it takes a while, and the ones that run for longer than that are servers and poll loops, which never report at all and are exactly what the bound is here to let go of.
+ */
+const BACKGROUND_SHELL_MS = 30 * 60_000;
 const SUBAGENT_POLL_MS = 5_000;
 // Claude drops the submit key while it is still settling a paste, so the prompt is re-submitted until its input box lets go of it.
 const SUBMIT_ATTEMPTS = 6;
@@ -108,6 +111,7 @@ export type RuntimeDependencies = {
   subagentPollMs?: number;
   subagentSilenceMs?: number;
   subagentWakeMs?: number;
+  backgroundShellMs?: number;
   runtimeRoot?: string;
   claudeConfigDir?: string;
   transcriptFilePath?: string;
@@ -145,6 +149,7 @@ export class ClaudeRuntime {
   private readonly subagentPollMs: number;
   private readonly subagentSilenceMs: number;
   private readonly subagentWakeMs: number;
+  private readonly backgroundShellMs: number;
   private readonly runtimeRoot: string;
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
@@ -174,7 +179,7 @@ export class ClaudeRuntime {
   private contextWaitCancelled = false;
   private contextWaitMisses = 0;
   private staleResumeAnswered = false;
-  private subagentHold: NodeJS.Timeout | null = null;
+  private backgroundHold: NodeJS.Timeout | null = null;
   private heldAssistantMessage: string | undefined;
   private heldAt = 0;
   /** When Claude last called a hook, which it does only while it is doing something. */
@@ -217,6 +222,7 @@ export class ClaudeRuntime {
     this.subagentPollMs = dependencies.subagentPollMs ?? SUBAGENT_POLL_MS;
     this.subagentSilenceMs = dependencies.subagentSilenceMs ?? SUBAGENT_SILENCE_MS;
     this.subagentWakeMs = dependencies.subagentWakeMs ?? SUBAGENT_WAKE_MS;
+    this.backgroundShellMs = dependencies.backgroundShellMs ?? BACKGROUND_SHELL_MS;
     this.runtimeRoot = dependencies.runtimeRoot ?? os.tmpdir();
     this.translator = dependencies.translator ?? new TranscriptTranslator(sessionId, cwd, connection);
     this.transcript = this.createTranscriptWatcher(claudeSessionId, dependencies.transcriptFilePath);
@@ -257,7 +263,7 @@ export class ClaudeRuntime {
     this.contextWaitCancelled = false;
     this.interactions.beginTurn();
     this.assistantBaseline = this.translator.assistantChunks;
-    this.translator.trackRunningSubagents();
+    this.translator.trackBackgroundWork();
     await this.submit(prompt.text);
     try {
       const result = await turn.promise;
@@ -439,13 +445,12 @@ export class ClaudeRuntime {
           this.finishTurn({ response: { stopReason: "cancelled" } });
           break;
         }
-        // Claude goes idle the moment it launches a background agent, but the work it launched has
-        // not happened yet. The turn is the only thing that tells Paseo a session is busy, so it is
-        // held open until every agent has reported — and Claude has answered for them, since the
-        // notification that closes one wakes Claude for a turn of its own that ends in another Stop.
+        // Claude goes idle the moment it launches a background agent or a background command, but the work it launched has not happened yet.
+        // A command is dispatched exactly as an asynchronous agent is: the tool answers at the launch, Claude idles, and a <task-notification> wakes it when the work ends.
+        // The turn is the only thing that tells Paseo a session is busy, so it is held open until every one of them has reported — and Claude has answered for them, since the notification that closes one wakes Claude for a turn of its own that ends in another Stop.
         this.heldAssistantMessage = asString(payload.last_assistant_message);
-        if (this.turn && this.translator.runningSubagents > 0) {
-          this.holdForSubagents();
+        if (this.turn && this.outstandingBackgroundWork > 0) {
+          this.holdForBackgroundWork();
           break;
         }
         this.finishTurn({
@@ -514,7 +519,7 @@ export class ClaudeRuntime {
     if (!this.turn) return;
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
     this.cancelTimer = null;
-    this.releaseSubagentHold();
+    this.releaseBackgroundHold();
     this.cancelRequested = false;
     this.interactions.cancelPending();
     const turn = this.turn;
@@ -585,51 +590,86 @@ export class ClaudeRuntime {
     }
   }
 
-  /** Watches from outside the hook channel, because a stuck agent produces no hook to answer. */
-  private holdForSubagents(): void {
-    if (this.subagentHold) return;
-    writeLog({ level: "info", message: "Holding the turn open for a background agent", sessionId: this.sessionId, agents: this.translator.runningSubagents });
-    this.heldAt = Date.now();
-    this.subagentHold = setInterval(() => this.reviewSubagentHold(), this.subagentPollMs);
-    this.subagentHold.unref();
+  /** Everything Claude launched to run on its own and is still owed a report for. */
+  private get outstandingBackgroundWork(): number {
+    return this.translator.runningSubagents + this.translator.runningBackgroundShells;
   }
 
-  private reviewSubagentHold(): void {
+  /** Watches from outside the hook channel, because stuck work produces no hook to answer. */
+  private holdForBackgroundWork(): void {
+    if (this.backgroundHold) return;
+    writeLog({
+      level: "info",
+      message: "Holding the turn open for background work",
+      sessionId: this.sessionId,
+      agents: this.translator.runningSubagents,
+      shells: this.translator.runningBackgroundShells,
+    });
+    this.heldAt = Date.now();
+    this.backgroundHold = setInterval(() => this.reviewBackgroundHold(), this.subagentPollMs);
+    this.backgroundHold.unref();
+  }
+
+  /**
+   * A hold that is simply over ends at the Stop hook.
+   * This is only the way out of one that is not, and each kind of work waited on has a bound of its own: the turn ends when every one of them has run out, never while one is still inside its own.
+   */
+  private reviewBackgroundHold(): void {
     if (!this.turn) {
-      this.releaseSubagentHold();
+      this.releaseBackgroundHold();
       return;
     }
-    // A hold that is simply over ends at the Stop hook. This is only the way out of one that is not:
-    // agents that have stopped writing, or a last agent whose report never woke Claude to answer it.
     const agents = this.translator.runningSubagents;
-    const silent = Date.now() - this.progressAt(agents);
-    if (silent < (agents > 0 ? this.subagentSilenceMs : this.subagentWakeMs)) return;
+    const shells = this.translator.runningBackgroundShells;
+    const now = Date.now();
+    // Nothing is given up on while Claude is still writing, whatever it is that woke it: an answer cut off by the poll that follows the report it answers is the very thing the hold is for.
+    if (now - this.answerProgressAt() < this.subagentWakeMs) return;
+    if (agents > 0 && now - this.agentProgressAt() < this.subagentSilenceMs) return;
+    if (shells > 0 && now - this.shellProgressAt() < this.backgroundShellMs) return;
+    // The bound that ran out, which is the one the message below is about.
+    const silent = now - (agents > 0 ? this.agentProgressAt() : shells > 0 ? this.shellProgressAt() : this.answerProgressAt());
     writeLog({
       level: "warn",
-      message: agents > 0 ? "Ending a turn whose background agents have gone quiet" : "Ending a turn Claude never answered its agents in",
+      message:
+        agents > 0
+          ? "Ending a turn whose background agents have gone quiet"
+          : shells > 0
+            ? "Ending a turn whose background commands never reported"
+            : "Ending a turn Claude never answered its background work in",
       sessionId: this.sessionId,
       agents,
-      // Which ones, because a turn held by an agent that has already gone is the hard one to read back.
+      shells,
+      // Which ones, because a turn held by work that has already gone is the hard one to read back.
       agentIds: this.translator.outstandingSubagents,
+      shellIds: this.translator.outstandingBackgroundShells,
       silentMs: silent,
     });
-    // The turn has stopped waiting on these agents, so nothing else goes on counting them either:
-    // every later turn would hold for a poll interval and give up again in the same breath.
-    this.translator.abandonRunningSubagents();
+    // The turn has stopped waiting on this work, so nothing else goes on counting it either: every later turn would hold for a poll interval and give up again in the same breath.
+    this.translator.abandonBackgroundWork();
     this.finishTurn({
       response: { stopReason: "end_turn" },
       assistantMessage: this.translator.assistantChunks === this.assistantBaseline ? this.heldAssistantMessage : undefined,
     });
   }
 
-  /**
-   * When the held turn last showed a sign of life, which is a different sign for each of the two bounds.
-   * Claude answering for an agent that has reported is exactly what the wake bound waits for, so anything Claude writes counts towards it: what it says, what it thinks, and the tools it runs on the way.
-   * An agent still running shows it by writing, and nothing Claude does says whether it is alive, so the silence bound reads only the agents and the hold itself — otherwise a session that stays busy keeps resetting the bound on an agent that has long since gone.
-   */
-  private progressAt(agents: number): number {
-    if (agents > 0) return Math.max(this.translator.subagentActivityAt, this.heldAt);
-    return Math.max(this.translator.subagentActivityAt, this.translator.assistantActivityAt, this.heldAt);
+  /** An agent still running shows it by writing, and nothing Claude does says whether it is alive, so this reads only the agents and the hold itself. */
+  private agentProgressAt(): number {
+    return Math.max(this.translator.subagentActivityAt, this.heldAt);
+  }
+
+  /** When a background command was last launched or reported, or the hold began, whichever is latest. */
+  private shellProgressAt(): number {
+    return Math.max(this.translator.backgroundShellActivityAt, this.heldAt);
+  }
+
+  /** Claude answering for work that has reported is exactly what the wake bound waits for, so anything Claude writes counts towards it: what it says, what it thinks, and the tools it runs on the way. */
+  private answerProgressAt(): number {
+    return Math.max(
+      this.translator.subagentActivityAt,
+      this.translator.backgroundShellActivityAt,
+      this.translator.assistantActivityAt,
+      this.heldAt,
+    );
   }
 
   /**
@@ -645,9 +685,9 @@ export class ClaudeRuntime {
     }
   }
 
-  private releaseSubagentHold(): void {
-    if (this.subagentHold) clearInterval(this.subagentHold);
-    this.subagentHold = null;
+  private releaseBackgroundHold(): void {
+    if (this.backgroundHold) clearInterval(this.backgroundHold);
+    this.backgroundHold = null;
     this.heldAssistantMessage = undefined;
   }
 

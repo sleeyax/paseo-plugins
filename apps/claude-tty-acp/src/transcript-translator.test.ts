@@ -336,7 +336,7 @@ test("counts the agents a turn is still waiting on, and ignores the ones history
   await translator.translate(launch("history-tool", "history", true));
   assert.equal(translator.runningSubagents, 0);
 
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
   await translator.translate([...launch("async-tool", "async", true), ...launch("sync-tool", "sync", false)]);
   assert.equal(translator.runningSubagents, 1);
 
@@ -359,6 +359,189 @@ test("counts the agents a turn is still waiting on, and ignores the ones history
   assert.ok(translator.subagentActivityAt >= activityBefore);
 });
 
+test("counts the background commands a turn is waiting on, and lets go of one that reports", async () => {
+  const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const launch = (toolCallId: string, taskId: string) => [
+    {
+      type: "assistant",
+      uuid: `launcher-${taskId}`,
+      message: {
+        content: [
+          { type: "tool_use", id: toolCallId, name: "Bash", input: { command: "npm test", description: "Run the tests", run_in_background: true } },
+        ],
+      },
+    },
+    {
+      type: "user",
+      uuid: `launched-${taskId}`,
+      toolUseResult: { stdout: "", stderr: "", backgroundTaskId: taskId },
+      message: { content: [{ type: "tool_result", tool_use_id: toolCallId, content: [] }] },
+    },
+  ];
+  const report = (taskId: string) => [
+    {
+      type: "user",
+      uuid: `notified-${taskId}`,
+      message: {
+        content: `<task-notification> <task-id>${taskId}</task-id> <status>completed</status> <summary>Background command "Run the tests" completed (exit code 0)</summary> </task-notification>`,
+      },
+    },
+  ];
+
+  // A session being loaded replays a transcript whose commands died with the process that ran them.
+  await translator.translate(launch("history-tool", "history"));
+  assert.equal(translator.runningBackgroundShells, 0);
+
+  translator.trackBackgroundWork();
+  await translator.translate(launch("bash-tool", "b1"));
+  assert.equal(translator.runningBackgroundShells, 1);
+  const startedAt = translator.backgroundShellActivityAt;
+  assert.ok(startedAt > 0);
+
+  // The report names the command by its task id, and is the only record that says it has ended.
+  await translator.translate(report("b1"));
+  assert.equal(translator.runningBackgroundShells, 0);
+  assert.ok(translator.backgroundShellActivityAt >= startedAt);
+
+  // A compaction rewrites the transcript, and the reader that notices replays it from the top.
+  await translator.translate(launch("bash-tool", "b1"));
+  assert.equal(translator.runningBackgroundShells, 0);
+});
+
+test("stops counting a background command a turn gave up on, and one whose session has stopped", async () => {
+  const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const launch = (toolCallId: string, taskId: string) => [
+    {
+      type: "assistant",
+      uuid: `launcher-${taskId}`,
+      message: {
+        content: [{ type: "tool_use", id: toolCallId, name: "Bash", input: { command: "npm run dev", run_in_background: true } }],
+      },
+    },
+    {
+      type: "user",
+      uuid: `launched-${taskId}`,
+      toolUseResult: { stdout: "", stderr: "", backgroundTaskId: taskId },
+      message: { content: [{ type: "tool_result", tool_use_id: toolCallId, content: [] }] },
+    },
+  ];
+
+  translator.trackBackgroundWork();
+  await translator.translate(launch("server-tool", "b1"));
+  assert.equal(translator.runningBackgroundShells, 1);
+
+  // A command that never reports — a server, say — is given up on once and not waited on again.
+  translator.abandonBackgroundWork();
+  assert.equal(translator.runningBackgroundShells, 0);
+  await translator.translate(launch("server-tool", "b1"));
+  assert.equal(translator.runningBackgroundShells, 0);
+
+  // A command is a child of the Claude process, so a stop is the end of it and of the wait for it.
+  await translator.translate(launch("suite-tool", "b2"));
+  assert.equal(translator.runningBackgroundShells, 1);
+  await translator.settleOpenToolCalls();
+  assert.equal(translator.runningBackgroundShells, 0);
+});
+
+test("lets go of a background command whose report was queued because Claude was busy when it ended", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const report =
+    '<task-notification><task-id>b1</task-id><tool-use-id>bash-tool</tool-use-id><status>completed</status><summary>Background command "Run the tests" completed (exit code 0)</summary></task-notification>';
+
+  translator.trackBackgroundWork();
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: {
+        content: [
+          { type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "npm test", description: "Run the tests", run_in_background: true } },
+        ],
+      },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: {
+        stdout: "Command running in background with ID: b1. Output is being written to: /tmp/claude-1000/-work-repo/session/tasks/b1.output",
+        stderr: "",
+        backgroundTaskId: "b1",
+      },
+      message: { content: [{ type: "tool_result", tool_use_id: "bash-tool", content: [] }] },
+    },
+  ]);
+  assert.equal(translator.runningBackgroundShells, 1);
+
+  // A command that ends while Claude is mid-turn is queued instead of delivered, and every command reported on this box left the report nowhere else.
+  notifications.length = 0;
+  await translator.translate([
+    { type: "attachment", uuid: "queued", attachment: { type: "queued_command", commandMode: "task-notification", prompt: report } },
+  ]);
+  assert.equal(translator.runningBackgroundShells, 0);
+  // A command has no card, so nothing about it is drawn.
+  assert.deepEqual(
+    notifications.filter((notification) => notification.update.sessionUpdate === "tool_call_update"),
+    [],
+  );
+});
+
+test("does not read a report for a background command a turn gave up on as an agent's", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+
+  translator.trackBackgroundWork();
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "npm run dev", run_in_background: true } }] },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { stdout: "", stderr: "", backgroundTaskId: "b1" },
+      message: { content: [{ type: "tool_result", tool_use_id: "bash-tool", content: [] }] },
+    },
+  ]);
+  translator.abandonBackgroundWork();
+  const abandonedAt = translator.backgroundShellActivityAt;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  // A command reports long after the turn that started it has stopped waiting on it, and the bound of a later turn is not the one that was waited out.
+  notifications.length = 0;
+  await translator.translate([
+    {
+      type: "user",
+      uuid: "notified",
+      message: {
+        content:
+          '<task-notification> <task-id>b1</task-id> <status>completed</status> <summary>Background command completed (exit code 0)</summary> </task-notification>',
+      },
+    },
+  ]);
+  assert.equal(translator.runningBackgroundShells, 0);
+  assert.equal(translator.backgroundShellActivityAt, abandonedAt);
+  // The id is a command's, so nothing looks for an agent by it.
+  assert.equal(translator.runningSubagents, 0);
+  assert.deepEqual(
+    notifications.filter((notification) => notification.update.sessionUpdate === "tool_call_update"),
+    [],
+  );
+});
+
 test("lets go of an agent whose report was queued because Claude was busy when it finished", async () => {
   const notifications: SessionNotification[] = [];
   const connection = {
@@ -375,7 +558,7 @@ test("lets go of an agent whose report was queued because Claude was busy when i
     attachment: { type: "queued_command", commandMode: "task-notification", prompt: report },
   };
 
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
   await translator.translate([
     {
       type: "assistant",
@@ -419,7 +602,7 @@ test("lets go of an agent whose queued report was written as blocks", async () =
   } as unknown as AgentSideConnection;
   const translator = new TranscriptTranslator("session", "/work/repo", connection);
 
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
   await translator.translate([
     {
       type: "assistant",
@@ -543,7 +726,7 @@ test("does not wait again on an agent whose launch a rewrite replayed", async ()
     },
   ];
 
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
   await translator.translate(launch);
   assert.equal(translator.runningSubagents, 1);
 
@@ -578,12 +761,12 @@ test("does not wait again on an agent a turn gave up on when a rewrite replays i
     },
   ];
 
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
   await translator.translate(launch);
   assert.equal(translator.runningSubagents, 1);
 
   // The turn waited its bound out on an agent that never reported, and stopped counting it.
-  translator.abandonRunningSubagents();
+  translator.abandonBackgroundWork();
   assert.equal(translator.runningSubagents, 0);
 
   await translator.translate(launch);
@@ -773,7 +956,7 @@ test("stops counting an agent the session stopped, which never reports and never
     },
   } as AgentSideConnection;
   const translator = new TranscriptTranslator("session", "/work/repo", connection);
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
 
   await translator.translate([
     {
@@ -829,7 +1012,7 @@ test("leaves an agent running when the stop that named it failed", async () => {
     },
   } as AgentSideConnection;
   const translator = new TranscriptTranslator("session", "/work/repo", connection);
-  translator.trackRunningSubagents();
+  translator.trackBackgroundWork();
 
   await translator.translate([
     {
@@ -856,4 +1039,49 @@ test("leaves an agent running when the stop that named it failed", async () => {
   ]);
 
   assert.equal(translator.runningSubagents, 1);
+});
+
+test("stops counting a background command the session stopped, and goes on counting one whose stop failed", async () => {
+  const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const stop = (toolCallId: string, taskId: string, result: Record<string, unknown>) => [
+    {
+      type: "assistant",
+      uuid: `stopper-${toolCallId}`,
+      message: { content: [{ type: "tool_use", id: toolCallId, name: "TaskStop", input: { task_id: taskId } }] },
+    },
+    {
+      type: "user",
+      uuid: `stopped-${toolCallId}`,
+      message: { content: [{ type: "tool_result", tool_use_id: toolCallId, ...result }] },
+    },
+  ];
+
+  translator.trackBackgroundWork();
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: {
+        content: [{ type: "tool_use", id: "server-tool", name: "Bash", input: { command: "npm run dev", run_in_background: true } }],
+      },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { stdout: "", stderr: "", backgroundTaskId: "blra7ddm0" },
+      message: { content: [{ type: "tool_result", tool_use_id: "server-tool", content: [] }] },
+    },
+  ]);
+  assert.equal(translator.runningBackgroundShells, 1);
+  const launchedAt = translator.backgroundShellActivityAt;
+
+  await translator.translate(stop("failed-stop", "blra7ddm0", { is_error: true, content: [] }));
+  assert.equal(translator.runningBackgroundShells, 1);
+  assert.deepEqual(translator.outstandingBackgroundShells, ["blra7ddm0"]);
+
+  await translator.translate(stop("stop-tool", "blra7ddm0", { content: [{ type: "text", text: '{"task_id":"blra7ddm0"}' }] }));
+  assert.equal(translator.runningBackgroundShells, 0);
+  assert.deepEqual(translator.outstandingBackgroundShells, []);
+  assert.ok(translator.backgroundShellActivityAt >= launchedAt);
 });
