@@ -1719,6 +1719,91 @@ test("goes on waiting for a background command after giving up on the agents bes
   }
 });
 
+test("goes on waiting for an agent inside its bound after giving up on the command beside it", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-agent-outlives-shell-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/agents-and-shells";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawned = new FakePty(4600);
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return spawned;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    subagentPollMs: 10,
+    subagentSilenceMs: 5_000,
+    subagentWakeMs: 100,
+    backgroundShellMs: 10,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "review it and serve it" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    const transcript = path.join(projectDirectory, `${session.sessionId}.jsonl`);
+    const launch = [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "launcher",
+        message: {
+          content: [
+            { type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Review the branch" } },
+            { type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "npm run dev", run_in_background: true } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched-agent",
+        toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched-shell",
+        toolUseResult: { stdout: "", stderr: "", backgroundTaskId: "b1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "bash-tool", content: [] }] },
+      }),
+    ];
+    await writeFile(transcript, `${launch.join("\n")}\n`);
+
+    let settled = false;
+    void turn.then(() => {
+      settled = true;
+    });
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
+    // The command is a server, which never reports and is well past its bound, but the agent is still inside its own.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(settled, false);
+
+    const notification =
+      '<task-notification> <task-id>a1</task-id> <tool-use-id>agent-tool</tool-use-id> <status>completed</status> <summary>Agent "Review the branch" finished</summary> </task-notification>';
+    await writeFile(
+      transcript,
+      `${[...launch, JSON.stringify({ type: "user", uuid: "notified", message: { content: notification } })].join("\n")}\n`,
+    );
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test("a turn waiting on a background agent still cancels at once", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-cancel-test-"));
   const configDirectory = path.join(root, "claude");

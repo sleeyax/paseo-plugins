@@ -445,6 +445,103 @@ test("stops counting a background command a turn gave up on, and one whose sessi
   assert.equal(translator.runningBackgroundShells, 0);
 });
 
+test("lets go of a background command whose report was queued because Claude was busy when it ended", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const report =
+    '<task-notification><task-id>b1</task-id><tool-use-id>bash-tool</tool-use-id><status>completed</status><summary>Background command "Run the tests" completed (exit code 0)</summary></task-notification>';
+
+  translator.trackBackgroundWork();
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: {
+        content: [
+          { type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "npm test", description: "Run the tests", run_in_background: true } },
+        ],
+      },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: {
+        stdout: "Command running in background with ID: b1. Output is being written to: /tmp/claude-1000/-work-repo/session/tasks/b1.output",
+        stderr: "",
+        backgroundTaskId: "b1",
+      },
+      message: { content: [{ type: "tool_result", tool_use_id: "bash-tool", content: [] }] },
+    },
+  ]);
+  assert.equal(translator.runningBackgroundShells, 1);
+
+  // A command that ends while Claude is mid-turn is queued instead of delivered, and every command reported on this box left the report nowhere else.
+  notifications.length = 0;
+  await translator.translate([
+    { type: "attachment", uuid: "queued", attachment: { type: "queued_command", commandMode: "task-notification", prompt: report } },
+  ]);
+  assert.equal(translator.runningBackgroundShells, 0);
+  // A command has no card, so nothing about it is drawn.
+  assert.deepEqual(
+    notifications.filter((notification) => notification.update.sessionUpdate === "tool_call_update"),
+    [],
+  );
+});
+
+test("does not read a report for a background command a turn gave up on as an agent's", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+  } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+
+  translator.trackBackgroundWork();
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: { content: [{ type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "npm run dev", run_in_background: true } }] },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { stdout: "", stderr: "", backgroundTaskId: "b1" },
+      message: { content: [{ type: "tool_result", tool_use_id: "bash-tool", content: [] }] },
+    },
+  ]);
+  translator.abandonBackgroundWork();
+  const abandonedAt = translator.backgroundShellActivityAt;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  // A command reports long after the turn that started it has stopped waiting on it, and the bound of a later turn is not the one that was waited out.
+  notifications.length = 0;
+  await translator.translate([
+    {
+      type: "user",
+      uuid: "notified",
+      message: {
+        content:
+          '<task-notification> <task-id>b1</task-id> <status>completed</status> <summary>Background command completed (exit code 0)</summary> </task-notification>',
+      },
+    },
+  ]);
+  assert.equal(translator.runningBackgroundShells, 0);
+  assert.equal(translator.backgroundShellActivityAt, abandonedAt);
+  // The id is a command's, so nothing looks for an agent by it.
+  assert.equal(translator.runningSubagents, 0);
+  assert.deepEqual(
+    notifications.filter((notification) => notification.update.sessionUpdate === "tool_call_update"),
+    [],
+  );
+});
+
 test("lets go of an agent whose report was queued because Claude was busy when it finished", async () => {
   const notifications: SessionNotification[] = [];
   const connection = {
