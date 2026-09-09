@@ -1040,3 +1040,48 @@ test("leaves an agent running when the stop that named it failed", async () => {
 
   assert.equal(translator.runningSubagents, 1);
 });
+
+test("stops counting a background command the session stopped, and goes on counting one whose stop failed", async () => {
+  const connection = { sessionUpdate: async () => undefined } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const stop = (toolCallId: string, taskId: string, result: Record<string, unknown>) => [
+    {
+      type: "assistant",
+      uuid: `stopper-${toolCallId}`,
+      message: { content: [{ type: "tool_use", id: toolCallId, name: "TaskStop", input: { task_id: taskId } }] },
+    },
+    {
+      type: "user",
+      uuid: `stopped-${toolCallId}`,
+      message: { content: [{ type: "tool_result", tool_use_id: toolCallId, ...result }] },
+    },
+  ];
+
+  translator.trackBackgroundWork();
+  await translator.translate([
+    {
+      type: "assistant",
+      uuid: "launcher",
+      message: {
+        content: [{ type: "tool_use", id: "server-tool", name: "Bash", input: { command: "npm run dev", run_in_background: true } }],
+      },
+    },
+    {
+      type: "user",
+      uuid: "launched",
+      toolUseResult: { stdout: "", stderr: "", backgroundTaskId: "blra7ddm0" },
+      message: { content: [{ type: "tool_result", tool_use_id: "server-tool", content: [] }] },
+    },
+  ]);
+  assert.equal(translator.runningBackgroundShells, 1);
+  const launchedAt = translator.backgroundShellActivityAt;
+
+  await translator.translate(stop("failed-stop", "blra7ddm0", { is_error: true, content: [] }));
+  assert.equal(translator.runningBackgroundShells, 1);
+  assert.deepEqual(translator.outstandingBackgroundShells, ["blra7ddm0"]);
+
+  await translator.translate(stop("stop-tool", "blra7ddm0", { content: [{ type: "text", text: '{"task_id":"blra7ddm0"}' }] }));
+  assert.equal(translator.runningBackgroundShells, 0);
+  assert.deepEqual(translator.outstandingBackgroundShells, []);
+  assert.ok(translator.backgroundShellActivityAt >= launchedAt);
+});
