@@ -7,6 +7,7 @@ import test from "node:test";
 import type { AgentSideConnection, RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from "@agentclientprotocol/sdk";
 import type { IPty, IPtyForkOptions } from "node-pty";
 import { ClaudeTtyAgent } from "./agent.ts";
+import { StateStore } from "./state-store.ts";
 import { subagentsDirectory } from "./subagent-transcript.ts";
 import { escapeProjectDirName } from "./transcript-reader.ts";
 
@@ -2260,6 +2261,94 @@ test("gives up on a silent agent even while Claude itself keeps working", async 
     assert.ok(Date.now() - startedAt < 2_000, `the turn waited ${Date.now() - startedAt}ms on an agent that had gone quiet`);
   } finally {
     await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("stops the adapter once the directory of every session it holds is gone", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-workspaces-test-"));
+  const runtimeRoot = path.join(root, "runtime");
+  const stateDirectory = path.join(root, "state");
+  const created = path.join(root, "created");
+  const loaded = path.join(root, "loaded");
+  await mkdir(runtimeRoot, { recursive: true });
+  await mkdir(created);
+  await mkdir(loaded);
+  const acpSessionId = "55555555-5555-4555-8555-555555555555";
+  await new StateStore(stateDirectory).save({
+    version: 1,
+    acpSessionId,
+    claudeSessionId: "66666666-6666-4666-8666-666666666666",
+    cwd: loaded,
+    model: "inherit",
+    mode: "default",
+    lastActivity: 1,
+  });
+  let removed = 0;
+  const spawnPty = (): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => new FakePty(1);
+  const agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory,
+    claudeConfigDir: path.join(root, "claude"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    onWorkspacesRemoved: () => {
+      removed += 1;
+    },
+    workspaceCheckIntervalMs: 10,
+  });
+
+  try {
+    await agent.newSession({ cwd: created, mcpServers: [] });
+    await agent.loadSession({ sessionId: acpSessionId, cwd: loaded, mcpServers: [] });
+
+    await rm(created, { force: true, recursive: true });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(removed, 0, "stopped an adapter that still had a session to serve");
+
+    await rm(loaded, { force: true, recursive: true });
+    await waitFor(() => removed === 1, 2_000);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(removed, 1, "stopped the adapter more than once");
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("lets go of the directories of a closed adapter's sessions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-workspaces-closed-test-"));
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = path.join(root, "workspace");
+  await mkdir(runtimeRoot, { recursive: true });
+  await mkdir(cwd);
+  let removed = 0;
+  const spawnPty = (): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => new FakePty(1);
+  const agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    onWorkspacesRemoved: () => {
+      removed += 1;
+    },
+    workspaceCheckIntervalMs: 10,
+  });
+
+  try {
+    await agent.newSession({ cwd, mcpServers: [] });
+    await agent.close();
+
+    await rm(cwd, { force: true, recursive: true });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(removed, 0, "stopped a process whose adapter was already closed");
+  } finally {
     await rm(root, { force: true, recursive: true });
   }
 });
