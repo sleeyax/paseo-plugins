@@ -24,7 +24,7 @@ export async function runAcpServer(): Promise<void> {
 
   const connection = new AgentSideConnection((activeConnection) => {
     agent = new ClaudeTtyAgent(activeConnection, {
-      // Only the process can end itself here, and nothing else will: the daemon's close is what normally ends an adapter, and this is one it never reached.
+      // Nothing else will end the process: the connection is still open.
       onWorkspacesRemoved: () => {
         writeLog({ level: "warn", message: "Stopping the adapter: the directory of every session it holds is gone" });
         void shutdown("workspace_removed").finally(() => process.exit(0));
