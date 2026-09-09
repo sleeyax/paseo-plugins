@@ -19,15 +19,25 @@ import { APP_NAME, APP_TITLE, APP_VERSION } from "./constants.ts";
 import { HookServer } from "./hook-server.ts";
 import { writeLog } from "./log.ts";
 import { type ClaudeSession, SessionRegistry, type SessionRegistryDependencies } from "./session-registry.ts";
+import { WorkspaceWatchdog } from "./workspace-watchdog.ts";
+
+export type ClaudeTtyAgentDependencies = SessionRegistryDependencies & {
+  /** Left out by anything that is not the adapter's own process, which is the only one with a process to stop. */
+  onWorkspacesRemoved?: () => void;
+  workspaceCheckIntervalMs?: number;
+};
 
 export class ClaudeTtyAgent implements Agent {
   readonly hooks = new HookServer();
   readonly sessions: SessionRegistry;
   readonly connection: AgentSideConnection;
+  private readonly workspaces: WorkspaceWatchdog | null;
 
-  constructor(connection: AgentSideConnection, dependencies: SessionRegistryDependencies = {}) {
+  constructor(connection: AgentSideConnection, dependencies: ClaudeTtyAgentDependencies = {}) {
+    const { onWorkspacesRemoved, workspaceCheckIntervalMs, ...sessionDependencies } = dependencies;
     this.connection = connection;
-    this.sessions = new SessionRegistry(connection, this.hooks, dependencies);
+    this.sessions = new SessionRegistry(connection, this.hooks, sessionDependencies);
+    this.workspaces = onWorkspacesRemoved ? new WorkspaceWatchdog(onWorkspacesRemoved, workspaceCheckIntervalMs) : null;
   }
 
   async initialize(_params: InitializeRequest): Promise<InitializeResponse> {
@@ -55,6 +65,7 @@ export class ClaudeTtyAgent implements Agent {
       throw new Error(`${APP_TITLE} does not accept ACP-injected MCP servers`);
     }
     const session = this.sessions.create(params.cwd);
+    this.workspaces?.watch(session.id, session.cwd);
     // The client first learns this session id from the response below, so an update sent any earlier has nowhere to land.
     setImmediate(() => void this.publishCommands(session));
     writeLog({ level: "info", message: "Created lazy ACP session", sessionId: session.id, cwd: session.cwd });
@@ -68,6 +79,7 @@ export class ClaudeTtyAgent implements Agent {
   async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
     if (params.mcpServers.length > 0) throw new Error(`${APP_TITLE} does not accept ACP-injected MCP servers`);
     const session = await this.sessions.load(params.sessionId, params.cwd);
+    this.workspaces?.watch(session.id, session.cwd);
     await session.emitCommands();
     writeLog({ level: "info", message: "Loaded persisted ACP session", sessionId: params.sessionId, cwd: params.cwd });
     return { models: session.models, modes: session.modes };
@@ -98,6 +110,7 @@ export class ClaudeTtyAgent implements Agent {
   }
 
   async close(): Promise<void> {
+    this.workspaces?.stop();
     await this.sessions.clear();
     await this.hooks.close();
   }

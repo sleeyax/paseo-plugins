@@ -222,9 +222,9 @@ Cancelling is unaffected: a held turn ends as promptly as any other, which is wh
 
 ### An adapter does not outlive its workspace
 
-The daemon closes the connection when it is done with an adapter, and that is what normally stops this process.
-A workspace that is archived is the case that does not cover: Paseo archives one by deleting its directory, and an adapter left standing in a directory that has gone can do nothing for anyone — Claude cannot be started there — while nothing closes the adapter itself, so it holds its memory until the machine is rebooted.
-The adapter therefore checks its own working directory every minute and stops once it has been missing twice running: twice rather than once so a workspace replaced at the same path, which is what reusing one looks like on disk, is not read as the end of the session.
+The daemon closes the connection when it archives or deletes an agent — archiving a workspace archives each of its agents first — and that is what normally stops this process.
+An adapter that close never reached has nothing left to end it, and a directory that is no longer there is the visible symptom: Paseo archives a workspace by deleting its directory, and an adapter left standing in one that has gone can do nothing for anyone — Claude cannot be started there — so it holds its memory until the machine is rebooted.
+The adapter therefore checks the directory of every session it holds once a minute, and stops once all of them have been missing twice running: twice rather than once so a workspace replaced at the same path, which is what reusing one looks like on disk, is not read as the end of the session.
 A directory that cannot be read for any other reason is still there, and no session is stopped over a failure to look.
 
 ### Hooks carry everything interactive

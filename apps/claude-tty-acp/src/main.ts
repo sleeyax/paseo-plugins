@@ -4,7 +4,6 @@ import { ClaudeTtyAgent } from "./agent.ts";
 import { readIdleTimeout, settingsFilePath } from "./idle-timeout.ts";
 import { enableLogFile, writeLog } from "./log.ts";
 import { cleanupAbandonedRuntimeDirectories } from "./runtime-directories.ts";
-import { watchWorkingDirectory } from "./workspace-watchdog.ts";
 
 export async function runAcpServer(): Promise<void> {
   // The daemon reads stderr and keeps none of it, so the server also writes its log to disk.
@@ -17,15 +16,22 @@ export async function runAcpServer(): Promise<void> {
   const input = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>;
   const output = Writable.toWeb(process.stdout) as WritableStream<Uint8Array>;
   let agent: ClaudeTtyAgent | null = null;
-  const connection = new AgentSideConnection((activeConnection) => {
-    agent = new ClaudeTtyAgent(activeConnection);
-    return agent;
-  }, ndJsonStream(output, input));
 
   const shutdown = async (signal: string): Promise<void> => {
     writeLog({ level: "info", message: "Stopping ACP adapter", signal });
     await agent?.close();
   };
+
+  const connection = new AgentSideConnection((activeConnection) => {
+    agent = new ClaudeTtyAgent(activeConnection, {
+      // Only the process can end itself here, and nothing else will: the daemon's close is what normally ends an adapter, and this is one it never reached.
+      onWorkspacesRemoved: () => {
+        writeLog({ level: "warn", message: "Stopping the adapter: the directory of every session it holds is gone" });
+        void shutdown("workspace_removed").finally(() => process.exit(0));
+      },
+    });
+    return agent;
+  }, ndJsonStream(output, input));
 
   const handleSignal = (signal: NodeJS.Signals): void => {
     void shutdown(signal).finally(() => process.exit(0));
@@ -33,17 +39,7 @@ export async function runAcpServer(): Promise<void> {
   process.once("SIGINT", handleSignal);
   process.once("SIGTERM", handleSignal);
 
-  // The daemon closes the connection when it is done with an adapter, which is what normally ends
-  // this process. An archived workspace is the case it does not cover: the directory goes, the
-  // connection stays open, and nothing else would ever stop the adapter standing in it.
-  const workingDirectory = process.cwd();
-  const stopWatchingWorkspace = watchWorkingDirectory(workingDirectory, () => {
-    writeLog({ level: "warn", message: "Stopping the adapter: its working directory is gone", directory: workingDirectory });
-    void shutdown("workspace_removed").finally(() => process.exit(0));
-  });
-
   await connection.closed;
-  stopWatchingWorkspace();
   process.off("SIGINT", handleSignal);
   process.off("SIGTERM", handleSignal);
   await shutdown("connection_closed");
