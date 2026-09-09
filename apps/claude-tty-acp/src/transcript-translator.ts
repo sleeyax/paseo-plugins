@@ -182,11 +182,15 @@ export class TranscriptTranslator {
     return [...new Set([...this.subagents.values()].filter((card) => card.outstanding).map((card) => card.agentId))];
   }
 
+  /** The background commands still being waited on, for that same log. */
+  get outstandingBackgroundShells(): string[] {
+    return [...this.backgroundShells.entries()].filter(([, shell]) => shell.outstanding).map(([taskId]) => taskId);
+  }
+
   /**
-   * Stops counting the agents and background commands a turn has given up waiting on. Their cards
-   * keep saying they are working, which is still true — nothing has reported — and they are closed
-   * when the process is. Without this every later turn holds for a poll interval and gives up again
-   * in the same breath.
+   * Stops counting the agents and background commands a turn has given up waiting on.
+   * Their cards keep saying they are working, which is still true — nothing has reported — and they are closed when the process is.
+   * Without this every later turn holds for a poll interval and gives up again in the same breath.
    */
   abandonBackgroundWork(): void {
     for (const card of this.subagents.values()) {

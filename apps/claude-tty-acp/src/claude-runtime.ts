@@ -649,12 +649,12 @@ export class ClaudeRuntime {
       sessionId: this.sessionId,
       agents,
       shells,
-      // Which ones, because a turn held by an agent that has already gone is the hard one to read back.
+      // Which ones, because a turn held by work that has already gone is the hard one to read back.
       agentIds: this.translator.outstandingSubagents,
+      shellIds: this.translator.outstandingBackgroundShells,
       silentMs: silent,
     });
-    // The turn has stopped waiting on this work, so nothing else goes on counting it either:
-    // every later turn would hold for a poll interval and give up again in the same breath.
+    // The turn has stopped waiting on this work, so nothing else goes on counting it either: every later turn would hold for a poll interval and give up again in the same breath.
     this.translator.abandonBackgroundWork();
     this.finishTurn({
       response: { stopReason: "end_turn" },
