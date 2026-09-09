@@ -323,11 +323,7 @@ export function promptOf(records: readonly Record<string, unknown>[]): string | 
   return null;
 }
 
-/**
- * Where an agent's outcome can be written. A notification for one that finished while Claude was
- * busy is queued rather than delivered as a turn, and the queued command is the only record it
- * leaves — read the message alone and the panel shows the agent running for good.
- */
+/** Where an agent's outcome can be written: a user turn, or the queued command a notification is left behind in when it arrives while Claude is busy. */
 function notificationTexts(record: Record<string, unknown>): string[] {
   const queued = asRecord(record.attachment);
   const prompt = queued?.type === "queued_command" && typeof queued.prompt === "string" ? [queued.prompt] : [];

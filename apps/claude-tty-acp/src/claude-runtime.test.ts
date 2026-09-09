@@ -2243,8 +2243,8 @@ test("gives up on a silent agent even while Claude itself keeps working", async 
     await writeFile(file, `${lines.join("\n")}\n`);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
 
-    // The agent never writes again. Claude does, all the way through the bound: on the old reading
-    // that kept pushing the agent's silence back, and the turn was held for as long as Claude was busy.
+    // The agent never writes again.
+    // Claude does, all the way through the bound.
     const startedAt = Date.now();
     let busy = 0;
     const writing = setInterval(() => {

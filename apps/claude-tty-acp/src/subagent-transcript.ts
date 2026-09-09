@@ -44,9 +44,8 @@ export type TaskNotification = {
 };
 
 /**
- * Claude reports a background task's outcome by writing a `<task-notification>` into the next user
- * turn. It is the only record that says an asynchronous agent has stopped, so it is read before
- * the block is scrubbed out of the text the user sees.
+ * Claude reports a background task's outcome by writing a `<task-notification>` into a user turn or a queued command.
+ * It is the only record that says an asynchronous agent has stopped, so it is read before the block is scrubbed out of the text the user sees.
  */
 export function parseTaskNotifications(text: string): TaskNotification[] {
   const notifications: TaskNotification[] = [];

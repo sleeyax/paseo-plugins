@@ -623,12 +623,9 @@ export class ClaudeRuntime {
   }
 
   /**
-   * When the held turn last showed a sign of life, which is a different sign for each of the two
-   * bounds. Claude answering for an agent that has reported is exactly what the wake bound waits
-   * for, so anything Claude writes counts towards it: what it says, what it thinks, and the tools it
-   * runs on the way. An agent still running shows it by writing, and nothing Claude does says
-   * whether it is alive, so the silence bound reads only the agents and the hold itself — otherwise
-   * a session that stays busy keeps resetting the bound on an agent that has long since gone.
+   * When the held turn last showed a sign of life, which is a different sign for each of the two bounds.
+   * Claude answering for an agent that has reported is exactly what the wake bound waits for, so anything Claude writes counts towards it: what it says, what it thinks, and the tools it runs on the way.
+   * An agent still running shows it by writing, and nothing Claude does says whether it is alive, so the silence bound reads only the agents and the hold itself — otherwise a session that stays busy keeps resetting the bound on an agent that has long since gone.
    */
   private progressAt(agents: number): number {
     if (agents > 0) return Math.max(this.translator.subagentActivityAt, this.heldAt);

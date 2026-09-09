@@ -391,8 +391,7 @@ test("lets go of an agent whose report was queued because Claude was busy when i
   ]);
   assert.equal(translator.runningSubagents, 1);
 
-  // An agent that finishes while Claude is mid-turn is queued instead of delivered, and this is the
-  // only record it leaves: no user turn ever carries it.
+  // An agent that finishes while Claude is mid-turn is queued instead of delivered, and this is the only record it leaves: no user turn ever carries it.
   await translator.translate([queued]);
   assert.equal(translator.runningSubagents, 0);
   assert.equal(translator.subagentSettled("a1"), true);
@@ -401,8 +400,8 @@ test("lets go of an agent whose report was queued because Claude was busy when i
   assert.equal(reported.status, "completed");
   assert.deepEqual(reported.content, [{ type: "content", content: { type: "text", text: 'Agent "Map the bridge" finished' } }]);
 
-  // The queue is rewritten at every turn boundary it survives, and the turn that finally delivers
-  // it says the same thing again. Neither is a second report to put on the card.
+  // The queue is rewritten at every turn boundary it survives, and the turn that finally delivers it says the same thing again.
+  // Neither is a second report to put on the card.
   notifications.length = 0;
   await translator.translate([
     { ...queued, uuid: "queued-again" },
