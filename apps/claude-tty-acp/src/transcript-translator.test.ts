@@ -489,7 +489,7 @@ test("puts a message queued while Claude was working into the conversation, once
 
   await translator.translate([
     typed,
-    // A message with an attachment on it is queued as blocks rather than as one string.
+    // Some Claude versions write the prompt as blocks rather than as one string.
     {
       type: "attachment",
       uuid: "queued-blocks",
@@ -521,7 +521,6 @@ test("puts a message queued while Claude was working into the conversation, once
     ],
   );
 
-  // A queue rewritten under a new record still names the item by the id the queue gave it.
   notifications.length = 0;
   await translator.translate([{ ...typed, uuid: "queued-again" }, unkeyed]);
   assert.deepEqual(notifications, []);
