@@ -22,6 +22,7 @@ That is the only way to see what a step machine or a filesystem guard actually d
 
 The plugin manages the adapter in the checkout it was installed from, and a bundled plugin has no path of its own to walk up from.
 `paseo.config.get().plugins["claude-tty"].path` is the one source, and `apps/claude-tty-acp/package.json` has to exist two levels above it before anything else is worth reporting.
+`server/checkout.ts` does that resolving and the filesystem probing around it; `server/paths.ts` is the naming vocabulary it builds on and computes paths without touching the disk.
 
 ## Constraints that are not obvious
 
@@ -55,8 +56,8 @@ Signal 0 proves only that a PID is taken, and a PID outlives the process that ea
 The command line alone cannot do it.
 Matching the adapter's name and its entry file as free-floating substrings passes for the `claude` child — it is handed a `--settings` path carrying the adapter's name, and is itself `node <...>/cli.js` wherever Claude Code is installed as a bundle rather than as a binary — and for any bystander whose arguments merely mention the checkout.
 So the command has to match as one path, `<...>/claude-tty-acp/<...>/cli.js`, and even then it says only what kind of process this is, never *which*: a second adapter that inherited the PID looks exactly like the first.
-That pattern is built from the same names `paths.shared.ts` registers the adapter under, so renaming either cannot leave a guard matching the old one behind.
-It lives in `lock-owner.shared.ts` rather than beside the session join, because `sessions.shared.ts` is bundled into the client and `paths.shared.ts` reaches for `node:os` and `node:path`.
+That pattern is built from the same names `server/paths.ts` registers the adapter under, so renaming either cannot leave a guard matching the old one behind.
+It lives in `server/lock-owner.ts` rather than beside the session join, because `shared/sessions.ts` is bundled into the client and `server/paths.ts` reaches for `node:os` and `node:path`, which `shared/` may not.
 
 The start time is the half that settles it.
 Two live processes cannot share a PID, so a process that was already running when the lock was written and still holds that PID is the process that wrote it.
@@ -79,9 +80,9 @@ A daemon that stalls or pages forever costs the titles and nothing else, which i
 
 ## There is no way to open an agent from here
 
-`openSurface` and `openPanel` live on command contexts and on the client-side entry point, never on a surface's props, and the only `openPanel` target is a panel this plugin contributes.
+`openSurface` and `openPanel` live on command contexts and on the client entry's context, never on a surface's props, and the only `openPanel` target is a panel this plugin contributes.
 Paseo has a `{ kind: "agent" }` navigation target of its own but does not expose it, so nothing a plugin can call reveals an agent's terminal.
-An "open" button built on `addClientSide` and an agent panel was tried and removed: the closest the API reaches is opening a tab that shows the same row the sidebar already shows, which is worse than sending someone to the agent list.
+An "open" button built on the client entry and an agent panel was tried and removed: the closest the API reaches is opening a tab that shows the same row the sidebar already shows, which is worse than sending someone to the agent list.
 
 ## A subagent is not a session, and its work is in another file
 
@@ -98,20 +99,21 @@ So an agent launched before a suspension or a model change stays listed as runni
 Both files are read incrementally from module scope, the way the adapter reads them, because each runs to megabytes and the panel polls: what is new is parsed onto what was already read, a rewrite is noticed by comparing the head of the file rather than its length, and only the tail of steps the panel shows is kept.
 Module scope lives as long as the plugin process, so everything it holds is keyed by the session directory it was read for and dropped as soon as that session is no longer open.
 
-## index.ts is AST-filtered
+## A module's directory picks its bundle
 
-The daemon builds both bundles from the entry, deleting `plugin.handle(...)` and `*.server` imports for the client, and `plugin.add*` and `*.client` imports for the server.
-The deletion is textual, so only mention a server module inside `plugin.handle(...)` and a client module inside `plugin.add*`.
-The entry must default-export one function taking one named parameter with a block body, and RPC names must match `^[a-z][a-z0-9._-]*$`.
+`index.client.tsx` and `index.server.ts` are compiled separately, and the directory a module sits in decides which bundle it joins: `client/` the app's, `server/` the daemon's, `shared/` both.
+Reaching across that line is a compile error rather than something the compiler quietly filters away, so the entries import only their own side, and a module left at the plugin root fails the build.
+`shared/` is the strictest of the three: no Node, no React, and no runtime-specific SDK entry, which is why everything here that computes a path or reads the disk is server-side however little it does.
+Each entry default-exports one contribution function returning cleanup, and RPC names must match `^[a-z][a-z0-9._-]*$`.
 
 ## The panel is styled off paseo's own scale
 
-`src/client/theme.client.ts` and `src/client/ui.client.tsx` are copies of the Discord plugin's, because the host hands plugins no metrics and each plugin directory has to bundle from its own root.
+`client/theme.ts` and `client/ui.tsx` are copies of the Discord plugin's, because the host hands plugins no metrics and each plugin directory has to bundle from its own root.
 Build new controls out of those tokens rather than out of literals, and keep the two files in step with their originals.
-Icons come from `@getpaseo/plugin/react-native`, by Lucide name; nothing here draws its own.
+Icons come from `@getpaseo/plugin/client/react-native`, by Lucide name; nothing here draws its own.
 
 ## Tests
 
-`pnpm test` is `node --test "src/**/*.test.ts"` through Node's type stripping, so no TypeScript that has to be emitted and relative imports keep their `.ts` extension.
-Tests must not import `contracts.shared.ts`, because `@getpaseo/plugin/server` only exists inside the daemon — keep the decisions in modules the tests can reach.
-`@getpaseo/client` is on 0.7.0 across the workspace; this plugin needs at least 0.6, because `paseo.config` and `paseo.providers` do not exist before that.
+`pnpm test` is `node --test "{client,server,shared}/**/*.test.ts"` through Node's type stripping, so no TypeScript that has to be emitted and relative imports keep their `.ts` extension.
+A test that resolves the plugin root walks up from `import.meta.dirname`, so it counts the directory it sits in and no `src/` above it.
+`@getpaseo/client` is on 0.8.0 across the workspace, which is what `@getpaseo/plugin` takes as a peer.

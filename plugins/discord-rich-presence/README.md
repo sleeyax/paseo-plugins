@@ -83,9 +83,9 @@ paseo plugin reload discord-rich-presence
 paseo plugin logs discord-rich-presence
 ```
 
-Paseo builds client and server bundles from `index.ts`. Client code lives in `src/client`, server code in `src/server`, and shared models and contracts in `*.shared.ts` files.
+Paseo builds the app bundle from `index.client.tsx` and the daemon bundle from `index.server.ts`. A module's directory decides which it joins: `client/` the app's, `server/` the daemon's, `shared/` both.
 
-The Discord IPC client in `src/server/ipc.server.ts` is implemented without a dependency because CommonJS packages do not survive Paseo's plugin compiler.
+The Discord IPC client in `server/ipc.ts` is implemented without a dependency because CommonJS packages do not survive Paseo's plugin compiler.
 
 To regenerate the Discord artwork after Paseo changes its assets, run:
 

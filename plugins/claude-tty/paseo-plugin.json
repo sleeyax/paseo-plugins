@@ -1,3 +1,4 @@
 {
-  "id": "claude-tty"
+  "id": "claude-tty",
+  "requirements": { "paseo": ">=0.8.0" }
 }
