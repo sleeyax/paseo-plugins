@@ -167,6 +167,46 @@ const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
 /**
+ * The state directory keeps every session ever saved and nothing prunes it, so a cutoff is the only
+ * thing standing between the panel and a hundred rows of history. It applies to plain saved sessions
+ * alone: anything carrying an action stays visible however old it is, which is the one rule the
+ * groups below are built from.
+ */
+const RECENT_WINDOW_MS = DAY_MS;
+
+/** `visible` is already in the order it renders in; `older` is what the cutoff put behind a press. */
+export type GroupedSessions = { visible: SessionEntry[]; older: SessionEntry[] };
+
+/**
+ * Splits a joined list into what the panel shows and what it collapses. The input order is kept
+ * within each group, so `joinSessions` decides recency once and this only decides the grouping.
+ */
+export function groupSessions(entries: readonly SessionEntry[], now: number): GroupedSessions {
+  const attention: SessionEntry[] = [];
+  const open: SessionEntry[] = [];
+  const recent: SessionEntry[] = [];
+  const older: SessionEntry[] = [];
+  for (const entry of entries) {
+    if (needsAttention(entry)) attention.push(entry);
+    else if (entry.lock?.live === true) open.push(entry);
+    else if (isRecent(entry.lastActivity, now)) recent.push(entry);
+    else older.push(entry);
+  }
+  return { visible: [...attention, ...open, ...recent], older };
+}
+
+/** The rows that ask something of whoever is reading, which is what earns them the top of the list. */
+function needsAttention(entry: SessionEntry): boolean {
+  return entry.corrupt || entry.orphanLock || (entry.lock !== null && !entry.lock.live);
+}
+
+/** A clock that has moved backwards reads as the present, the way `lastActiveLabel` reads it. */
+function isRecent(lastActivity: number | null, now: number): boolean {
+  if (lastActivity === null || !Number.isFinite(lastActivity)) return false;
+  return now - lastActivity < RECENT_WINDOW_MS;
+}
+
+/**
  * How long a session has been left alone, which is what decides whether it is worth stopping. The
  * adapter stamps `lastActivity` when it saves a session, which it does as a prompt *starts*, so this
  * says "last prompted" rather than "active": a session an hour into one turn is still working. Both

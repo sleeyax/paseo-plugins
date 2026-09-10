@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   attachAgents,
+  groupSessions,
   isSafeStateFileStem,
   joinSessions,
   lastActiveLabel,
+  type SessionEntry,
   type StateFile,
 } from "./sessions.ts";
 
@@ -133,4 +135,90 @@ test("says nothing about a session with no recorded activity, and reads a clock 
   assert.equal(lastActiveLabel(null, 1_000), null);
   assert.equal(lastActiveLabel(Number.NaN, 1_000), null);
   assert.equal(lastActiveLabel(2_000, 1_000), "last prompted just now");
+});
+
+const NOW = 1_000 * 60 * 60 * 24 * 400;
+const DAY_MS = 24 * 60 * 60 * 1_000;
+
+function entry(id: string, overrides: Partial<SessionEntry> = {}): SessionEntry {
+  return {
+    id,
+    claudeSessionId: `claude-${id}`,
+    cwd: "/srv/project",
+    model: "opus",
+    mode: "default",
+    lastActivity: NOW,
+    corrupt: false,
+    orphanLock: false,
+    lock: null,
+    agent: null,
+    ...overrides,
+  };
+}
+
+const ids = (entries: readonly SessionEntry[]) => entries.map((entry) => entry.id);
+
+test("groups the sessions that need attention above the open ones, and those above the recent", () => {
+  const { visible, older } = groupSessions(
+    [
+      entry("open", { lock: { pid: ALIVE, createdAt: 10, live: true } }),
+      entry("recent"),
+      entry("stale", { lock: { pid: DEAD, createdAt: 10, live: false } }),
+      entry("corrupt", { corrupt: true, lastActivity: null }),
+      entry("orphan", { orphanLock: true, lastActivity: null }),
+    ],
+    NOW,
+  );
+  assert.deepEqual(ids(visible), ["stale", "corrupt", "orphan", "open", "recent"]);
+  assert.deepEqual(ids(older), []);
+});
+
+test("keeps a session that needs attention visible however long ago it was prompted", () => {
+  const age = NOW - 30 * DAY_MS;
+  const { visible, older } = groupSessions(
+    [
+      entry("stale", { lastActivity: age, lock: { pid: DEAD, createdAt: 10, live: false } }),
+      entry("open", { lastActivity: age, lock: { pid: ALIVE, createdAt: 10, live: true } }),
+      entry("corrupt", { lastActivity: age, corrupt: true }),
+      entry("plain", { lastActivity: age }),
+    ],
+    NOW,
+  );
+  assert.deepEqual(ids(visible), ["stale", "corrupt", "open"]);
+  assert.deepEqual(ids(older), ["plain"]);
+});
+
+test("collapses a session last prompted more than a day ago", () => {
+  const { visible, older } = groupSessions(
+    [
+      entry("inside", { lastActivity: NOW - DAY_MS + 1_000 }),
+      entry("outside", { lastActivity: NOW - DAY_MS - 1_000 }),
+    ],
+    NOW,
+  );
+  assert.deepEqual(ids(visible), ["inside"]);
+  assert.deepEqual(ids(older), ["outside"]);
+});
+
+test("leaves the order it was given alone within a group", () => {
+  const { visible, older } = groupSessions(
+    [
+      entry("newer", { lastActivity: NOW - 1_000 }),
+      entry("older", { lastActivity: NOW - 2_000 }),
+      entry("ancient", { lastActivity: NOW - 30 * DAY_MS }),
+      entry("prehistoric", { lastActivity: NOW - 60 * DAY_MS }),
+    ],
+    NOW,
+  );
+  assert.deepEqual(ids(visible), ["newer", "older"]);
+  assert.deepEqual(ids(older), ["ancient", "prehistoric"]);
+});
+
+test("reads a clock that moved backwards as the present, and no activity as history", () => {
+  const { visible, older } = groupSessions(
+    [entry("future", { lastActivity: NOW + DAY_MS }), entry("never", { lastActivity: null })],
+    NOW,
+  );
+  assert.deepEqual(ids(visible), ["future"]);
+  assert.deepEqual(ids(older), ["never"]);
 });

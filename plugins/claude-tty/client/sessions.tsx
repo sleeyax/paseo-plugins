@@ -1,14 +1,14 @@
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import React from "react";
-import { Text, View } from "react-native";
+import React, { useState } from "react";
+import { Pressable, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import type { SessionsPayload } from "../shared/contracts.ts";
-import { lastActiveLabel } from "../shared/sessions.ts";
+import { groupSessions, lastActiveLabel } from "../shared/sessions.ts";
 import { fontSize, leading, spacing, type Palette } from "./theme.ts";
 import { ConfirmButton } from "./confirm.tsx";
 import { Monospace, ReadingRow, type Reading } from "./status.tsx";
-import { Card, Row, Section } from "./ui.tsx";
+import { Card, Row, Section, pressable } from "./ui.tsx";
 
 export const SESSIONS_QUERY_KEY = ["claude-tty", "sessions"];
 const REFETCH_MS = 10_000;
@@ -16,6 +16,7 @@ const REFETCH_MS = 10_000;
 type Session = SessionsPayload["sessions"][number];
 
 export function SessionsSection({ palette }: { palette: Palette }) {
+  const [showOlder, setShowOlder] = useState(false);
   const queryClient = useQueryClient();
   const getSessions = useRpc(contracts.getSessions);
   const releaseLock = useRpc(contracts.releaseLock);
@@ -37,35 +38,48 @@ export function SessionsSection({ palette }: { palette: Palette }) {
   const failure = release.error ?? quarantine.error ?? stop.error ?? null;
   // A stop waits on a process, so the row it is waiting on says so rather than just going flat.
   const stopping = stop.isPending ? stop.variables : null;
+  const groups = payload === null ? null : groupSessions(payload.sessions, payload.now);
+
+  const row = (session: Session, now: number, divided: boolean) => (
+    <ReadingRow
+      key={session.id}
+      palette={palette}
+      title={title(session)}
+      reading={reading(session, now)}
+      divided={divided}
+      trailing={
+        <SessionAction
+          palette={palette}
+          session={session}
+          busy={busy}
+          stopping={session.id === stopping}
+          onRelease={() => release.mutate(session.id)}
+          onQuarantine={() => quarantine.mutate(session.id)}
+          onStop={() => stop.mutate(session.id)}
+        />
+      }
+    />
+  );
 
   return (
     <Section palette={palette} title="Sessions">
-      {payload === null ? null : payload.sessions.length === 0 ? (
+      {groups === null || payload === null ? null : payload.sessions.length === 0 ? (
         <Card palette={palette}>
           <Row palette={palette} title="No saved sessions" hint={payload.stateDirectory} dimmed />
         </Card>
       ) : (
         <Card palette={palette}>
-          {payload.sessions.map((session, index) => (
-            <ReadingRow
-              key={session.id}
+          {groups.visible.map((session, index) => row(session, payload.now, index > 0))}
+          {groups.older.length === 0 ? null : (
+            <OlderSessions
               palette={palette}
-              title={title(session)}
-              reading={reading(session, payload.now)}
-              divided={index > 0}
-              trailing={
-                <SessionAction
-                  palette={palette}
-                  session={session}
-                  busy={busy}
-                  stopping={session.id === stopping}
-                  onRelease={() => release.mutate(session.id)}
-                  onQuarantine={() => quarantine.mutate(session.id)}
-                  onStop={() => stop.mutate(session.id)}
-                />
-              }
+              count={groups.older.length}
+              open={showOlder}
+              divided={groups.visible.length > 0}
+              onPress={() => setShowOlder(!showOlder)}
             />
-          ))}
+          )}
+          {showOlder ? groups.older.map((session) => row(session, payload.now, true)) : null}
         </Card>
       )}
 
@@ -86,6 +100,39 @@ export function SessionsSection({ palette }: { palette: Palette }) {
         releasing by hand is only for a lock that outlived its process and is still in the way.
       </Text>
     </Section>
+  );
+}
+
+/** The one row the cutoff adds, which is also the only way to reach what it collapsed. */
+function OlderSessions({
+  palette,
+  count,
+  open,
+  divided,
+  onPress,
+}: {
+  palette: Palette;
+  count: number;
+  open: boolean;
+  divided: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ expanded: open }}
+      style={pressable(({ hovered, pressed }) => ({
+        backgroundColor: hovered || pressed ? palette.surface2 : "transparent",
+      }))}
+    >
+      <Row
+        palette={palette}
+        title={`${open ? "Hide" : "Show"} ${count} older session${count === 1 ? "" : "s"}`}
+        divided={divided}
+        dimmed
+      />
+    </Pressable>
   );
 }
 
