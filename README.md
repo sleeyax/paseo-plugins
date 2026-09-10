@@ -39,7 +39,7 @@ To work on a plugin, install it from the working copy instead:
 paseo plugin install "/absolute/path/to/paseo-plugins/plugins/discord-rich-presence"
 ```
 
-After making changes, run `paseo plugin reload <id>`. Paseo does not hot-reload plugins, and reloading is the compile check for the client and server bundles built from `index.ts`.
+After making changes, run `paseo plugin reload <id>`. Paseo does not hot-reload plugins, and reloading is the compile check for the client and server bundles built from `index.client.tsx` and `index.server.ts`.
 
 ## Plugin settings
 
