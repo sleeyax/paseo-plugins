@@ -1,5 +1,6 @@
 {
   "name": "@paseo-plugins/catppuccin-theme",
+  "description": "Adds all four Catppuccin flavours — Latte, Frappé, Macchiato, and Mocha — as Paseo app themes.",
   "private": true,
   "version": "0.0.0",
   "scripts": {

@@ -1,5 +1,6 @@
 {
   "name": "@paseo-plugins/discord-rich-presence",
+  "description": "Show your current Paseo activity on Discord.",
   "private": true,
   "version": "0.0.0",
   "scripts": {
