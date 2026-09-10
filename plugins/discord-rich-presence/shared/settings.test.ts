@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_SETTINGS, type PresenceSnapshot } from "./presence.shared.ts";
+import { DEFAULT_SETTINGS, type PresenceSnapshot } from "./presence.ts";
 import {
   coerceApplicationId,
   coerceSettings,
   knownProjects,
   withProjectDetailLevel,
-} from "./settings.shared.ts";
+} from "./settings.ts";
 
 test("an empty file yields the defaults", () => {
   assert.deepEqual(coerceSettings(null), DEFAULT_SETTINGS);

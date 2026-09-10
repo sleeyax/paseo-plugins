@@ -9,7 +9,7 @@ import {
   type PresenceSettings,
   type PresenceSnapshot,
   type WorkspaceActivity,
-} from "./presence.shared.ts";
+} from "./presence.ts";
 
 const START = 1_700_000_000_000;
 const NOW = START + 60_000;

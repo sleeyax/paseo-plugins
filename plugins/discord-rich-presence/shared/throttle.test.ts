@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decideWrite, MIN_WRITE_INTERVAL_MS } from "./throttle.shared.ts";
+import { decideWrite, MIN_WRITE_INTERVAL_MS } from "./throttle.ts";
 
 const NOW = 1_700_000_000_000;
 

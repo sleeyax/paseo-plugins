@@ -4,8 +4,8 @@ import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
-import { DiscordConnection } from "./discord.server.ts";
-import { encodeFrame, FrameDecoder, OP_FRAME } from "./ipc.server.ts";
+import { DiscordConnection } from "./discord.ts";
+import { encodeFrame, FrameDecoder, OP_FRAME } from "./ipc.ts";
 
 let runtimeDir: string;
 let server: Server | null = null;

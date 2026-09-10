@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { renderActivity, DEFAULT_SETTINGS } from "./presence.shared.ts";
+import { renderActivity, DEFAULT_SETTINGS } from "./presence.ts";
 import {
   toAgentActivities,
   toPresenceSnapshot,
   toProjects,
   toWorkspaceActivity,
-} from "./snapshot.shared.ts";
+} from "./snapshot.ts";
 
 function fixture(name: string): unknown[] {
   return JSON.parse(readFileSync(path.join(import.meta.dirname, "fixtures", `${name}.json`), "utf8"));

@@ -4,7 +4,7 @@ import type {
   Project,
   WorkspaceActivity,
   WorkspaceStatus,
-} from "./presence.shared.ts";
+} from "./presence.ts";
 
 const WORKSPACE_STATUSES: readonly WorkspaceStatus[] = [
   "needs_input",

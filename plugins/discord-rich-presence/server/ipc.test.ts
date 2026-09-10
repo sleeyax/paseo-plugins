@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { PresenceActivity } from "../presence.shared.ts";
+import type { PresenceActivity } from "../shared/presence.ts";
 import {
   closeFrameError,
   encodeFrame,
@@ -14,7 +14,7 @@ import {
   setActivityFrame,
   socketCandidates,
   toActivityPayload,
-} from "./ipc.server.ts";
+} from "./ipc.ts";
 
 const ACTIVITY: PresenceActivity = {
   details: "paseo-plugins — main",

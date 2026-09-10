@@ -7,7 +7,7 @@ import {
   type PresenceSnapshot,
   type Project,
   type ProjectDetailLevel,
-} from "./presence.shared.ts";
+} from "./presence.ts";
 
 export type StoredState = {
   version: 1;

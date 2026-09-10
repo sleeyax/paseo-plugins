@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alpha, derivePalette, isDarkColor, parseColor } from "./theme.client.ts";
+import { alpha, derivePalette, isDarkColor, parseColor } from "./theme.ts";
 
 /** Paseo's own zinc dark and light themes, the ones the derived shades are measured against. */
 const ZINC_DARK = {

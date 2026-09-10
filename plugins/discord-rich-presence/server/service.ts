@@ -3,13 +3,13 @@ import type {
   PresenceActivity,
   PresenceSettings,
   PresenceSnapshot,
-} from "../presence.shared.ts";
-import { renderActivity } from "../presence.shared.ts";
-import { knownProjects } from "../settings.shared.ts";
-import { decideWrite, MIN_WRITE_INTERVAL_MS } from "../throttle.shared.ts";
-import { DaemonConnection, type DaemonState } from "./daemon.server.ts";
-import { DiscordConnection, type DiscordState } from "./discord.server.ts";
-import { SettingsStore } from "./settings-store.server.ts";
+} from "../shared/presence.ts";
+import { renderActivity } from "../shared/presence.ts";
+import { knownProjects } from "../shared/settings.ts";
+import { decideWrite, MIN_WRITE_INTERVAL_MS } from "../shared/throttle.ts";
+import { DaemonConnection, type DaemonState } from "./daemon.ts";
+import { DiscordConnection, type DiscordState } from "./discord.ts";
+import { SettingsStore } from "./settings-store.ts";
 
 /** A burst of agent events is one presence write, and the debounce doubles as the rate-limit floor. */
 const REFRESH_DEBOUNCE_MS = MIN_WRITE_INTERVAL_MS;

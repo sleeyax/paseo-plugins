@@ -1,19 +1,19 @@
-import type { PluginSurfaceProps } from "@getpaseo/plugin";
-import { useRpc } from "@getpaseo/plugin";
+import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
+import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import { ScrollView, Text, TextInput, View } from "react-native";
-import * as contracts from "../contracts.shared.ts";
-import type { PresenceStatusPayload } from "../contracts.shared.ts";
+import * as contracts from "../shared/contracts.ts";
+import type { PresenceStatusPayload } from "../shared/contracts.ts";
 import {
   BADGE_COLORS,
   DETAIL_LEVELS,
   DETAIL_LEVEL_LABELS,
   type DetailLevel,
   MANAGED_APPLICATION_ID,
-} from "../presence.shared.ts";
-import { coerceApplicationId } from "../settings.shared.ts";
-import { DiscordPreview } from "./preview.client.tsx";
+} from "../shared/presence.ts";
+import { coerceApplicationId } from "../shared/settings.ts";
+import { DiscordPreview } from "./preview.tsx";
 import {
   MAX_CONTENT_WIDTH,
   controlHeight,
@@ -22,7 +22,7 @@ import {
   radius,
   spacing,
   type Palette,
-} from "./theme.client.ts";
+} from "./theme.ts";
 import {
   Button,
   Card,
@@ -35,7 +35,7 @@ import {
   StatusDot,
   Switch,
   usePalette,
-} from "./ui.client.tsx";
+} from "./ui.tsx";
 
 const STATUS_QUERY_KEY = ["discord-rich-presence", "status"];
 const REFETCH_MS = 5_000;

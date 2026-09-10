@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import type { Env } from "../daemon-url.shared.ts";
+import type { Env } from "../shared/daemon-url.ts";
 
 export function cacheDir(env: Env = process.env): string {
   const base = env.XDG_CACHE_HOME?.trim() || path.join(env.HOME ?? os.homedir(), ".cache");

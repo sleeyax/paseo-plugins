@@ -1,9 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { Env } from "../daemon-url.shared.ts";
-import type { PresenceSettings } from "../presence.shared.ts";
-import { coerceSettings, type StoredState } from "../settings.shared.ts";
-import { settingsFilePath } from "./paths.server.ts";
+import type { Env } from "../shared/daemon-url.ts";
+import type { PresenceSettings } from "../shared/presence.ts";
+import { coerceSettings, type StoredState } from "../shared/settings.ts";
+import { settingsFilePath } from "./paths.ts";
 
 export class SettingsStore {
   private settings: PresenceSettings | null = null;

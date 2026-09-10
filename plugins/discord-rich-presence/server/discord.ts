@@ -1,6 +1,6 @@
 import { createConnection, type Socket } from "node:net";
 import { randomUUID } from "node:crypto";
-import type { PresenceActivity } from "../presence.shared.ts";
+import type { PresenceActivity } from "../shared/presence.ts";
 import {
   closeFrameError,
   encodeFrame,
@@ -14,7 +14,7 @@ import {
   OP_PONG,
   setActivityFrame,
   socketCandidates,
-} from "./ipc.server.ts";
+} from "./ipc.ts";
 
 const RETRY_BASE_MS = 5_000;
 const RETRY_MAX_MS = 60_000;

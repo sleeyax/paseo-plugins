@@ -1,6 +1,6 @@
 import path from "node:path";
-import type { Env } from "../daemon-url.shared.ts";
-import type { PresenceActivity } from "../presence.shared.ts";
+import type { Env } from "../shared/daemon-url.ts";
+import type { PresenceActivity } from "../shared/presence.ts";
 
 export const OP_HANDSHAKE = 0;
 export const OP_FRAME = 1;

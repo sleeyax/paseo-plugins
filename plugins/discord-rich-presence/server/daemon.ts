@@ -1,9 +1,9 @@
 import { promises as fs } from "node:fs";
 import { createPaseoClient, type PaseoClient } from "@getpaseo/client";
-import { resolveDaemonPassword, resolveDaemonUrl, type Env } from "../daemon-url.shared.ts";
-import type { PresenceSnapshot } from "../presence.shared.ts";
-import { toPresenceSnapshot } from "../snapshot.shared.ts";
-import { daemonConfigPath, pidFilePath } from "./paths.server.ts";
+import { resolveDaemonPassword, resolveDaemonUrl, type Env } from "../shared/daemon-url.ts";
+import type { PresenceSnapshot } from "../shared/presence.ts";
+import { toPresenceSnapshot } from "../shared/snapshot.ts";
+import { daemonConfigPath, pidFilePath } from "./paths.ts";
 
 /** The daemon routes a `plugin:`-prefixed client id to its own plugin session, and that handshake never completes for a websocket. */
 const DAEMON_CLIENT_ID = "discord-rich-presence";

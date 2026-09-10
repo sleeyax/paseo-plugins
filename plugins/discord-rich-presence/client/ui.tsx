@@ -1,5 +1,5 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import { Icon } from "@getpaseo/plugin/react-native";
+import { Icon } from "@getpaseo/plugin/client/react-native";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Dimensions, Modal, Platform, Pressable, Text, View } from "react-native";
@@ -13,7 +13,7 @@ import {
   spacing,
   switchGeometry,
   type Palette,
-} from "./theme.client.ts";
+} from "./theme.ts";
 
 export function usePalette(theme: PluginTheme): Palette {
   const colors = theme.colors;

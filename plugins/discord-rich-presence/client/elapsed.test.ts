@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatElapsed } from "./elapsed.client.ts";
+import { formatElapsed } from "./elapsed.ts";
 
 test("counts up the way discord does", () => {
   assert.equal(formatElapsed(0), "00:00");

@@ -1,31 +1,20 @@
-import type { PluginContext } from "@getpaseo/plugin";
-import * as contracts from "./src/contracts.shared.ts";
-import {
-  setEnabledHandler,
-  setProjectLevelHandler,
-  setSettingsHandler,
-  statusHandler,
-} from "./src/server/handlers.server.ts";
-import { DiscordPresenceSurface } from "./src/client/settings.client.tsx";
+import type { PluginClientContext } from "@getpaseo/plugin/client";
+import * as contracts from "./shared/contracts.ts";
+import { DiscordPresenceSurface } from "./client/settings.tsx";
 
 export const SURFACE_ID = "settings";
 
-export default function contribute(plugin: PluginContext) {
-  plugin.handle(contracts.getStatus, () => statusHandler());
-  plugin.handle(contracts.setSettings, (input) => setSettingsHandler(input));
-  plugin.handle(contracts.setEnabled, (input) => setEnabledHandler(input));
-  plugin.handle(contracts.setProjectLevel, (input) => setProjectLevelHandler(input));
+export default function contribute(client: PluginClientContext) {
+  client.addSurface(SURFACE_ID, DiscordPresenceSurface);
 
-  plugin.addSurface(SURFACE_ID, DiscordPresenceSurface);
-
-  plugin.addSidebarItem({
+  client.addSidebarItem({
     id: "discord-rich-presence",
     title: "Discord",
     icon: "Gamepad2",
     surface: SURFACE_ID,
   });
 
-  plugin.addCommandCenterItem({
+  client.addCommandCenterItem({
     id: "discord-rich-presence-off",
     title: "Discord rich presence: turn off",
     icon: "EyeOff",
@@ -36,7 +25,7 @@ export default function contribute(plugin: PluginContext) {
     },
   });
 
-  plugin.addCommandCenterItem({
+  client.addCommandCenterItem({
     id: "discord-rich-presence-on",
     title: "Discord rich presence: turn on",
     icon: "Eye",
@@ -47,7 +36,7 @@ export default function contribute(plugin: PluginContext) {
     },
   });
 
-  plugin.addCommandCenterItem({
+  client.addCommandCenterItem({
     id: "discord-rich-presence-project-detailed",
     title: "Discord rich presence: show this project as Detailed",
     icon: "Eye",
@@ -62,7 +51,7 @@ export default function contribute(plugin: PluginContext) {
     },
   });
 
-  plugin.addCommandCenterItem({
+  client.addCommandCenterItem({
     id: "discord-rich-presence-project-projects",
     title: "Discord rich presence: show this project as Projects only",
     icon: "Folder",
@@ -77,7 +66,7 @@ export default function contribute(plugin: PluginContext) {
     },
   });
 
-  plugin.addCommandCenterItem({
+  client.addCommandCenterItem({
     id: "discord-rich-presence-project-hidden",
     title: "Discord rich presence: show this project as Hidden",
     icon: "EyeOff",
@@ -92,7 +81,7 @@ export default function contribute(plugin: PluginContext) {
     },
   });
 
-  plugin.addCommandCenterItem({
+  client.addCommandCenterItem({
     id: "discord-rich-presence-project-default",
     title: "Discord rich presence: show this project at the default level",
     icon: "Settings2",

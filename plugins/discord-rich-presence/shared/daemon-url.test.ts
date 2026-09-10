@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_DAEMON_HOST, resolveDaemonPassword, resolveDaemonUrl } from "./daemon-url.shared.ts";
+import { DEFAULT_DAEMON_HOST, resolveDaemonPassword, resolveDaemonUrl } from "./daemon-url.ts";
 
 test("falls back to the default daemon host", () => {
   assert.deepEqual(resolveDaemonUrl({ env: {} }), { url: `ws://${DEFAULT_DAEMON_HOST}/ws` });

@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { Image, Text, View } from "react-native";
-import type { PresenceStatusPayload } from "../contracts.shared.ts";
-import { BADGE_COLORS } from "../presence.shared.ts";
-import { PASEO_ICON_DATA_URL } from "./artwork.client.ts";
-import { formatElapsed } from "./elapsed.client.ts";
-import { fontSize, leading, radius, spacing } from "./theme.client.ts";
-import { MONO_FONT } from "./ui.client.tsx";
+import type { PresenceStatusPayload } from "../shared/contracts.ts";
+import { BADGE_COLORS } from "../shared/presence.ts";
+import { PASEO_ICON_DATA_URL } from "./artwork.ts";
+import { formatElapsed } from "./elapsed.ts";
+import { fontSize, leading, radius, spacing } from "./theme.ts";
+import { MONO_FONT } from "./ui.tsx";
 
 /**
  * Discord's dark activity card, held to its own colours rather than the paseo theme's: the point of

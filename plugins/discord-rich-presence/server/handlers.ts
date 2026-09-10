@@ -1,6 +1,6 @@
-import type { DetailLevel, PresenceSettings } from "../presence.shared.ts";
-import { withProjectDetailLevel } from "../settings.shared.ts";
-import { service, type PresenceStatus } from "./service.server.ts";
+import type { DetailLevel, PresenceSettings } from "../shared/presence.ts";
+import { withProjectDetailLevel } from "../shared/settings.ts";
+import { service, type PresenceStatus } from "./service.ts";
 
 export function statusHandler(): Promise<PresenceStatus> {
   return service.status();
