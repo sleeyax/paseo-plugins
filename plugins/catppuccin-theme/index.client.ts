@@ -1,4 +1,5 @@
-import type { PluginContext, PluginThemeContribution } from "@getpaseo/plugin";
+import type { PluginThemeContribution } from "@getpaseo/plugin";
+import type { PluginClientContext } from "@getpaseo/plugin/client";
 
 const themes: PluginThemeContribution[] = [
   {
@@ -63,9 +64,9 @@ const themes: PluginThemeContribution[] = [
   },
 ];
 
-export default function contribute(plugin: PluginContext) {
+export default function contribute(client: PluginClientContext) {
   for (const theme of themes) {
-    plugin.addTheme(theme);
+    client.addTheme(theme);
   }
   return () => {};
 }

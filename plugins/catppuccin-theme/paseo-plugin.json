@@ -1,3 +1,4 @@
 {
-  "id": "catppuccin-theme"
+  "id": "catppuccin-theme",
+  "requirements": { "paseo": ">=0.8.0" }
 }
