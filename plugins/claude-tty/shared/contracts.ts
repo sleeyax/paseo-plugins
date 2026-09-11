@@ -1,9 +1,5 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
-import { INSTALL_STEP_IDS } from "./install.ts";
-import { MAX_IDLE_TIMEOUT_MS } from "./settings.ts";
-
-export const ProviderStateSchema = z.enum(["absent", "matching", "mismatched", "foreign"]);
 
 export const StatusSchema = z.object({
   /** The checkout this plugin was installed from, or null when it could not be identified. */
@@ -14,25 +10,28 @@ export const StatusSchema = z.object({
     binary: z.string().nullable(),
     built: z.boolean(),
   }),
-  provider: z.object({
-    id: z.string(),
-    state: ProviderStateSchema,
-    label: z.string().nullable(),
-    command: z.array(z.string()).nullable(),
-    expectedCommand: z.array(z.string()).nullable(),
-  }),
   host: z.object({
     node: z.string(),
     claude: z.string().nullable(),
   }),
   stateDirectory: z.string(),
+  /** What the settings screen cannot see for itself: where the host keeps the document, and what overrides it. */
   settings: z.object({
-    idleTimeoutMs: z.number().int().nonnegative(),
-    /** Where the value is stored, which is the plugin's own settings file rather than the daemon config. */
+    /** The document the host settings store owns, which is also the path the adapter is handed. */
     file: z.string(),
-    /** Set when the provider entry pins the timeout in `env`, which the adapter honours over this setting. */
+    /** Set when the daemon's environment pins the timeout, which the adapter honours over the setting. */
     envOverrideMs: z.number().int().nonnegative().nullable(),
   }),
+  /** The adapter's entry in the daemon configuration from before this plugin owned the provider, or null. */
+  legacyProvider: z
+    .object({
+      id: z.string(),
+      configFile: z.string(),
+      command: z.string(),
+      /** Agents the daemon still lists on that entry, or null when it did not answer in time to count them all. */
+      agents: z.number().int().nonnegative().nullable(),
+    })
+    .nullable(),
 });
 
 export type StatusPayload = z.output<typeof StatusSchema>;
@@ -41,44 +40,6 @@ export const getStatus = defineRpc({
   name: "claude-tty.status",
   input: z.object({}),
   output: StatusSchema,
-});
-
-export const setSettings = defineRpc({
-  name: "claude-tty.settings.set",
-  input: z.object({ idleTimeoutMs: z.number().int().nonnegative().max(MAX_IDLE_TIMEOUT_MS) }),
-  output: StatusSchema,
-});
-
-export const InstallStepSchema = z.object({
-  id: z.enum(INSTALL_STEP_IDS),
-  label: z.string(),
-  state: z.enum(["pending", "running", "ok", "failed"]),
-  detail: z.string(),
-  stdout: z.string(),
-  stderr: z.string(),
-  exitCode: z.number().nullable(),
-});
-
-export const InstallJobSchema = z.object({
-  state: z.enum(["running", "ok", "failed"]),
-  startedAt: z.number(),
-  finishedAt: z.number().nullable(),
-  steps: z.array(InstallStepSchema),
-});
-
-export type InstallJobPayload = z.output<typeof InstallJobSchema>;
-
-export const startInstall = defineRpc({
-  name: "claude-tty.install.start",
-  /** Repointing an entry that already exists is never part of an ordinary install. */
-  input: z.object({ repair: z.boolean() }),
-  output: InstallJobSchema,
-});
-
-export const getInstall = defineRpc({
-  name: "claude-tty.install.status",
-  input: z.object({}),
-  output: InstallJobSchema.nullable(),
 });
 
 export const DiagnosticCheckSchema = z.object({
@@ -91,15 +52,11 @@ export const DiagnosticCheckSchema = z.object({
 export const DoctorSchema = z.object({
   ranAt: z.number(),
   adapter: z.object({
-    /** The executable the daemon would launch, which is not always the one this checkout builds. */
+    /** The executable this plugin hands the daemon as the provider's command. */
     binary: z.string().nullable(),
     ok: z.boolean(),
     problem: z.string().nullable(),
     checks: z.array(DiagnosticCheckSchema),
-  }),
-  daemon: z.object({
-    diagnostic: z.string().nullable(),
-    error: z.string().nullable(),
   }),
 });
 
@@ -171,77 +128,13 @@ export const releaseStaleLocks = defineRpc({
   output: SessionsSchema,
 });
 
-export const SubagentSchema = z.object({
-  agentId: z.string(),
-  /** What the session asked for, or the opening line of the prompt when the launch is long gone. */
-  description: z.string().nullable(),
-  status: z.enum(["running", "completed", "failed", "unknown"]),
-  summary: z.string().nullable(),
-  /** Launched by another subagent, so the session's own transcript never mentions it. */
-  nested: z.boolean(),
-  lastActivity: z.number().nullable(),
-});
+/** Removing the state directory either happens or throws, so what comes back is only what it did. */
+export const RemoveStateSchema = z.object({ detail: z.string() });
 
-export const SubagentSessionSchema = z.object({
-  sessionId: z.string(),
-  cwd: z.string().nullable(),
-  subagents: z.array(SubagentSchema),
-});
+export type RemoveStatePayload = z.output<typeof RemoveStateSchema>;
 
-export const SubagentsSchema = z.object({
-  now: z.number(),
-  problem: z.string().nullable(),
-  sessions: z.array(SubagentSessionSchema),
-});
-
-export type SubagentsPayload = z.output<typeof SubagentsSchema>;
-
-export const getSubagents = defineRpc({
-  name: "claude-tty.subagents.list",
+export const removeState = defineRpc({
+  name: "claude-tty.state.remove",
   input: z.object({}),
-  output: SubagentsSchema,
-});
-
-export const SubagentStepSchema = z.object({
-  kind: z.enum(["text", "tool"]),
-  /** When it happened, against the daemon's clock, like every other time in this payload. */
-  at: z.number().nullable(),
-  /** What the subagent said, or the name of the tool it called. */
-  title: z.string(),
-  /** What the tool was asked to do, in the subagent's own words. */
-  detail: z.string().nullable(),
-  /** The argument worth reading as it was written: a command, a path, a pattern. */
-  body: z.string().nullable(),
-  failed: z.boolean(),
-  error: z.string().nullable(),
-});
-
-export const SubagentTranscriptSchema = z.object({
-  /** The first thing in the transcript, so a step can say how far into the run it happened. */
-  startedAt: z.number().nullable(),
-  steps: z.array(SubagentStepSchema),
-  /** Steps older than the ones returned, which are on disk but not worth sending. */
-  earlier: z.number(),
-});
-
-export type SubagentTranscriptPayload = z.output<typeof SubagentTranscriptSchema>;
-
-export const readSubagent = defineRpc({
-  name: "claude-tty.subagents.read",
-  input: z.object({ sessionId: z.string(), agentId: z.string() }),
-  output: SubagentTranscriptSchema,
-});
-
-export const UninstallSchema = z.object({
-  removedProvider: z.boolean(),
-  removedState: z.boolean(),
-  detail: z.string(),
-});
-
-export type UninstallPayload = z.output<typeof UninstallSchema>;
-
-export const runUninstall = defineRpc({
-  name: "claude-tty.uninstall.run",
-  input: z.object({ removeState: z.boolean() }),
-  output: UninstallSchema,
+  output: RemoveStateSchema,
 });
