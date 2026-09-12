@@ -11,10 +11,24 @@ import { StateStore } from "./state-store.ts";
 import { subagentsDirectory } from "./subagent-transcript.ts";
 import { escapeProjectDirName } from "./transcript-reader.ts";
 
+/** What the runtime clears Claude's input box with before every paste. */
+const CLEAR_INPUT_BOX = "\u0015";
+
 class FakePty {
   readonly pid: number;
-  readonly writes: string[] = [];
+  /** Every key the runtime sent, in order, the clear before each prompt included. */
+  readonly keystrokes: string[] = [];
   killed = false;
+
+  /**
+   * The same without that clear. Nearly every test here counts or names the writes one prompt makes, and
+   * a key sent ahead of all of them says nothing about any one of them; the tests about the clear itself
+   * read `keystrokes`.
+   */
+  get writes(): string[] {
+    return this.keystrokes.filter((write) => write !== CLEAR_INPUT_BOX);
+  }
+
   private readonly dataHandlers: Array<(data: string) => void> = [];
   private readonly exitHandlers: Array<(event: { exitCode: number; signal?: number }) => void> = [];
   private readonly writeHandler: ((data: string) => void) | undefined;
@@ -26,7 +40,7 @@ class FakePty {
 
   write(data: string | Buffer): void {
     const text = data.toString();
-    this.writes.push(text);
+    this.keystrokes.push(text);
     this.writeHandler?.(text);
   }
 
@@ -65,7 +79,8 @@ function createConnection(updates: SessionNotification[]): AgentSideConnection {
     sessionUpdate: async (update: SessionNotification) => {
       updates.push(update);
     },
-  } as AgentSideConnection;
+    extNotification: async () => undefined,
+  } as unknown as AgentSideConnection;
 }
 
 test("keeps three parallel PTYs, hooks, cancellation, and attachments isolated", async () => {
@@ -235,6 +250,7 @@ test("asks through ACP before accepting Claude workspace trust", async () => {
       permissionRequests.push(request);
       return { outcome: { outcome: "selected", optionId: "trust-workspace" } };
     },
+    extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
     const sessionId = args[args.indexOf("--session-id") + 1]!;
@@ -290,6 +306,7 @@ test("never confirms workspace trust unless Claude visibly selects Yes", async (
   const connection = {
     sessionUpdate: async () => undefined,
     requestPermission: async (): Promise<RequestPermissionResponse> => ({ outcome: { outcome: "selected", optionId: "trust-workspace" } }),
+    extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   const agent = new ClaudeTtyAgent(connection, {
     spawnPty: () => {
@@ -326,6 +343,7 @@ test("fails closed when Claude workspace trust is denied", async () => {
   const connection = {
     sessionUpdate: async () => undefined,
     requestPermission: async (): Promise<RequestPermissionResponse> => ({ outcome: { outcome: "selected", optionId: "deny-workspace" } }),
+    extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   const agent = new ClaudeTtyAgent(connection, {
     spawnPty: () => {
@@ -386,6 +404,49 @@ test("applies native model and mode controls and restarts an idle session", asyn
     assert.equal(spawns.length, 2);
     assert.deepEqual(spawns[1]!.args.slice(0, 6), ["--resume", created.sessionId, "--model", "sonnet", "--permission-mode", "plan"]);
     assert.equal(spawns[0]!.pty.writes.at(-1), "\u0004");
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("launches Claude at the effort a config option chose and restarts an idle session to change it", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-effort-test-"));
+  const spawns: SpawnRecord[] = [];
+  const updates: SessionNotification[] = [];
+  let agent!: ClaudeTtyAgent;
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    let pty!: FakePty;
+    pty = new FakePty(4200 + spawns.length, (data) => {
+      if (data === "") setImmediate(() => pty.emitExit());
+    });
+    spawns.push({ file, args, options, pty });
+    const idFlag = args.includes("--resume") ? "--resume" : "--session-id";
+    const sessionId = args[args.indexOf(idFlag) + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+
+  try {
+    const created = await agent.newSession({ cwd: "/work/effort", mcpServers: [] });
+    const set = await agent.setSessionConfigOption({ sessionId: created.sessionId, configId: "effort", value: "xhigh" });
+    assert.equal(set.configOptions.find((option) => option.category === "thought_level")?.currentValue, "xhigh");
+
+    const turn = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "think it over" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+    assert.deepEqual(spawns[0]!.args.slice(0, 4), ["--session-id", created.sessionId, "--effort", "xhigh"]);
+    await assert.rejects(agent.setSessionConfigOption({ sessionId: created.sessionId, configId: "effort", value: "low" }), /active turn/);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "thought" });
+    await turn;
+
+    await agent.setSessionConfigOption({ sessionId: created.sessionId, configId: "model", value: "claude-opus-5" });
+    assert.equal(spawns.length, 2);
+    assert.deepEqual(spawns[1]!.args.slice(0, 6), ["--resume", created.sessionId, "--model", "claude-opus-5", "--effort", "xhigh"]);
+    assert.equal(updates.filter((update) => update.update.sessionUpdate === "config_option_update").length, 2);
+
+    await assert.rejects(agent.setSessionConfigOption({ sessionId: created.sessionId, configId: "verbosity", value: "loud" }), /Unsupported configuration option verbosity/);
+    await assert.rejects(agent.setSessionConfigOption({ sessionId: created.sessionId, configId: "model", type: "boolean", value: true }), /not a boolean/);
   } finally {
     await agent.close();
     await rm(runtimeRoot, { force: true, recursive: true });
@@ -580,9 +641,10 @@ test("delivers the assistant text before an interactive hook prompts", async () 
     },
     requestPermission: async (_request: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
       textWhenAsked.push(...assistantText(updates));
-      return { outcome: { outcome: "selected", optionId: "answer-0" } };
+      return { outcome: { outcome: "selected", optionId: "answer-0-0" } };
     },
-  } as AgentSideConnection;
+    extNotification: async () => undefined,
+  } as unknown as AgentSideConnection;
   agent = new ClaudeTtyAgent(connection, {
     spawnPty,
     runtimeRoot,
@@ -662,6 +724,63 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<voi
   }
 }
 
+test("clears what an interrupt left in Claude's input box before pasting the next prompt", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-clear-box-test-"));
+  let agent!: ClaudeTtyAgent;
+  let pty!: FakePty;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    pty = new FakePty(6100);
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    // Claude as it stands after an interrupt: the prompt it was answering is back in the input box, where
+    // a bracketed paste would land on the end of it rather than in place of it.
+    setImmediate(() => pty.emitData("\u001b[2J\u001b[H\u276f the message before this one\r\n  \u23f8 manual mode on\r\n"));
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/clear", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => pty !== undefined && pty.writes.length === 2);
+    // The clear goes first, so what Claude reads is this prompt and not it run together with the old one.
+    assert.deepEqual(pty.keystrokes, [CLEAR_INPUT_BOX, "\u001b[200~hello \u001b[201~", "\r"]);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("clears the input box even when nothing is showing in it", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-clear-empty-test-"));
+  let agent!: ClaudeTtyAgent;
+  let pty!: FakePty;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    pty = new FakePty(6200);
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => pty.emitData("\u001b[2J\u001b[H\u276f\r\n  \u23f8 manual mode on\r\n"));
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/clear-empty", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => pty !== undefined && pty.writes.length === 2);
+    // Unconditional, because the screen is sampled: a paste too recent to have been drawn is exactly the
+    // residue worth clearing, and an empty box costs nothing to clear.
+    assert.equal(pty.keystrokes[0], CLEAR_INPUT_BOX);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
 test("resubmits a prompt Claude leaves sitting in its input box", async () => {
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-test-"));
   const updates: SessionNotification[] = [];
@@ -688,6 +807,78 @@ test("resubmits a prompt Claude leaves sitting in its input box", async () => {
     assert.deepEqual(await turn, { stopReason: "end_turn" });
     assert.equal(submits, 2);
     assert.equal(pty.writes[0], "\u001b[200~hello there \u001b[201~");
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+// The screens Claude paints around a prompt, spelled here rather than inline: what these tests turn on
+// is which of them arrives when.
+const ESC_SEQ = String.fromCharCode(27);
+const CLEARED = `${ESC_SEQ}[2J${ESC_SEQ}[H`;
+const EMPTY_INPUT_BOX = `${CLEARED}\u276f\r\n`;
+const INPUT_BOX_HOLDING = `${CLEARED}\u276f hello there\r\n`;
+
+test("sends a prompt Claude echoed only after the first submit key, rather than leaving it in the box", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-late-paste-test-"));
+  const updates: SessionNotification[] = [];
+  let agent!: ClaudeTtyAgent;
+  let pty!: FakePty;
+  let submits = 0;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    pty = new FakePty(2100, (text) => {
+      // The paste is read and the box stays empty: Claude has not settled it into a render yet.
+      if (text.startsWith(`${ESC_SEQ}[200~`)) pty.emitData(EMPTY_INPUT_BOX);
+      if (text !== "\r") return;
+      submits += 1;
+      // The first submit key lands on that empty box and sends nothing; the echo turns up behind it.
+      pty.emitData(submits === 1 ? INPUT_BOX_HOLDING : EMPTY_INPUT_BOX);
+    });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, latePasteMs: 500, contextRefreshTimeoutMs: 0 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/late", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello there" }] });
+    await waitFor(() => submits === 2, 5_000);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+    assert.equal(submits, 2);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("fails a prompt Claude never took, and leaves the session able to take the next one", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-lost-paste-test-"));
+  const updates: SessionNotification[] = [];
+  let agent!: ClaudeTtyAgent;
+  let pty!: FakePty;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    // The box is on screen and stays empty however often the prompt is pasted into it: the paste is gone.
+    pty = new FakePty(2200, () => pty.emitData(EMPTY_INPUT_BOX));
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, latePasteMs: 50, contextRefreshTimeoutMs: 0 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/lost", mcpServers: [] });
+    await assert.rejects(
+      agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello there" }] }),
+      /never took the prompt/,
+    );
+    // The turn the lost prompt opened is gone with it, rather than holding the session busy for good.
+    await assert.rejects(
+      agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "anyone there" }] }),
+      /never took the prompt/,
+    );
   } finally {
     await agent.close();
     await rm(runtimeRoot, { force: true, recursive: true });
@@ -932,7 +1123,7 @@ test("says nothing about the context when the session closes while the wait is r
         closing = agent.close();
       });
     },
-  } as AgentSideConnection;
+  } as unknown as AgentSideConnection;
   agent = new ClaudeTtyAgent(connection, { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 500 });
 
   try {
@@ -993,6 +1184,7 @@ test("keeps a stop that lands while the turn's last message is still in flight",
       const update = notification.update as { sessionUpdate?: string; content?: { text?: string } };
       if (update.sessionUpdate === "agent_message_chunk" && update.content?.text === "done") await agent.cancel({ sessionId });
     },
+    extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
     const pty = new FakePty(4000 + spawns.length);
@@ -1067,6 +1259,7 @@ test("does not let stopped waits count towards giving up on a session's readings
       const update = notification.update as { sessionUpdate?: string; content?: { text?: string } };
       if (stopEveryWait && update.sessionUpdate === "agent_message_chunk" && update.content?.text === "done") await agent.cancel({ sessionId });
     },
+    extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
     const pty = new FakePty(4200 + spawns.length);
@@ -1245,6 +1438,7 @@ test("leaves a session running while a card is still waiting on the person who h
   const connection = {
     sessionUpdate: async () => undefined,
     requestPermission: () => new Promise<RequestPermissionResponse>((resolve) => (answer = resolve)),
+    extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   agent = new ClaudeTtyAgent(connection, {
     spawnPty,
@@ -1279,7 +1473,7 @@ test("leaves a session running while a card is still waiting on the person who h
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     assert.equal(agent.sessions.get(created.sessionId)?.started, true);
 
-    answer!({ outcome: { outcome: "selected", optionId: "answer-0" } });
+    answer!({ outcome: { outcome: "selected", optionId: "answer-0-0" } });
     const decision = (await question) as { hookSpecificOutput?: { permissionDecision?: string } };
     assert.equal(decision.hookSpecificOutput?.permissionDecision, "allow");
   } finally {
@@ -1804,6 +1998,294 @@ test("goes on waiting for an agent inside its bound after giving up on the comma
   }
 });
 
+test("takes a message during a turn held for a background agent without interrupting Claude", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-chat-during-agent-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/agents-chat";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawned = new FakePty(3750);
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return spawned;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "launch an agent" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    await writeFile(
+      path.join(projectDirectory, `${session.sessionId}.jsonl`),
+      `${[
+        JSON.stringify({
+          type: "assistant",
+          uuid: "launcher",
+          message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Count the files" } }] },
+        }),
+        JSON.stringify({
+          type: "user",
+          uuid: "launched",
+          toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+          message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+        }),
+      ].join("\n")}\n`,
+    );
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
+
+    // Claude is back at its prompt and the turn is only being held so the agent's report has somewhere to
+    // land, which is how every message sent while a subagent runs arrives: Paseo cancels, then re-prompts.
+    await agent.cancel({ sessionId: session.sessionId });
+    assert.deepEqual(await turn, { stopReason: "cancelled" });
+    const keys = (spawned as unknown as FakePty).keystrokes;
+    assert.ok(!keys.includes("\u001b"), `a held turn was cancelled with an Escape: ${JSON.stringify(keys)}`);
+
+    // And the message that replaces it goes in as an ordinary prompt, with the agent still waited on.
+    const second = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "what do you think?" }] });
+    await waitFor(() => (spawned as unknown as FakePty).writes.length === 4);
+    assert.equal((spawned as unknown as FakePty).writes[2], "\u001b[200~what do you think? \u001b[201~");
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "ANSWERED" });
+    await agent.cancel({ sessionId: session.sessionId });
+    assert.deepEqual(await second, { stopReason: "cancelled" }, "the second turn is held for the same agent, which is still running");
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("goes on holding the turn for a command the agent backgrounded, after the agent itself reported", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-agent-shell-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/agent-shell";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawned = new FakePty(3780);
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return spawned;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    subagentPollMs: 10,
+    subagentWakeMs: 20,
+    subagentSilenceMs: 5_000,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const transcript = path.join(projectDirectory, `${session.sessionId}.jsonl`);
+    const first = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "count to sixty" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    const records = [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "launcher",
+        message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Count" } }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched",
+        toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+      }),
+    ];
+    await writeFile(transcript, `${records.join("\n")}\n`);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
+
+    // The agent backgrounds the counting itself and reports the moment it has launched it, so its own
+    // report says nothing about whether the work is over.
+    const subagents = subagentsDirectory(transcript);
+    await mkdir(subagents, { recursive: true });
+    await writeFile(
+      path.join(subagents, "agent-a1.jsonl"),
+      `${JSON.stringify({ type: "user", uuid: "bg", toolUseResult: { stdout: "", stderr: "", backgroundTaskId: "b9" } })}\n`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    records.push(
+      JSON.stringify({
+        type: "user",
+        uuid: "agent-done",
+        message: { content: "<task-notification> <task-id>a1</task-id> <status>completed</status> <summary>Agent finished</summary> </task-notification>" },
+      }),
+    );
+    await writeFile(transcript, `${records.join("\n")}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // A message now, which is what the session's own turn ends on. The command is still running, so it holds.
+    await agent.cancel({ sessionId: session.sessionId });
+    assert.deepEqual(await first, { stopReason: "cancelled" });
+    const second = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "is it done?" }] });
+    let settled = false;
+    void second.then(() => {
+      settled = true;
+    });
+    await waitFor(() => (spawned as unknown as FakePty).writes.length === 4);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "STILL GOING" });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(settled, false, "the session read as done while a command its agent backgrounded was still running");
+
+    // It ends when that command reports, at the Stop of the turn that answered for it.
+    // Only as a queue record: a command a subagent backgrounded is never reported in a user turn, and the
+    // `queued_command` attachment beside it carries what was queued as a prompt rather than this.
+    records.push(
+      JSON.stringify({
+        type: "queue-operation",
+        operation: "enqueue",
+        uuid: "shell-done",
+        content: "<task-notification> <task-id>b9</task-id> <status>completed</status> <summary>Background command completed (exit code 0)</summary> </task-notification>",
+      }),
+    );
+    await writeFile(transcript, `${records.join("\n")}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "It counted to sixty." });
+    // Bounded, so a wait that never ends fails here rather than hanging the run.
+    await waitFor(() => settled, 2_000);
+    assert.deepEqual(await second, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("puts an agent back to work when Claude sends it another message", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-agent-resume-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/agent-resume";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawned = new FakePty(3790);
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return spawned;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), {
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    subagentPollMs: 10,
+    subagentWakeMs: 1_000,
+    subagentSilenceMs: 5_000,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const transcript = path.join(projectDirectory, `${session.sessionId}.jsonl`);
+    const first = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "start an agent" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    const records = [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "launcher",
+        message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Watch" } }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched",
+        toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+      }),
+    ];
+    await writeFile(transcript, `${records.join("\n")}\n`);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
+
+    // Claude notifies every time an agent stops, and the same agent may notify many times over. This one
+    // closes the card, and the turn that was holding for it ends.
+    records.push(
+      JSON.stringify({
+        type: "user",
+        uuid: "agent-stopped",
+        message: { content: "<task-notification> <task-id>a1</task-id> <status>completed</status> <summary>Agent finished</summary> </task-notification>" },
+      }),
+    );
+    await writeFile(transcript, `${records.join("\n")}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "IT REPORTED" });
+    assert.deepEqual(await first, { stopReason: "end_turn" });
+
+    // The turn that replaces it sends the agent another message, which starts it again.
+    const second = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "ask it how far it got" }] });
+    let settled = false;
+    void second.then(() => {
+      settled = true;
+    });
+    await waitFor(() => (spawned as unknown as FakePty).writes.length === 4);
+    records.push(
+      JSON.stringify({
+        type: "assistant",
+        uuid: "messenger",
+        message: { content: [{ type: "tool_use", id: "message-tool", name: "SendMessage", input: { to: "a1" } }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "messaged",
+        toolUseResult: { success: true, message: "Resuming agent a1", resumedAgentId: "a1", pin: { id: "a1" } },
+        message: { content: [{ type: "tool_result", tool_use_id: "message-tool", content: [] }] },
+      }),
+    );
+    await writeFile(transcript, `${records.join("\n")}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "ASKED IT" });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(settled, false, "the session read as done while the agent it had just messaged was running again");
+
+    // And the agent's next report is what closes it, as it was the first time.
+    records.push(
+      JSON.stringify({
+        type: "user",
+        uuid: "agent-stopped-again",
+        message: { content: "<task-notification> <task-id>a1</task-id> <status>completed</status> <summary>Agent finished</summary> </task-notification>" },
+      }),
+    );
+    await writeFile(transcript, `${records.join("\n")}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "It got to twenty-seven." });
+    await waitFor(() => settled, 2_000);
+    assert.deepEqual(await second, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test("a turn waiting on a background agent still cancels at once", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-cancel-test-"));
   const configDirectory = path.join(root, "claude");
@@ -2311,6 +2793,7 @@ test("asks through ACP before accepting Claude's bypass permissions disclaimer",
       permissionRequests.push(request);
       return { outcome: { outcome: "selected", optionId: "accept-bypass" } };
     },
+    extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
     const sessionId = args[args.indexOf("--session-id") + 1]!;
@@ -2370,6 +2853,7 @@ test("leaves a session in another mode alone when its screen only quotes the dis
       permissionRequests.push(request);
       return { outcome: { outcome: "selected", optionId: "accept-bypass" } };
     },
+    extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   agent = new ClaudeTtyAgent(connection, {
     spawnPty: (_file: string, args: string[]) => {
@@ -2408,6 +2892,7 @@ test("fails the start rather than run in another mode when the bypass disclaimer
   const connection = {
     sessionUpdate: async () => undefined,
     requestPermission: async (): Promise<RequestPermissionResponse> => ({ outcome: { outcome: "selected", optionId: "deny-bypass" } }),
+    extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   const agent = new ClaudeTtyAgent(connection, {
     spawnPty: () => {
@@ -2451,6 +2936,7 @@ test("lets a cancelled session go when nobody answers the bypass disclaimer", { 
       asked = true;
       return new Promise<RequestPermissionResponse>(() => undefined);
     },
+    extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   const agent = new ClaudeTtyAgent(connection, {
     spawnPty: () => {

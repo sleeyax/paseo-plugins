@@ -3,7 +3,7 @@
 Run the genuine interactive Claude Code CLI as a native Paseo agent.
 
 Paseo speaks [ACP](https://agentclientprotocol.com) to this adapter, and the adapter keeps a single real `claude` process in a PTY per session.
-It translates that process's transcripts and hooks into native Paseo messages, reasoning, tool calls, plans, permissions, models, modes, slash commands, attachments, cancellation, and history.
+It translates that process's transcripts and hooks into native Paseo messages, reasoning, tool calls, plans, permissions, models, modes, effort levels, slash commands, attachments, cancellation, and history.
 There is no `claude -p` and no Claude Agent SDK anywhere in the path.
 
 ## Why?
@@ -21,72 +21,26 @@ The price is that every native affordance has to be reconstructed from terminal 
 - Node.js 22 or newer
 - pnpm
 - A current Claude Code CLI, authenticated on the same host as the Paseo daemon
-- A Paseo version that supports custom ACP providers
+- Paseo 0.8 or newer
 
 ## Installation
 
-Setup is host-local: the adapter runs wherever the Paseo daemon runs, so repeat every step below on each host that should offer Claude.
+The adapter is installed through the [Claude TTY plugin](../../plugins/claude-tty): `paseo plugin add sleeyax/paseo-plugins --path plugins/claude-tty` clones this repository, builds the adapter, and registers it as the `claude-tty` provider.
+The plugin's README covers installing, updating and removing it, and upgrading a host that registered this adapter in its Paseo configuration by hand.
+
+Setup is host-local: the adapter runs wherever the Paseo daemon runs, so install the plugin on each host that should offer Claude.
 See [Multiple hosts](#multiple-hosts) for what that means in practice.
 
-The [Claude Code plugin](../../plugins/claude-tty) does all of this from Paseo's sidebar, on whichever host is selected, and manages the provider entry afterwards.
-Install it instead if you would rather not run the steps below by hand; you still have to authenticate Claude yourself, as in [step 2](#2-authenticate-claude).
-
-### 1. Build the adapter
-
-```sh
-git clone https://github.com/sleeyax/paseo-plugins.git /opt/paseo-plugins
-cd /opt/paseo-plugins
-pnpm install --frozen-lockfile
-pnpm --filter @paseo-plugins/claude-tty-acp build
-/opt/paseo-plugins/apps/claude-tty-acp/bin/claude-tty-acp --diagnose
-```
-
-### 2. Authenticate Claude
+### Authenticate Claude
 
 Run `claude` interactively as the same OS user that runs the Paseo daemon, and complete authentication before using the provider.
 If the daemon runs through systemd, SSH into that account or use an equivalent login shell so Claude writes its credentials into the correct home directory.
-
-### 3. Register the provider
-
-Add the provider to that host's Paseo configuration:
-
-```json
-{
-  "agents": {
-    "providers": {
-      "traecli": {
-        "extends": "acp",
-        "label": "Claude Code (interactive)",
-        "command": [
-          "/opt/paseo-plugins/apps/claude-tty-acp/bin/claude-tty-acp"
-        ],
-        "params": {
-          "supportsMcpServers": false
-        }
-      }
-    }
-  }
-}
-```
-
-Restart or reload the Paseo daemon afterwards.
-
-A few details in that snippet are deliberate:
-
-- `supportsMcpServers: false` refers only to MCP servers that Paseo injects over ACP, which a running interactive Claude process cannot adopt.
-  Claude's own MCP servers are unaffected; it loads them from its usual configuration at startup.
-- The provider ID is `traecli` because Paseo special-cases that ID when listing slash commands.
-  See [slash commands need a borrowed provider ID](#slash-commands-need-a-borrowed-provider-id) before choosing another.
-
-`label` is what the agent view displays, so it can say anything.
 
 ### Multiple hosts
 
 Hosts share nothing: no processes, ports, locks, state, credentials, paths, or sessions.
 Selecting a VPS in a client makes that VPS's daemon launch its own adapter and Claude process, read the VPS's Claude configuration and transcripts, and stream ACP back to the client.
 The same provider ID is therefore safe to use everywhere.
-
-The `command` path must be absolute and must exist on the selected host; it is never resolved against the client machine.
 
 ## Environment
 
@@ -97,6 +51,8 @@ The adapter inherits the Paseo daemon's environment.
 | `CLAUDE_BIN` | Absolute path to Claude when the daemon's `PATH` cannot find `claude`. |
 | `CLAUDE_CONFIG_DIR` | Existing Claude configuration, credentials, plugins, commands, skills, and transcript root. |
 | `CLAUDE_TTY_ACP_STATE_DIR` | Adapter session mappings and locks; defaults to the host's XDG state directory. |
+| `CLAUDE_TTY_HOST_SESSION` | `1` runs this agent's session beside the adapter even where the host would otherwise put it in a container. See [Sessions in a container](#sessions-in-a-container). |
+| `TOOLCHAIN_BOX_BIN` | The `toolchain-box` the adapter asks where a session runs; defaults to `~/.local/bin/toolchain-box`, and where there is none every session runs beside the adapter. |
 | `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` | Stop an idle session's native Claude process after this many milliseconds. Overrides the Claude TTY plugin's saved setting; without either, the default is `3600000` (one hour). Set to `0` to disable suspension. A value that is not a whole number of milliseconds in range is logged and ignored rather than fatal. |
 | `XDG_STATE_HOME` | Base for adapter state when `CLAUDE_TTY_ACP_STATE_DIR` is unset. |
 
@@ -107,6 +63,8 @@ For a systemd service, set `CLAUDE_BIN` to the output of `command -v claude` in 
 Paseo session IDs stay stable even though Claude's own session ID can rotate after `/clear`.
 The mapping is persisted only after the first real prompt, so provider probes leave no saved sessions behind.
 Loading a session replays its transcript and launches `claude --resume` lazily on the next prompt.
+The replay goes out *after* `session/load` has answered, never before: until that answer the client has no session to put an update on, and everything sent ahead of it is dropped -- which is a resumed session coming up with an empty timeline while Claude still holds the whole conversation.
+A replay that fails costs the timeline rather than the session, which is left open to carry on.
 
 Each active session owns an isolated PTY, hook route, transcript reader, permission bridge, lock, and attachment directory.
 Sessions run concurrently, work inside a single session stays serialized, and a second adapter process cannot open a session that is already active on the host.
@@ -119,24 +77,43 @@ The next prompt launches `claude --resume <id>` automatically, so the conversati
 Quiet is observed rather than inferred from prompts: the clock runs from the last thing the session actually did, whether that was the end of a prompt, a hook Claude called, a record it wrote, a turn it was woken for by a task notification, or a step one of its background agents took.
 A prompt is only what Paseo asked for; Claude goes on working after one — answering for an agent that reported, launching the next — and a suspension measured from the prompt alone stopped exactly that work an hour into it, mid-run.
 
-The timeout is read at each suspension rather than once at startup: `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` if it is set, otherwise `idleTimeoutMs` in `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/claude-tty/settings.json`, which is what the Claude TTY plugin's panel writes.
-Reading it per suspension is what lets a change in that panel reach a session that is already connected, and it is also why an unreadable file or a malformed variable leaves the session running rather than taking the adapter down.
+The timeout is read at each suspension rather than once at startup: `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` if it is set, otherwise `values.idleTimeoutMs` in the JSON document named by `--settings-file`, which is where Paseo stores the Claude TTY plugin's settings and which that plugin passes when it spawns the adapter.
+Reading it per suspension is what lets a change on that settings screen reach a session that is already connected, and it is also why an unreadable document or a malformed variable leaves the session running rather than taking the adapter down.
+An adapter started without `--settings-file` — by hand, or by anything that is not that plugin — has the variable and the default and nothing else.
 
 A suspension waits for its session to be genuinely idle. It stands aside while a turn is running and while a permission or question card is still waiting for an answer — stopping Claude then would cancel the request behind that card and leave it on screen in Paseo answering to nothing — and a suspension that fails re-arms rather than giving up, because giving up once would keep that process alive for the rest of its life.
 
-## Models and modes
+## Models, modes and effort
 
 The model selector offers Claude Code's rolling aliases — `inherit`, `opus`, `fable`, `sonnet`, `haiku` — plus the full catalog that Paseo's native Claude provider exposes, including explicit releases and 1M-context variants.
 Claude Code has no supported way to list models without opening an interactive session, so that catalog is versioned with the adapter while the aliases keep following Claude's.
 
 The mode selector offers Default, Accept Edits, Plan, Auto, and Bypass Permissions.
 
+The effort selector offers Claude Code's own `--effort` levels — Low, Medium, High, Extra high and Max — ahead of a Default that passes no flag and leaves Claude at whatever its settings name.
+Paseo shows it as the session's thinking level.
+
 Bypass Permissions is last and named for what it does: nothing stops a command before it runs, which is why it is a mode a person picks per session rather than a default.
 Claude gates it behind a disclaimer it keeps once per host, so the first session that asks for the mode raises a card in Paseo carrying the same warning; accepting it answers Claude's dialog, declining it fails the session start rather than quietly running in another mode.
 Because Claude remembers the answer, the card appears once on a host and never again — including for the scheduled, unattended sessions the mode exists for.
 
-Changing either control before launch changes startup flags.
+Changing any of the three before launch changes startup flags.
 Changing one while idle restarts and resumes Claude with deterministic flags, and changing one during a turn is rejected.
+
+All three are published twice, because the two ACP bridges Paseo can run this adapter on read different fields.
+`session/new` answers with the older `models` and `modes` state *and* with `configOptions` carrying a `model` selector and a `thought_level` one, and the adapter serves both `session/set_model` and `session/set_config_option`.
+The daemon's own bridge prefers `models` and takes the effort levels only from the config options; the bridge a Paseo plugin provider runs on reads `configOptions` and nothing else, and would show an empty model picker without them.
+
+### Auto Accept
+
+`configOptions` also carries `auto_accept`, a boolean the plugin provider's bridge shows as a toggle on the agent, with the ID Paseo gives its own ACP providers' toggle.
+While it is on, a `PermissionRequest` is answered with Allow once instead of a card, and none of Claude's permission suggestions are applied, so switching it off again leaves no rule behind.
+That covers the prompts Claude Code keeps even in Bypass Permissions mode, such as a removal of the working directory's contents; `AskUserQuestion` and `ExitPlanMode` are for a person and still raise their cards.
+
+A session nobody has switched follows the plugin's settings for its current mode: `values.bypassAutoAccept` (`on` or `off`) for a Bypass Permissions session, and otherwise `values.autoAccept`, both in the document named by `--settings-file`.
+They are read again at every request and whenever the mode changes, and the session publishes a `config_option_update` when the answer moves, so the toggle shows what the next request gets.
+Without a readable document the answer is off.
+Switching the toggle is taken even mid-turn, restarts nothing, and is saved with the session, after which the settings no longer apply to it.
 
 ## Prompt content
 
@@ -152,11 +129,11 @@ Paseo ──ACP over stdio──► claude-tty-acp ──keystrokes over a PTY�
         hooks over loopback HTTP┘    └transcript JSONL, polled
 ```
 
-The daemon starts one adapter process per provider connection, and that process speaks ACP as newline-delimited JSON on stdout while its structured logs go to stderr — and, because the daemon reads stderr and keeps none of it, to `logs/claude-tty-acp.log` under the state directory as well, where every process on the host appends with its pid and a full file is moved aside once.
-Every session of that connection lives in that one process, and each session owns its own `claude` process in a PTY.
+The plugin starts one adapter process per ACP session, and that process speaks ACP as newline-delimited JSON on stdout while its structured logs go to stderr — and, because the daemon reads stderr and keeps none of it, to `logs/claude-tty-acp.log` under the state directory as well, where every process on the host appends with its pid and a full file is moved aside once.
+The session owns its own `claude` process in a PTY.
 
 A session starts empty: `session/new` returns an ID immediately and launches nothing, so a provider probe or an untouched draft never spawns Claude.
-The first prompt launches `claude --session-id <id>` and later launches reuse `claude --resume <id>`, with the model and mode selectors translated into `--model` and `--permission-mode`.
+The first prompt launches `claude --session-id <id>` and later launches reuse `claude --resume <id>`, with the model, mode and effort selectors translated into `--model`, `--permission-mode` and `--effort`.
 
 Every launch gets a private runtime directory holding a generated `settings.json` and hook client, passed with `--settings`, so the adapter registers its hooks and its status line without touching the user's Claude configuration.
 No global hooks are required; remove any legacy hooks left in `~/.claude/settings.json` after uninstalling the old panel plugin.
@@ -166,7 +143,7 @@ Approving the card selects **Yes, I trust this folder** in the PTY and gives Cla
 
 Readiness also requires the screen to have stopped changing, and that is not a nicety.
 A resumed session paints its entire conversation before its input box exists, and text inside that conversation can satisfy every readiness signal on its own — a footer quoted in a message, a token count, the words `auto mode on`.
-A prompt pasted into that window is dropped, and because the paste never echoes there is nothing for the submit loop to notice: the adapter presses Enter once into whatever has focus and the turn then waits for a `Stop` hook that is never coming.
+A prompt pasted into that window is dropped, and the paste then never echoes -- which is the one thing the submit loop reads, and now what it refuses to proceed without.
 
 The second thing a resume can stop at is Claude asking how to open a long or old conversation — **Resume from summary**, **Resume full session as-is**, **Don't ask me again** — and the idle timeout guarantees every long-lived session eventually meets it.
 The adapter answers it the same way it answers the trust screen, by moving the selection and pressing Enter, and it always keeps the full session: the conversation is the ACP session it was asked to restore, and a summary would silently replace the history Paseo has already replayed into its timeline.
@@ -177,11 +154,22 @@ Slash commands are the one thing the adapter never asks Claude for: an interacti
 ### Prompts go in as keystrokes
 
 A prompt is flattened into one block of text: images and embedded resources become files in the runtime directory referenced as `@path`, and host-local resource links become `@path` directly.
-The adapter writes that text into the PTY wrapped in bracketed paste, waits briefly, then writes Enter, exactly as a person pasting into the terminal would.
+The adapter clears Claude's input box with Ctrl-U, writes that text into the PTY wrapped in bracketed paste, waits briefly, then writes Enter, exactly as a person pasting into the terminal would.
+The clear is what keeps a prompt from being read as the end of another one: Claude appends a bracketed paste to whatever the box already holds, and the box is not reliably empty -- interrupting a turn puts the prompt it interrupted back for editing, and a submit a cancel abandons between its paste and its Enter leaves that paste behind.
+Paseo interrupts before it replaces a turn, so in a session it is steering both are one message away, and what Claude would otherwise receive is the two run together as a single prompt nobody wrote.
+It goes in whatever the screen shows, because the screen is sampled and a paste too recent to have been drawn is exactly the residue worth clearing; a box that did have something in it is named in the log.
 The paste ends with a space so Claude's completion menu is closed rather than swallowing that Enter, and the adapter watches its input box on the headless screen and presses Enter again while the prompt is still sitting there, because Claude drops the key while it is settling a paste.
 
+That echo is also what says the prompt went in at all, and it is not always prompt: Claude reads a bracketed paste at once but only shows it a render later, and on a loaded host that render is what slips.
+An Enter sent before it lands sends nothing, and the prompt turns up afterwards in a box nothing will press Enter on again -- so the adapter waits for a late echo rather than assuming there is not one coming, and submits it properly when it arrives.
+If the echo never arrives, or the box will not let go of the prompt after every attempt, the prompt fails instead of returning: every way a turn ends is a hook Claude fires, so a prompt Claude never took ends nothing, and the session would show as working for the rest of its life with the message gone and no line written anywhere.
+The turn it opened is released with it, so the session takes the next prompt normally.
+A screen that has painted nothing at all is not read as an empty box -- it says nothing either way -- and a prompt the box was seen to let go of between two samples is checked against the session's own activity before it is called lost.
+
 Cancellation is the same kind of impersonation: an Escape keystroke, plus a short fallback that ends the turn when no `Stop` hook follows.
-Changing the model or mode while idle sends Ctrl-D, waits for the process to exit, and relaunches with `--resume`, which is why the change survives as a real flag rather than an in-band command.
+A turn held open only for background work is the exception and is ended without one: Claude has answered and gone back to its prompt, so there is no foreground to interrupt, and an Escape there stops nothing a subagent is doing while rewinding the turn Claude just finished and putting its prompt back in the input box.
+Since Paseo cancels before it replaces a turn, that is the path every message sent while a subagent is still running takes, which is what makes chatting with a session during its background work work at all.
+Changing the model, mode or effort while idle sends Ctrl-D, waits for the process to exit, and relaunches with `--resume`, which is why the change survives as a real flag rather than an in-band command.
 
 ### Output comes out of the transcript
 
@@ -190,6 +178,11 @@ Claude appends its own JSONL transcript under its projects directory, and the ad
 
 A translator turns each record into an ACP session update — user and agent chunks, thinking, tool calls with diffs and file locations, `TodoWrite` into a plan, token usage into a context-window update — and dedupes by record key so re-reads and history replay never emit the same thing twice.
 Loading a persisted session runs that translator over the whole file to rebuild the conversation, and still launches nothing until the next prompt.
+
+Every tool-call update goes out twice: once as the ACP update, and just ahead of it as a copy on the vendor method `_claude_tty/tool_call`.
+Paseo has two ACP bridges and only one of them reads a tool call whole.
+Its own builds a card out of the update's `kind`, `content` blocks and `locations`; the one behind the plugin SDK's `runAcpProvider` keeps `rawInput` and `rawOutput`, renders every call as an edit or as raw JSON, and drops the rest before any hook it offers can see it.
+The copy is the only way a plugin gets those fields back, and a client that has no use for it ignores it, which is what both of Paseo's bridges do with an extension they were not written for.
 
 A message typed while Claude is working is the one thing that is not written as a turn.
 Claude absorbs it mid-turn, at its next tool result, and writes a `queued_command` attachment there: no user turn ever carries the message, and it reaches the transcript nowhere else, so that attachment is the only record of it.
@@ -212,6 +205,9 @@ Where that notification is written depends on what the session was doing when th
 Both are read, since reading the turn alone loses every agent that finished while Claude was working, and the same notification is written many times over — queued, delivered, and rewritten at every turn boundary the queue survives — so it is read as news only while the card it names is still open.
 Anything but a clean finish leaves the call failed.
 An agent Claude stops itself, with `TaskStop`, is closed on that stop instead: a stopped agent writes no report and sends no notification, so nothing else would ever close its card, and it would go on being counted as running until the bound below gave up on it.
+A notification is not the end of an agent, only of a run of one: Claude notifies each time an agent stops with no live background children of its own, and a message sent to a stopped agent starts it again, so the same task id may notify many times over.
+So a message Claude sends an agent reopens its card and holds the turn again, and the agent's next notification closes it as the first one did. Claude names the agent outright when the message resumes a stopped one, and names it in the pin it answers with when the message is queued for one that is still going; both are read the same way, since either says the agent is going to run.
+Only an agent this session already knows is reopened, and never one a turn has given up on -- that turn stopped counting it deliberately, and every later turn would hold for a poll interval and give up again in the same breath.
 
 The session's turn is held open for as long as any of those agents is still running.
 Paseo reads a session as busy from the turn it has open and from nothing else — an ACP agent has no other way to say so — and Claude goes idle the moment it launches a background agent, so without this a session with ten minutes of work ahead of it reads as ready, and the answer Claude writes when the agent reports arrives outside any turn at all.
@@ -227,6 +223,11 @@ A command Claude runs in the background holds the turn open the same way, for th
 It is dispatched exactly as an asynchronous agent is — the tool answers with the id of a task still running, Claude goes idle, and it is woken by a `<task-notification>` when the command ends — so a turn that ends at the `Stop` in between leaves everything Claude does from the report onwards outside any turn, which is a session that reads as ready while it works.
 Claude records the id its report will name in `backgroundTaskId` beside the launching tool result, and the notification carries it as the `<task-id>`, so the two are joined the way an agent's launch and report are.
 The command has no card of its own: its tool call is the launch, which finished, and everything it does goes to a file the adapter does not follow.
+A command an *agent* backgrounds is waited on the same way, and has to be: the agent reports the moment it has launched one, so its own report says nothing about whether the work is over, and a session whose agent left a twenty-minute command running would otherwise read as done the moment that agent stopped.
+Its launch is in the agent's own transcript rather than the session's, which is where it is read from, and its notification arrives here naming it by task id, so it settles exactly as one of the session's own.
+That notification is the one report that never reaches a user turn: it is written only as a record of Claude's queue, alongside the `queued_command` attachment, which carries what was queued as a prompt rather than this.
+So those queue records are read too, for their notifications and nothing else -- without them a wait on a command an agent backgrounded would never end, and the session would read as busy for the rest of its life.
+The same notification is written on the way in, on the way out, and again at every turn boundary the queue survives, which costs nothing: a card is closed only while it is open, and ending a wait that has already ended changes nothing.
 A `TaskStop` naming its id ends the wait for it as it ends an agent's, since a stop names either through the one `task_id`.
 That is also why its bound is a flat thirty minutes from the moment the turn was held rather than a silence: a running command shows nothing to measure a silence against, and the bound starts again whenever a command is launched or reports.
 Thirty because backgrounding is what Claude does with a command precisely when it takes a while: on the sessions this was measured on the median command took four minutes and the longest genuine wait was a twenty-one minute code review, while the ones that ran for hours were servers and poll loops, which never report at all and are what the bound is there to let go of.
@@ -240,45 +241,66 @@ The adapter therefore checks the directory of every session it holds once a minu
 Every directory is watched for as long as its session lives, so one that comes back counts as there again and keeps the adapter standing.
 A directory that cannot be read for any other reason is still there, and no session is stopped over a failure to look.
 
+### Sessions in a container
+
+A host may decide that a session's working directory belongs in a container rather than beside the adapter.
+The adapter does not decide this and does not look: it runs `toolchain-box session <cwd>` and obeys the answer, because a working directory is something a container can write and a session that could talk its way onto the host would defeat the arrangement.
+A host with no such tool runs every session beside the adapter, which is what the adapter did before any of this.
+
+The answer is one of three.
+**Box** names the container, the `~/.claude` it writes into as the host sees it, and where the container mounts that; the adapter starts the box and then spawns `claude` through `toolchain-box exec`, which is a `podman exec` into it.
+The session is still the interactive TUI under a pty — `podman exec -t` carries the adapter's pty in — and a box that will not start fails the session rather than falling back to the host.
+**Host** runs it here.
+**Refuse** opens the session and ends its first turn instead, so that one refusal is not remembered against the provider itself, and `CLAUDE_TTY_HOST_SESSION=1` is the way to take the host for one agent anyway; Paseo's `paseo run --env` puts it in the agent's environment.
+The message is the host's: its `reason` for this directory, and a `guidance` line — how a project is given a container there, and where that policy is written — which only the host can know and which the adapter passes through untouched. A host that sends no `guidance` gets the adapter's own generic advice instead.
+
+Two things follow from the container not sharing this host's filesystem or its loopback:
+
+- Everything Claude reads at launch — its settings, the hook client, the status-line file, prompt attachments — goes in a runtime directory inside that mounted `~/.claude` rather than in this host's temporary directory, and every path written into the settings is the path the container sees. The adapter goes on reading its own side of the same files, and a transcript Claude reports at its own path is read back at the host's.
+- The hook server's loopback port is unreachable from the container, so a boxed session gets a second listener on a unix socket in that same runtime directory. It carries the same per-session route and is trusted no further than the port is.
+
+`podman exec` proxies no signals, so nothing about killing a session would reach the process inside the box.
+That is why the spawn goes through `toolchain-box exec` rather than a podman command line of the adapter's own: it leaves behind the watchdog that stops the process tree in the box once the client is gone, and a second copy of that mechanism here is the last thing worth having.
+
 ### Hooks carry everything interactive
 
 The adapter runs a single loopback HTTP server whose URL carries a per-process secret and a per-session route, and the generated hook client posts each hook payload to it and hands the JSON answer back to Claude.
 
 `Stop`, `StopFailure` and `SessionEnd` end the turn with `end_turn`, `refusal` and `cancelled`, each first flushing the transcript until the file stops growing so the updates land before the turn does.
 
-`PermissionRequest` becomes an ACP permission request offering Allow once, Claude's own permission suggestions as always-allow options, and Deny, and the answer becomes the hook's decision.
-`PreToolUse` intercepts two tools before they run: `AskUserQuestion` renders as permission cards, and `ExitPlanMode` renders as a plan approval.
+`PermissionRequest` becomes an ACP permission request offering Allow once, Claude's own permission suggestions as always-allow options, and Deny, and the answer becomes the hook's decision — unless [Auto Accept](#auto-accept) is on, which answers Allow once without asking.
+`PreToolUse` intercepts two tools before they run: `AskUserQuestion` renders as one permission card for the whole call, and `ExitPlanMode` renders as a plan approval.
 
 ### State on disk
 
-The state directory holds one JSON file per session, mapping the Paseo session ID to Claude's own session ID, cwd, model and mode, plus a lock file naming the process that has the session open.
-Runtime directories live in the host's temporary directory, record their owner PID, and are swept on the next adapter startup if that process is gone.
+The state directory holds one JSON file per session, mapping the Paseo session ID to Claude's own session ID, cwd, model, mode and effort, plus a lock file naming the process that has the session open.
+A file written before the effort selector existed names none, which reads as the default effort.
+Runtime directories live in the host's temporary directory — or, for a session in a container, in the `~/.claude` that container mounts — record their owner PID, and are swept on the next adapter startup if that process is gone.
 
 ## Limitations
 
-Claude keeps its own MCP servers, plugins, skills, permissions, and `CLAUDE.md` hierarchy, but MCP servers injected by Paseo over ACP are rejected, as explained in [step 3](#3-register-the-provider).
+Claude keeps its own MCP servers, plugins, skills, permissions, and `CLAUDE.md` hierarchy, but MCP servers injected by Paseo over ACP are rejected, because a running interactive Claude process cannot adopt them.
+Claude's own MCP servers are unaffected; it loads them from its usual configuration at startup.
 
-### Slash commands need a borrowed provider ID
+### Slash commands arrive after the session does
 
 Paseo learns this adapter's slash commands, and with them Claude's skills, from an ACP `available_commands_update` notification.
 The adapter sends it as soon as `session/new` returns, because Paseo drops any session update carrying a session ID it has not received yet.
 
-A draft agent's composer lists commands for an agent that does not exist yet: Paseo spawns a throwaway session, reads the commands back, and closes it, waiting for that first batch only when the provider ID is one it special-cases.
-`traecli` is such an ID, and its client differs from the generic one only by waiting up to 10 seconds, which is why this provider borrows it.
-Under any other ID the composer stays empty until the agent has taken its first turn, after which the live session has the commands cached.
-
-The configured label is what users see, so the borrowed ID stays invisible, but a genuine Trae CLI provider cannot be registered next to it and a future Paseo release may drop the special case.
+A draft agent's composer lists commands for an agent that does not exist yet: Paseo spawns a throwaway session, reads the commands back, and closes it, and it waits for that first batch only when the provider asks it to.
+The plugin asks, through `acpOptions.waitForInitialCommands`, for up to 10 seconds; without the wait the composer stays empty until the agent has taken its first turn, after which the live session has the commands cached.
 
 Related, a draft must carry a model ID that is not literally `default`: Paseo reads `default` as "no model selected" and returns an empty list before the adapter ever launches, which is why the pass-through entry is named `inherit` instead.
 
-### Questions arrive as permission cards
+### A question card needs the plugin to be worth answering
 
-Claude's `AskUserQuestion` tool cannot use Paseo's native question and chooser UI while an external provider is selected, because Paseo's generic ACP provider exposes only the standard ACP permission request path.
-The adapter renders each question as a permission card with an action per answer: single-select answers work through those actions, and multi-select questions repeat the card until Done is selected.
-Choose *Answer this question in chat* when an answer needs free-form text; the adapter defers that question, continues through the remaining cards, preserves their answers, and asks Claude to restate only the deferred questions before waiting for the next normal message.
+Claude's `AskUserQuestion` raises one permission card for the whole tool call, carrying every question it asks.
+Under the Claude TTY plugin that card is Paseo's own question form — radio buttons, checkboxes for a multi-select question, a box for an answer that is on none of the lists — and every answer comes back in one response, because the plugin republishes the request and hands the answers back down here.
+See the plugin's own notes for how, and for what it costs: an option's `preview` has no surface in that form and is folded into its description.
 
-The native chooser is available only to Paseo's direct providers, because plugins cannot intercept or transform ACP requests, contribute permission renderers, or emit native agent question events.
-Supporting it here requires Paseo's generic ACP provider to implement ACP `session/elicitation`, or a Paseo-specific equivalent, and return structured answers to the adapter.
+The adapter alone cannot do any of that.
+ACP has one shape for asking permission — a list of options, one of them chosen — so an adapter run outside the plugin, or without the `--answers-dir` it is passed at spawn, offers one option per answer while a single question is on the card and *Answer in chat* otherwise.
+Whatever the card is left with unanswered is denied back to Claude with instructions to restate those questions in prose and wait for a normal message, which is also what a cancelled or dismissed card does.
 
 ### Prompts sent mid-turn interrupt the turn
 
@@ -389,16 +411,8 @@ The live smoke test asks Claude for a fixed tool-free response and consumes norm
 
 ## Upgrading and uninstalling
 
-Upgrade each host independently, then restart the Paseo daemon:
-
-```sh
-cd /opt/paseo-plugins
-git pull --ff-only
-pnpm install --frozen-lockfile
-pnpm --filter @paseo-plugins/claude-tty-acp build
-```
+The adapter is updated and removed with the plugin, on each host independently; see the [plugin's installation notes](../../plugins/claude-tty/README.md#installation).
+A running adapter process keeps the code it started with, so a rebuilt adapter reaches the sessions started after it.
 
 Persistent session files are versioned and survive upgrades in the configured state directory.
-
-To uninstall, remove the provider from the host's Paseo configuration, restart the daemon, and delete the source checkout once no other app or plugin uses it.
-Remove the host's `claude-tty-acp` state directory only if the session resume mappings are no longer needed.
+Removing the plugin leaves that directory in place; remove it only if the session resume mappings are no longer needed.

@@ -14,6 +14,7 @@ import { questionText } from "./question-text.ts";
 import {
   launchedAgent,
   launchedBackgroundShell,
+  messagedAgent,
   notificationFailed,
   parseTaskNotifications,
   subagentProse,
@@ -36,7 +37,6 @@ const IGNORED_RECORD_TYPES = new Set([
   "mode",
   "permission-mode",
   "pr-link",
-  "queue-operation",
   "relocated",
   "summary",
   "worktree-state",
@@ -66,10 +66,25 @@ const AGENT_TOOLS = new Set(["Agent", "Task"]);
 const STOP_TASK_TOOL = "TaskStop";
 
 /** The last step on the card of a subagent whose session stopped before it said how it went. */
+/** What a tool call still open when its session stopped is failed with, since nothing will report on it. */
+const STOPPED_TOOL_CALL = "The session stopped before this tool call reported.";
 const UNREPORTED_AGENT = "Claude stopped before this agent reported back.";
 
 /** The last step on the card of a subagent the session it runs in stopped on purpose. */
 const STOPPED_AGENT = "Claude stopped this agent.";
+
+/**
+ * A copy of every tool-call update, sent beside the update itself as a vendor notification.
+ *
+ * Paseo has two ACP bridges and they read a tool call differently. The daemon's own builds eight
+ * kinds of card out of `kind`, `content` and `locations`; the one behind the plugin SDK's
+ * `runAcpProvider` keeps `rawInput` and `rawOutput` and nothing else, and renders every call as an
+ * edit or as raw JSON. The fields it drops are gone before any of the hooks it offers can see them,
+ * so the only way a plugin can draw the card the daemon draws is to be handed the update a second
+ * time on a channel the bridge does not consume. A client that does not know the method ignores it,
+ * which is what both of Paseo's bridges do with an extension they were not written for.
+ */
+export const TOOL_CALL_MIRROR_METHOD = "_claude_tty/tool_call";
 
 /**
  * A subagent and the tool call standing for it. Nested subagents share their spawner's card, so one
@@ -108,6 +123,8 @@ export class TranscriptTranslator {
   private readonly backgroundShellsByToolCall = new Map<string, string>();
   /** The task each `TaskStop` call names, kept for the life of the session because a replay reads the call again and needs it again. */
   private readonly stoppedTasksByToolCall = new Map<string, string>();
+  /** The diff each edit's tool call carried, until its result has sent it again. */
+  private readonly diffsByToolCall = new Map<string, ToolCallContent[]>();
   private lastSubagentActivity = 0;
   private lastBackgroundShellActivity = 0;
   private lastAssistantActivity = 0;
@@ -227,6 +244,9 @@ export class TranscriptTranslator {
       case "attachment":
         await this.translateAttachment(record);
         return;
+      case "queue-operation":
+        await this.translateQueueOperation(record);
+        return;
       default:
         if (type && !IGNORED_RECORD_TYPES.has(type)) this.reportUnknown(type);
     }
@@ -322,6 +342,7 @@ export class TranscriptTranslator {
     this.lastAssistantActivity = Date.now();
     const locations = toolLocations(input, this.cwd);
     const content = toolContents(name, input, this.cwd);
+    if (content.some((item) => item.type === "diff")) this.diffsByToolCall.set(toolCallId, content);
     await this.send({
       sessionUpdate: "tool_call",
       toolCallId,
@@ -350,6 +371,9 @@ export class TranscriptTranslator {
     // A background command answers with the id its report will name, and goes on running after it.
     const shell = launchedBackgroundShell(record.toolUseResult);
     if (shell !== null) this.trackBackgroundShell(shell.taskId, toolCallId);
+    // Messaging an agent is the only record that puts one back to work after its own report closed it.
+    const messaged = messagedAgent(record.toolUseResult);
+    if (messaged !== null) await this.resumeSubagentCard(messaged.agentId);
     // Stopped work writes no report and sends no notification, so nothing else ever ends it: it would go on being counted as running and hold every later turn open to its bound.
     // The stop names an agent or a background command through the one `task_id`, so it is offered to both.
     const stopped = this.stoppedTasksByToolCall.get(toolCallId);
@@ -362,7 +386,11 @@ export class TranscriptTranslator {
     this.emitted.add(resultKey);
     // A result is Claude's tool finishing, which is as much its own progress as calling it was.
     this.lastAssistantActivity = Date.now();
-    const content = resultContent(block.content);
+    // Content replaces what the call carried, and both of Paseo's bridges read an edit card's text as its unified diff.
+    // So an edit's result sends its diff again rather than the line saying the file was updated, which would leave a card with no diff at all.
+    // The result is still there in `rawOutput`.
+    const content = this.diffsByToolCall.get(toolCallId) ?? resultContent(block.content);
+    this.diffsByToolCall.delete(toolCallId);
     this.openToolCalls.delete(toolCallId);
     await this.send({
       sessionUpdate: "tool_call_update",
@@ -381,6 +409,23 @@ export class TranscriptTranslator {
     for (const text of contentTexts(content)) {
       for (const notification of parseTaskNotifications(text)) await this.applyNotification(notification);
     }
+  }
+
+  /**
+   * A task notification Claude queued while it was working, written as a record of the queue's own.
+   *
+   * For a command a *subagent* backgrounded this is the only record of the report there is: it never
+   * reaches a user turn, and the `queued_command` attachment beside it carries what was queued as a
+   * prompt rather than this. A wait left on one of those never ends, and the session reads as busy for
+   * the rest of its life.
+   *
+   * Only the notifications are taken; the rest of what the queue writes is Claude's own bookkeeping.
+   * The same notification is written on the way in, on the way out, and again at every turn boundary
+   * the queue survives, which costs nothing: a card is closed only while it is open, and ending a wait
+   * that has already ended changes nothing.
+   */
+  private async translateQueueOperation(record: TranscriptRecord): Promise<void> {
+    await this.translateNotifications(record.content);
   }
 
   /**
@@ -408,10 +453,12 @@ export class TranscriptTranslator {
    * A replayed launch does not start a background command over: one that has already reported, or that a turn gave up waiting on, is recorded here as settled and is not waited on again.
    * Nor is one whose launch is only history — a session being loaded replays commands that stopped with the process that ran them.
    */
-  private trackBackgroundShell(taskId: string, toolCallId: string): void {
+  private trackBackgroundShell(taskId: string, toolCallId: string | null): void {
     if (this.backgroundShells.has(taskId)) return;
     this.backgroundShells.set(taskId, { outstanding: this.trackingBackgroundWork });
-    this.backgroundShellsByToolCall.set(toolCallId, taskId);
+    // Null for a command an agent backgrounded: the tool call that launched it is in that agent's own
+    // transcript, not this session's, and its notification names it by task id rather than by call.
+    if (toolCallId !== null) this.backgroundShellsByToolCall.set(toolCallId, taskId);
     this.lastBackgroundShellActivity = Date.now();
   }
 
@@ -446,6 +493,11 @@ export class TranscriptTranslator {
   private logSubagentRecord(card: SubagentCard, record: TranscriptRecord, prefix: string): boolean {
     const nested = launchedAgent(record.toolUseResult);
     if (nested !== null) this.adoptSubagent(nested.agentId, card);
+    // An agent that backgrounds a command reports the moment it has launched it, so its own report says
+    // nothing about whether the work is over. The command notifies this session directly when it ends --
+    // the notification names it by task id -- so it is waited on here exactly as one of the session's own.
+    const backgrounded = launchedBackgroundShell(record.toolUseResult);
+    if (backgrounded !== null) this.trackBackgroundShell(backgrounded.taskId, null);
     const message = objectValue(record.message);
     const content = message?.content;
     if (stringValue(record.type) !== "assistant" || !Array.isArray(content)) return false;
@@ -519,6 +571,28 @@ export class TranscriptTranslator {
     for (const shell of this.backgroundShells.values()) shell.outstanding = false;
   }
 
+  /**
+   * Puts an agent that has already reported back to work.
+   *
+   * Its notification closed its card, which was right at the time -- Claude notifies each time an agent
+   * stops, and the same agent may notify many times over, because a message sent to one starts it again.
+   * Nothing else records that restart, so a card left closed stops holding the session's turn open while
+   * the agent it stands for is running, and the session reads as done with work still going.
+   *
+   * Only a card this session already knows is reopened, so a message naming something that is not one of
+   * its agents invents nothing, and never one a turn has given up on: that turn stopped counting it
+   * deliberately, and every later turn would hold for a poll interval and give up again in the same breath.
+   */
+  private async resumeSubagentCard(agentId: string): Promise<void> {
+    const card = this.subagents.get(agentId);
+    if (card === undefined || card.status === "in_progress" || card.abandoned) return;
+    card.status = "in_progress";
+    card.outstanding = this.trackingBackgroundWork;
+    this.lastSubagentActivity = Date.now();
+    if (card.toolCallId !== null) this.openToolCalls.add(card.toolCallId);
+    await this.publishSubagent(card);
+  }
+
   /** Records how an agent went, on the card that has to go on saying so after Claude has stopped. */
   private settleSubagentCard(agentId: string, failed: boolean): void {
     const card = this.subagents.get(agentId);
@@ -561,7 +635,7 @@ export class TranscriptTranslator {
     }
     for (const toolCallId of [...this.openToolCalls]) {
       this.openToolCalls.delete(toolCallId);
-      await this.send({ sessionUpdate: "tool_call_update", toolCallId, status: "failed" });
+      await this.send({ sessionUpdate: "tool_call_update", toolCallId, status: "failed", rawOutput: { error: STOPPED_TOOL_CALL } });
     }
   }
 
@@ -575,6 +649,10 @@ export class TranscriptTranslator {
       toolCallId: card.toolCallId,
       status: card.status,
       content: [{ type: "content", content: { type: "text", text } }],
+      // A failed tool call the daemon is given no error for is one it cannot put in a timeline at all:
+      // its schema wants a non-null error there, and the response carrying the item fails validation
+      // whole, so the client refuses the agent's entire history rather than this one card.
+      ...(card.status === "failed" ? { rawOutput: { error: text } } : {}),
     });
   }
 
@@ -664,6 +742,13 @@ export class TranscriptTranslator {
 
   private async send(update: SessionUpdate): Promise<void> {
     this.lastActivity = Date.now();
+    // Ahead of the update it copies, not behind it. The plugin bridge handles a vendor notification
+    // where it sits in the stream and an update on a lane of its own, so a copy sent afterwards
+    // still arrives first — but only by the depth of that lane, which is whatever a single read off
+    // the pipe happened to carry. Sent first it is first by the order of the stream instead.
+    if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
+      await this.connection.extNotification(TOOL_CALL_MIRROR_METHOD, { sessionId: this.sessionId, update });
+    }
     await this.connection.sessionUpdate({ sessionId: this.sessionId, update });
   }
 
