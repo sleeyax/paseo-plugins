@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { AgentSideConnection, ContentBlock, PromptResponse } from "@agentclientprotocol/sdk";
@@ -11,7 +11,8 @@ import { InteractionBridge } from "./interactions.ts";
 import { writeLog } from "./log.ts";
 import { cleanupPromptFiles, materializePrompt } from "./prompt-content.ts";
 import { markRuntimeDirectory, runtimePrefix } from "./runtime-directories.ts";
-import { INHERIT_MODEL_ID } from "./session-options.ts";
+import { INHERIT_EFFORT_ID, INHERIT_MODEL_ID } from "./session-options.ts";
+import { type Placement, unboxedPlacement } from "./session-placement.ts";
 import { TerminalScreen } from "./terminal-screen.ts";
 import { SubagentWatcher } from "./subagent-watcher.ts";
 import { TranscriptReader } from "./transcript-reader.ts";
@@ -45,12 +46,21 @@ const SUBAGENT_POLL_MS = 5_000;
 const SUBMIT_ATTEMPTS = 6;
 const SUBMIT_CONFIRM_MS = 400;
 const PASTE_ECHO_MS = 300;
+// How long a paste that missed the window above is still waited for before the prompt is called undelivered.
+// Claude reads a bracketed paste immediately and echoes it a render later, and on a loaded host that render
+// is the thing that slips: the echo is what says the input box is holding the prompt, and a submit key sent
+// before it lands leaves that prompt sitting there unsent, with no hook to end the turn waiting on it.
+const LATE_PASTE_MS = 2_000;
 const PROMPT_ECHO_CHARS = 40;
 const BRACKETED_PASTE_START = "\u001b[200~";
 const BRACKETED_PASTE_END = "\u001b[201~";
 // Claude keeps its completion menu open while the cursor sits at the end of an @mention or a /command, and the submit key then picks an entry instead of sending the prompt.
 // A trailing space closes the menu, so every paste ends with one.
 const COMPLETION_DISMISS = " ";
+// Claude appends a bracketed paste to whatever its input box already holds rather than replacing it, so a
+// prompt pasted into a box with something left in it reaches Claude as the two run together. Ctrl-U is what
+// empties it, and costs nothing on the empty box that is the ordinary case.
+const CLEAR_INPUT_BOX = "\u0015";
 const ESCAPE = "\u001b";
 const CARRIAGE_RETURN = "\r";
 const CONTROL_D = "\u0004";
@@ -77,6 +87,7 @@ const STALE_RESUME_SELECTION_TIMEOUT_MS = 3_000;
 // A resumed session paints its whole conversation before its input box exists, and text inside that conversation can satisfy every readiness signal on its own.
 // Readiness therefore also requires Claude to have stopped painting, because a paste sent mid-restore is dropped without an echo to notice it by.
 const READY_QUIET_MS = 400;
+const HOOK_SOCKET_NAME = "hooks.sock";
 
 /** One of the menus Claude opens on its way up, as the adapter has to answer it. */
 type StartupMenu = {
@@ -100,6 +111,7 @@ export type RuntimeDependencies = {
   cancelTimeoutMs?: number;
   contextRefreshTimeoutMs?: number;
   submitDelayMs?: number;
+  latePasteMs?: number;
   transcriptPollIntervalMs?: number;
   workspaceTrustKeyDelayMs?: number;
   workspaceTrustSelectionTimeoutMs?: number;
@@ -114,12 +126,17 @@ export type RuntimeDependencies = {
   backgroundShellMs?: number;
   runtimeRoot?: string;
   claudeConfigDir?: string;
+  /** Where this session's Claude runs. Left out, it runs beside the adapter, which is what every test wants. */
+  placement?: Placement;
   transcriptFilePath?: string;
   stateDirectory?: string;
   translator?: TranscriptTranslator;
   resume?: boolean;
   model?: string;
   mode?: string;
+  effort?: string;
+  /** Whether a permission request is answered without a card, asked at each request. */
+  autoAccept?: () => Promise<boolean>;
   onClaudeSessionChange?: (claudeSessionId: string) => Promise<void>;
 };
 
@@ -138,6 +155,7 @@ export class ClaudeRuntime {
   private readonly cancelTimeoutMs: number;
   private readonly contextRefreshTimeoutMs: number;
   private readonly submitDelayMs: number;
+  private readonly latePasteMs: number;
   private readonly transcriptPollIntervalMs: number | undefined;
   private readonly workspaceTrustKeyDelayMs: number;
   private readonly workspaceTrustSelectionTimeoutMs: number;
@@ -153,12 +171,14 @@ export class ClaudeRuntime {
   private readonly runtimeRoot: string;
   private readonly connection: AgentSideConnection;
   private readonly hooks: HookServer;
+  private readonly placement: Placement;
   private readonly claudeConfigDir: string | undefined;
   /** The transcript the watcher is reading now, so a SessionStart naming that same file leaves it, and its offset, alone. */
   private transcriptFilePath!: string;
   private resumeNextLaunch: boolean;
   private model: string;
   private mode: string;
+  private effort: string;
   private readonly onClaudeSessionChange: ((claudeSessionId: string) => Promise<void>) | undefined;
   private readonly interactions: InteractionBridge;
   private readonly translator: TranscriptTranslator;
@@ -166,6 +186,9 @@ export class ClaudeRuntime {
   private readonly screen = new TerminalScreen();
   private pty: PtyProcess | null = null;
   private runtimeDirectory: string | null = null;
+  /** The short path this host binds a boxed session's hook socket at; see openHookSocket. */
+  private hookSocketDirectory: string | null = null;
+  private hookSocketPath: string | null = null;
   private hookRegistration: HookRegistration | null = null;
   private ready: Deferred<void> | null = null;
   private trustPrompt: Deferred<void> | null = null;
@@ -199,18 +222,23 @@ export class ClaudeRuntime {
     this.cwd = cwd;
     this.connection = connection;
     this.hooks = hooks;
-    this.claudeConfigDir = dependencies.claudeConfigDir;
+    this.placement = dependencies.placement ?? unboxedPlacement(cwd);
+    // A boxed session's transcripts are in the box's own ~/.claude, which is a directory of this
+    // host's that the box mounts, so the readers here go on reading them from outside.
+    this.claudeConfigDir = dependencies.claudeConfigDir ?? this.placement.configDir;
     this.resumeNextLaunch = dependencies.resume === true;
     this.model = dependencies.model ?? INHERIT_MODEL_ID;
     this.mode = dependencies.mode ?? "default";
+    this.effort = dependencies.effort ?? INHERIT_EFFORT_ID;
     this.onClaudeSessionChange = dependencies.onClaudeSessionChange;
-    this.interactions = new InteractionBridge(sessionId, cwd, connection);
+    this.interactions = new InteractionBridge(sessionId, cwd, connection, dependencies.autoAccept);
     this.spawnPty = dependencies.spawnPty ?? nodePty.spawn;
     this.startupTimeoutMs = dependencies.startupTimeoutMs ?? STARTUP_TIMEOUT_MS;
     this.readinessTimeoutMs = dependencies.readinessTimeoutMs ?? STARTUP_TIMEOUT_MS;
     this.cancelTimeoutMs = dependencies.cancelTimeoutMs ?? CANCEL_TIMEOUT_MS;
     this.contextRefreshTimeoutMs = dependencies.contextRefreshTimeoutMs ?? CONTEXT_REFRESH_TIMEOUT_MS;
     this.submitDelayMs = dependencies.submitDelayMs ?? SUBMIT_DELAY_MS;
+    this.latePasteMs = dependencies.latePasteMs ?? LATE_PASTE_MS;
     this.transcriptPollIntervalMs = dependencies.transcriptPollIntervalMs;
     this.workspaceTrustKeyDelayMs = dependencies.workspaceTrustKeyDelayMs ?? WORKSPACE_TRUST_KEY_DELAY_MS;
     this.workspaceTrustSelectionTimeoutMs = dependencies.workspaceTrustSelectionTimeoutMs ?? WORKSPACE_TRUST_SELECTION_TIMEOUT_MS;
@@ -223,7 +251,9 @@ export class ClaudeRuntime {
     this.subagentSilenceMs = dependencies.subagentSilenceMs ?? SUBAGENT_SILENCE_MS;
     this.subagentWakeMs = dependencies.subagentWakeMs ?? SUBAGENT_WAKE_MS;
     this.backgroundShellMs = dependencies.backgroundShellMs ?? BACKGROUND_SHELL_MS;
-    this.runtimeRoot = dependencies.runtimeRoot ?? os.tmpdir();
+    // A box reads none of this host's temporary directory, so where a boxed session's launch files
+    // go is the placement's to say and not a caller's.
+    this.runtimeRoot = this.placement.runtimeRoot ?? dependencies.runtimeRoot ?? os.tmpdir();
     this.translator = dependencies.translator ?? new TranscriptTranslator(sessionId, cwd, connection);
     this.transcript = this.createTranscriptWatcher(claudeSessionId, dependencies.transcriptFilePath);
   }
@@ -256,7 +286,10 @@ export class ClaudeRuntime {
     if (this.turn) throw new Error(`Session ${this.sessionId} already has an active turn`);
     await this.ensureStarted();
     if (!this.runtimeDirectory) throw new Error(`Session ${this.sessionId} has no runtime directory`);
-    const prompt = await materializePrompt(content, this.runtimeDirectory, this.cwd);
+    // The attachments are written here and named to Claude, which for a boxed session reads them
+    // through the mount at a path of its own; the checkout a resource_link points into is at the
+    // same path on both sides, so only what this wrote moves.
+    const prompt = await materializePrompt(content, this.runtimeDirectory, this.cwd, (file) => this.placement.guest(file));
     const turn = createDeferred<TurnResult>();
     this.turn = turn;
     this.cancelRequested = false;
@@ -264,8 +297,8 @@ export class ClaudeRuntime {
     this.interactions.beginTurn();
     this.assistantBaseline = this.translator.assistantChunks;
     this.translator.trackBackgroundWork();
-    await this.submit(prompt.text);
     try {
+      await this.submit(prompt.text);
       const result = await turn.promise;
       if (result.assistantMessage) {
         this.translator.suppressNextAssistantText(result.assistantMessage);
@@ -280,15 +313,26 @@ export class ClaudeRuntime {
       }
       await this.emitContextUsage(result.response.stopReason);
       return result.response;
+    } catch (error) {
+      // A prompt that never reached Claude has no hook coming to end its turn, so the turn is let go of
+      // here. Left standing it would hold the session busy for good and refuse every prompt after it.
+      if (this.turn === turn) {
+        this.turn = null;
+        this.interactions.cancelPending();
+        writeLog({ level: "error", message: "Failed to put a prompt to Claude", sessionId: this.sessionId, error: errorMessage(error) });
+      }
+      throw error;
     } finally {
       await cleanupPromptFiles(prompt.files);
     }
   }
 
-  async reconfigure(model: string, mode: string): Promise<void> {
-    if (this.turn) throw new Error("Cannot change Claude model or mode during an active turn");
+  /** Claude takes its model and its effort at launch and offers no way to change either after, so this restarts it on the same conversation. */
+  async reconfigure(model: string, mode: string, effort: string): Promise<void> {
+    if (this.turn) throw new Error("Cannot change Claude model, mode or effort during an active turn");
     this.model = model;
     this.mode = mode;
+    this.effort = effort;
     if (!this.pty) return;
     await this.stopForRestart();
     await this.ensureStarted();
@@ -311,6 +355,18 @@ export class ClaudeRuntime {
     if (!turn) return;
     this.cancelRequested = true;
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
+    // A turn held open only for background work has no foreground to interrupt. Claude answered and went
+    // back to its prompt; the turn is this adapter's own bookkeeping, kept so the report that work still
+    // owes has something to arrive in. Escape there stops nothing -- a subagent runs in its own loop and
+    // outlives it -- and costs the turn before it, which Claude rewinds and puts back in the input box for
+    // the next paste to land on. So the hold is simply let go of. Paseo cancels before it replaces a turn
+    // and a message sent while a subagent runs arrives as exactly that, which makes this the path every
+    // such message takes rather than a corner of one.
+    if (this.backgroundHold) {
+      this.cancelTimer = null;
+      void this.finishCancelled();
+      return;
+    }
     if (!this.pty) {
       this.cancelTimer = null;
       void this.finishCancelled();
@@ -352,33 +408,46 @@ export class ClaudeRuntime {
     if (this.pty) return;
     this.screen.reset();
     this.staleResumeAnswered = false;
+    // Before anything else, because a boxed project whose box will not start has nowhere to run,
+    // and that is an error to raise here rather than a session quietly started on this host.
+    await this.placement.prepare();
     await this.hooks.start();
+    await mkdir(this.runtimeRoot, { recursive: true, mode: 0o700 });
     this.runtimeDirectory = await mkdtemp(runtimePrefix(this.runtimeRoot));
     await chmod(this.runtimeDirectory, 0o700);
     await markRuntimeDirectory(this.runtimeDirectory);
     this.hookRegistration = this.hooks.register(this.currentClaudeSessionId, (payload) => this.handleHook(payload));
     const hookClientPath = path.join(this.runtimeDirectory, "hook-client.mjs");
-    await writeFile(hookClientPath, hookClientSource(this.hookRegistration.endpoint), { mode: 0o600 });
+    await writeFile(hookClientPath, hookClientSource(await this.hookTarget(this.hookRegistration)), { mode: 0o600 });
     this.contextFilePath = path.join(this.runtimeDirectory, "context.json");
     const settingsPath = path.join(this.runtimeDirectory, "settings.json");
-    const hookCommand = `${shellQuote(process.execPath)} ${shellQuote(hookClientPath)}`;
-    await writeFile(settingsPath, `${JSON.stringify(createSettings(hookCommand, this.contextFilePath))}\n`, { mode: 0o600 });
+    // Every path in the settings is one Claude uses, so each is written as the process running
+    // Claude sees it; the adapter keeps reading its own side of the same files.
+    const hookCommand = `${shellQuote(this.placement.nodeCommand)} ${shellQuote(this.placement.guest(hookClientPath))}`;
+    await writeFile(settingsPath, `${JSON.stringify(createSettings(hookCommand, this.placement.guest(this.contextFilePath)))}\n`, { mode: 0o600 });
     this.ready = createDeferred<void>();
     this.trustPrompt = createDeferred<void>();
-    const claudeBin = process.env.CLAUDE_BIN || "claude";
     const sessionArgs = this.resumeNextLaunch
       ? ["--resume", this.currentClaudeSessionId]
       : ["--session-id", this.currentClaudeSessionId];
+    const launch = this.placement.launch([
+      ...sessionArgs,
+      ...selectionArgs(this.model, this.mode, this.effort),
+      "--settings",
+      this.placement.guest(settingsPath),
+    ]);
     try {
-      this.pty = this.spawnPty(claudeBin, [...sessionArgs, ...selectionArgs(this.model, this.mode), "--settings", settingsPath], {
+      // Still the interactive TUI under a pty, in a box as on the host: what changes is which
+      // machine the terminal is attached to, and nothing about how the session is driven.
+      this.pty = this.spawnPty(launch.file, launch.args, {
         name: "xterm-256color",
         cols: 120,
         rows: 40,
         cwd: this.cwd,
-        env: process.env,
+        env: launch.env,
       });
     } catch (error) {
-      await this.failedStartup(`Could not start ${claudeBin}: ${errorMessage(error)}`);
+      await this.failedStartup(`Could not start ${launch.file}: ${errorMessage(error)}`);
     }
     const started = this.pty;
     // A PTY that has been stopped can still flush its last output, and the screen it would land on now belongs to its replacement.
@@ -401,7 +470,46 @@ export class ClaudeRuntime {
     await this.waitForTerminalReady();
     await this.transcript.start();
     this.resumeNextLaunch = true;
-    writeLog({ level: "info", message: "Started interactive Claude session", sessionId: this.sessionId, claudePid: this.pty?.pid, cwd: this.cwd });
+    writeLog({
+      level: "info",
+      message: this.placement.boxed ? "Started interactive Claude session in its worktree box" : "Started interactive Claude session",
+      sessionId: this.sessionId,
+      claudePid: this.pty?.pid,
+      cwd: this.cwd,
+      boxed: this.placement.boxed,
+    });
+  }
+
+  /**
+   * How the hook client reaches this adapter. A session on this host posts to the loopback port the
+   * hook server is on; a boxed one cannot see this host's loopback at all — a box reaches only the
+   * ports its project asked to have forwarded — so it posts over a unix socket instead.
+   */
+  private async hookTarget(registration: HookRegistration): Promise<HookTarget> {
+    if (!this.placement.boxed) return loopbackHookTarget(registration.endpoint);
+    return { socketPath: await this.openHookSocket(), path: registration.requestPath };
+  }
+
+  /**
+   * The socket goes in the runtime directory, which for a boxed session is inside the `~/.claude`
+   * the box mounts, so both sides can reach the one file. It is bound through a symlink in this
+   * host's temporary directory because a unix socket path may be about 107 bytes and a box's agent
+   * home is nearly that on its own: `bind` resolves the leading directories, so a short path here
+   * creates the socket over there. The box's own path to it is short to begin with.
+   *
+   * Returns that path, as the box sees it.
+   */
+  private async openHookSocket(): Promise<string> {
+    if (!this.runtimeDirectory) throw new Error(`Session ${this.sessionId} has no runtime directory to put its hook socket in`);
+    // Marked and prefixed like any runtime directory, so the sweep for the ones an abandoned
+    // process left behind takes this one too.
+    this.hookSocketDirectory = await mkdtemp(runtimePrefix(os.tmpdir()));
+    await markRuntimeDirectory(this.hookSocketDirectory);
+    const short = path.join(this.hookSocketDirectory, "box");
+    await symlink(this.runtimeDirectory, short);
+    this.hookSocketPath = path.join(short, HOOK_SOCKET_NAME);
+    await this.hooks.listenOn(this.hookSocketPath);
+    return this.placement.guest(path.join(this.runtimeDirectory, HOOK_SOCKET_NAME));
   }
 
   private async failedStartup(message: string): Promise<never> {
@@ -698,7 +806,9 @@ export class ClaudeRuntime {
 
   private async handleSessionStart(payload: HookPayload): Promise<void> {
     const nextClaudeSessionId = asString(payload.session_id);
-    const transcriptFilePath = asString(payload.transcript_path);
+    // Claude reports its transcript at its own path, which in a box is a path of the box's.
+    const reported = asString(payload.transcript_path);
+    const transcriptFilePath = reported === undefined ? undefined : this.placement.host(reported);
     const source = asString(payload.source);
     if (source === "clear" && nextClaudeSessionId && nextClaudeSessionId !== this.currentClaudeSessionId) {
       await this.transcript.close();
@@ -727,8 +837,15 @@ export class ClaudeRuntime {
   }
 
   private async removeRuntimeDirectory(): Promise<void> {
+    const socketPath = this.hookSocketPath;
+    const socketDirectory = this.hookSocketDirectory;
     const directory = this.runtimeDirectory;
+    this.hookSocketPath = null;
+    this.hookSocketDirectory = null;
     this.runtimeDirectory = null;
+    // The socket's listener first: closing it unlinks the file, which is inside the directory below.
+    if (socketPath) await this.hooks.stopListeningOn(socketPath);
+    if (socketDirectory) await rm(socketDirectory, { force: true, recursive: true });
     if (directory) await rm(directory, { force: true, recursive: true });
   }
 
@@ -755,18 +872,76 @@ export class ClaudeRuntime {
     await this.removeRuntimeDirectory();
   }
 
+  /**
+   * Empties Claude's input box so the paste that follows is the whole of what Claude reads.
+   *
+   * The box is not reliably empty when a prompt arrives. Interrupting a turn puts the prompt it
+   * interrupted back for editing, and a submit a cancel abandons between its paste and its Enter leaves
+   * that paste behind; Paseo interrupts before it replaces a turn, so both are one message away in any
+   * session the daemon is steering. What Claude then receives is the two run together as a single
+   * prompt nobody wrote, sent from before the turn the interrupt rewound.
+   *
+   * The key goes in whatever the screen says, because the screen is sampled and a paste too recent to
+   * have been rendered is exactly the residue worth clearing; the snapshot is read only to name it in
+   * the log, since a box that had anything in it is worth a line either way.
+   */
+  private clearInputBox(): void {
+    const held = inputBoxContent(this.screen.snapshot());
+    if (held) {
+      writeLog({
+        level: "warn",
+        message: "Cleared something out of Claude's input box before sending a prompt",
+        sessionId: this.sessionId,
+        held: held.slice(0, PROMPT_ECHO_CHARS),
+      });
+    }
+    this.pty?.write(CLEAR_INPUT_BOX);
+  }
+
+  /**
+   * Puts the prompt in Claude's input box and sends it, and says so when it could not.
+   *
+   * Every way a turn ends is a hook Claude fires, so a prompt Claude never took ends nothing: the turn
+   * stays open for the rest of the session, the client shows it working, and the message is gone without
+   * a line anywhere. That is worth an error rather than a silence, so this only returns on evidence that
+   * the prompt went in — the input box letting go of it, or the turn moving on by itself.
+   */
   private async submit(text: string): Promise<void> {
+    const activityBefore = this.activityAt;
+    this.clearInputBox();
     this.pty?.write(`${BRACKETED_PASTE_START}${text}${COMPLETION_DISMISS}${BRACKETED_PASTE_END}`);
     const echo = promptEcho(text);
-    const pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), PASTE_ECHO_MS);
+    let pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), PASTE_ECHO_MS);
     for (let attempt = 0; attempt < SUBMIT_ATTEMPTS; attempt += 1) {
       await delay(this.submitDelayMs);
       if (this.cancelRequested) return;
       this.pty?.write(CARRIAGE_RETURN);
-      if (!pasted) return;
-      if (await this.screenSettles((screen) => !inputBoxHolds(screen, echo), SUBMIT_CONFIRM_MS)) return;
+      if (pasted) {
+        if (await this.screenSettles((screen) => !inputBoxHolds(screen, echo), SUBMIT_CONFIRM_MS)) return;
+        continue;
+      }
+      // The key above went into an input box with nothing of ours in it, so it sent nothing. Claude
+      // settles a long paste a render after it reads it, and a prompt that turns up behind a spent
+      // submit key sits in the box unsent -- so the echo is waited for rather than assumed absent,
+      // and sent properly on the next attempt once it lands.
+      if (!inputBoxVisible(this.screen.snapshot())) return;
+      pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), this.latePasteMs);
+      if (!pasted) {
+        if (this.submissionMovedOn(activityBefore)) return;
+        throw new Error(`Claude never took the prompt for session ${this.sessionId}: it did not appear in Claude's input box.`);
+      }
     }
-    writeLog({ level: "warn", message: "Claude kept the prompt in its input box after every submit attempt", sessionId: this.sessionId });
+    if (this.submissionMovedOn(activityBefore)) return;
+    throw new Error(`Claude kept the prompt for session ${this.sessionId} in its input box after ${SUBMIT_ATTEMPTS} submit attempts.`);
+  }
+
+  /**
+   * Whether the prompt went in after all, read from something other than the input box.
+   * The box is sampled, not followed, so a prompt taken between two samples leaves no trace in it —
+   * and calling that one undelivered would fail a turn that is running.
+   */
+  private submissionMovedOn(activityBefore: number): boolean {
+    return this.turn === null || this.activityAt > activityBefore;
   }
 
   private async screenSettles(predicate: (screen: string) => boolean, timeoutMs: number): Promise<boolean> {
@@ -955,15 +1130,27 @@ function createSettings(command: string, contextFilePath: string): Record<string
   };
 }
 
+/**
+ * Where the hook client posts. A session on this host reaches the adapter on the loopback port; one
+ * in a box reaches none of this host's loopback and posts over a unix socket instead. Either is
+ * node:http request options, so the client that carries them is the same client.
+ */
+type HookTarget = { host: string; port: string; path: string } | { socketPath: string; path: string };
+
+export function loopbackHookTarget(endpoint: string): HookTarget {
+  const url = new URL(endpoint);
+  return { host: url.hostname, port: url.port, path: `${url.pathname}${url.search}` };
+}
+
 // A hook that renders a card waits for as long as the person does, so this posts over node:http rather than fetch.
 // Node's fetch is undici, whose headersTimeout gives up on the response after 300 seconds; node:http imposes no such deadline.
-function hookClientSource(endpoint: string): string {
+function hookClientSource(target: HookTarget): string {
   return `import http from "node:http";
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
 const payload = Buffer.concat(chunks);
 const status = await new Promise((resolve, reject) => {
-  const request = http.request(${JSON.stringify(endpoint)}, { method: "POST", headers: { "content-type": "application/json", "content-length": payload.length } }, (response) => {
+  const request = http.request({ ...${JSON.stringify(target)}, method: "POST", headers: { "content-type": "application/json", "content-length": payload.length } }, (response) => {
     const parts = [];
     response.on("data", (part) => parts.push(part));
     response.on("end", () => {
@@ -983,10 +1170,11 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-function selectionArgs(model: string, mode: string): string[] {
+function selectionArgs(model: string, mode: string, effort: string): string[] {
   const args: string[] = [];
   if (model !== INHERIT_MODEL_ID) args.push("--model", model);
   if (mode !== "default") args.push("--permission-mode", mode);
+  if (effort !== INHERIT_EFFORT_ID) args.push("--effort", effort);
   return args;
 }
 
@@ -994,14 +1182,29 @@ function promptEcho(text: string): string {
   return text.trim().split("\n", 1)[0]!.trim().slice(0, PROMPT_ECHO_CHARS);
 }
 
+/**
+ * Whether Claude's input box is on screen at all, empty or not.
+ * An empty box only means the prompt is not in it where there is a box to read: a session whose terminal
+ * has painted nothing -- every test's fake PTY, and a real one before Claude's first render -- says nothing
+ * either way, and is left to the submit key rather than called a failure.
+ */
+function inputBoxVisible(screen: string): boolean {
+  return /^\s*❯/m.test(screen);
+}
+
 // The last prompt marker on screen is Claude's input box; the ones above it are prompts it has already taken.
-function inputBoxHolds(screen: string, echo: string): boolean {
+// Null where the screen has no box on it at all, which says nothing about what Claude is holding.
+function inputBoxContent(screen: string): string | null {
   const lines = screen.split("\n");
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const match = /^\s*❯\s?(.*)$/.exec(lines[index]!);
-    if (match) return match[1]!.trim().startsWith(echo);
+    if (match) return match[1]!.trim();
   }
-  return false;
+  return null;
+}
+
+function inputBoxHolds(screen: string, echo: string): boolean {
+  return inputBoxContent(screen)?.startsWith(echo) ?? false;
 }
 
 // Registering a status line makes Claude drop most footer hints, `? for shortcuts` among them, so that alternative cannot match in an adapter-launched session.
