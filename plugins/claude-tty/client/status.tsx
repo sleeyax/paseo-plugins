@@ -1,8 +1,10 @@
+import { Icon, copyText, useToast } from "@getpaseo/plugin/client/react-native";
+import { SettingsRow } from "@getpaseo/plugin/client/ui";
 import React from "react";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import type { StatusPayload } from "../shared/contracts.ts";
-import { MONO_FONT, Row, StatusDot } from "./ui.tsx";
-import { fontSize, leading, spacing, type Palette } from "./theme.ts";
+import { MONO_FONT, StatusDot, pressable } from "./ui.tsx";
+import { fontSize, iconSize, leading, radius, spacing, type Palette } from "./theme.ts";
 
 export type Tone = "ok" | "muted" | "danger";
 
@@ -14,25 +16,11 @@ export function toneColor(palette: Palette, tone: Tone): string {
 
 export type Reading = { hint: string; tone: Tone };
 
-export function providerReading(status: StatusPayload): Reading {
-  const provider = status.provider;
-  switch (provider.state) {
-    case "matching":
-      return { hint: `Registered as "${provider.label ?? provider.id}" and pointing at this checkout`, tone: "ok" };
-    case "mismatched":
-      return { hint: `Registered, but pointing at ${provider.command?.[0] ?? "another command"}`, tone: "danger" };
-    case "foreign":
-      return { hint: `The ID "${provider.id}" is taken by a provider this plugin did not register`, tone: "danger" };
-    default:
-      return { hint: "Not registered yet", tone: "muted" };
-  }
-}
-
 export function adapterReading(status: StatusPayload): Reading {
-  if (status.adapter.binary === null) return { hint: "No checkout to look in", tone: "muted" };
+  if (status.adapter.binary === null) return { hint: "No checkout to look in", tone: "danger" };
   return status.adapter.built
     ? { hint: status.adapter.binary, tone: "ok" }
-    : { hint: "Not built yet — build it in the checkout", tone: "muted" };
+    : { hint: `${status.adapter.binary} is not built — run the build in the checkout`, tone: "danger" };
 }
 
 export function claudeReading(status: StatusPayload): Reading {
@@ -41,52 +29,66 @@ export function claudeReading(status: StatusPayload): Reading {
     : { hint: status.host.claude, tone: "ok" };
 }
 
-/** A settings row whose hint is a reading, marked with the dot paseo uses for provider health. */
+/**
+ * A settings row whose hint is a reading. A bad one goes in the host row's `error`, which is where it
+ * is coloured and announced; the dot beside the control is what separates a good reading from one
+ * that is merely inert.
+ */
 export function ReadingRow({
   palette,
   title,
   reading,
-  divided,
   trailing,
 }: {
   palette: Palette;
   title: string;
   reading: Reading;
-  divided?: boolean;
   trailing?: React.ReactNode;
 }) {
   return (
-    <Row
-      palette={palette}
-      title={title}
-      hint={reading.hint}
-      hintColor={toneColor(palette, reading.tone)}
-      divided={divided}
-      trailing={trailing}
-      leading={
-        <View style={{ paddingRight: spacing[1] }}>
-          <StatusDot color={toneColor(palette, reading.tone)} />
-        </View>
-      }
-    />
+    <SettingsRow
+      label={title}
+      hint={reading.tone === "danger" ? undefined : reading.hint}
+      error={reading.tone === "danger" ? reading.hint : undefined}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[3] }}>
+        <StatusDot color={toneColor(palette, reading.tone)} />
+        {trailing}
+      </View>
+    </SettingsRow>
   );
 }
 
 /** Command output and daemon diagnostics, which are read as terminal text or not at all. */
 export function Monospace({ palette, text }: { palette: Palette; text: string }) {
+  const toast = useToast();
+  // Selecting a wrapped stack trace by hand on a phone is the alternative, so the copy is worth a button.
+  const copy = async (): Promise<void> => {
+    try {
+      await copyText(text);
+      toast.show("Copied", { variant: "success" });
+    } catch {
+      toast.error("Could not copy. Select the text and use Copy.");
+    }
+  };
+
   return (
     <View
       style={{
         backgroundColor: palette.surface0,
-        borderRadius: 6,
+        borderRadius: radius.md,
         borderWidth: 1,
         borderColor: palette.border,
         padding: spacing[3],
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: spacing[2],
       }}
     >
       <Text
         selectable
         style={{
+          flex: 1,
           color: palette.foregroundMuted,
           fontFamily: MONO_FONT,
           fontSize: fontSize.sm,
@@ -95,6 +97,15 @@ export function Monospace({ palette, text }: { palette: Palette; text: string })
       >
         {text}
       </Text>
+      <Pressable
+        onPress={() => void copy()}
+        accessibilityRole="button"
+        accessibilityLabel="Copy this text"
+        hitSlop={8}
+        style={pressable(({ hovered, pressed }) => ({ opacity: hovered || pressed ? 1 : 0.6 }))}
+      >
+        <Icon name="Copy" size={iconSize.sm} color={palette.foregroundMuted} />
+      </Pressable>
     </View>
   );
 }

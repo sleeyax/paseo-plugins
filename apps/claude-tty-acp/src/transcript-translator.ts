@@ -72,6 +72,19 @@ const UNREPORTED_AGENT = "Claude stopped before this agent reported back.";
 const STOPPED_AGENT = "Claude stopped this agent.";
 
 /**
+ * A copy of every tool-call update, sent beside the update itself as a vendor notification.
+ *
+ * Paseo has two ACP bridges and they read a tool call differently. The daemon's own builds eight
+ * kinds of card out of `kind`, `content` and `locations`; the one behind the plugin SDK's
+ * `runAcpProvider` keeps `rawInput` and `rawOutput` and nothing else, and renders every call as an
+ * edit or as raw JSON. The fields it drops are gone before any of the hooks it offers can see them,
+ * so the only way a plugin can draw the card the daemon draws is to be handed the update a second
+ * time on a channel the bridge does not consume. A client that does not know the method ignores it,
+ * which is what both of Paseo's bridges do with an extension they were not written for.
+ */
+export const TOOL_CALL_MIRROR_METHOD = "_claude_tty/tool_call";
+
+/**
  * A subagent and the tool call standing for it. Nested subagents share their spawner's card, so one
  * card holds one log and an update never replaces another agent's steps with its own.
  */
@@ -108,6 +121,8 @@ export class TranscriptTranslator {
   private readonly backgroundShellsByToolCall = new Map<string, string>();
   /** The task each `TaskStop` call names, kept for the life of the session because a replay reads the call again and needs it again. */
   private readonly stoppedTasksByToolCall = new Map<string, string>();
+  /** The diff each edit's tool call carried, until its result has sent it again. */
+  private readonly diffsByToolCall = new Map<string, ToolCallContent[]>();
   private lastSubagentActivity = 0;
   private lastBackgroundShellActivity = 0;
   private lastAssistantActivity = 0;
@@ -322,6 +337,7 @@ export class TranscriptTranslator {
     this.lastAssistantActivity = Date.now();
     const locations = toolLocations(input, this.cwd);
     const content = toolContents(name, input, this.cwd);
+    if (content.some((item) => item.type === "diff")) this.diffsByToolCall.set(toolCallId, content);
     await this.send({
       sessionUpdate: "tool_call",
       toolCallId,
@@ -362,7 +378,11 @@ export class TranscriptTranslator {
     this.emitted.add(resultKey);
     // A result is Claude's tool finishing, which is as much its own progress as calling it was.
     this.lastAssistantActivity = Date.now();
-    const content = resultContent(block.content);
+    // Content replaces what the call carried, and both of Paseo's bridges read an edit card's text as its unified diff.
+    // So an edit's result sends its diff again rather than the line saying the file was updated, which would leave a card with no diff at all.
+    // The result is still there in `rawOutput`.
+    const content = this.diffsByToolCall.get(toolCallId) ?? resultContent(block.content);
+    this.diffsByToolCall.delete(toolCallId);
     this.openToolCalls.delete(toolCallId);
     await this.send({
       sessionUpdate: "tool_call_update",
@@ -664,6 +684,13 @@ export class TranscriptTranslator {
 
   private async send(update: SessionUpdate): Promise<void> {
     this.lastActivity = Date.now();
+    // Ahead of the update it copies, not behind it. The plugin bridge handles a vendor notification
+    // where it sits in the stream and an update on a lane of its own, so a copy sent afterwards
+    // still arrives first — but only by the depth of that lane, which is whatever a single read off
+    // the pipe happened to carry. Sent first it is first by the order of the stream instead.
+    if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
+      await this.connection.extNotification(TOOL_CALL_MIRROR_METHOD, { sessionId: this.sessionId, update });
+    }
     await this.connection.sessionUpdate({ sessionId: this.sessionId, update });
   }
 
