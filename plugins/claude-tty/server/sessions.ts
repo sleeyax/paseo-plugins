@@ -46,7 +46,7 @@ export async function listSessions(paseo: PaseoApi): Promise<SessionsPayload> {
     problem: reading.problem,
     // The panel may be running on another machine, so elapsed time is measured against this clock.
     now: Date.now(),
-    sessions: attachAgents(reading.sessions, await listAgents(paseo)),
+    sessions: attachAgents(reading.sessions, (await listAgents(paseo)).entries),
   };
 }
 
@@ -154,8 +154,23 @@ export async function readState(): Promise<StateReading> {
   };
 }
 
-/** Titles are a courtesy: a daemon that stalls or pages forever costs them and nothing else. */
-async function listAgents(paseo: PaseoApi): Promise<unknown[]> {
+/**
+ * One session's state file. The provider reads it once a second for every open session, so it is
+ * read on its own rather than through the whole directory, and a session the adapter has not
+ * written one for yet is an answer rather than a failure.
+ */
+export async function readSessionEntry(stateDirectory: string, id: string): Promise<SessionEntry | null> {
+  const name = `${id}${SESSION_SUFFIX}`;
+  const contents = await readFile(path.join(sessionsDirectory(stateDirectory), name), "utf8").catch(() => null);
+  if (contents === null) return null;
+  return joinSessions([{ name, contents }], [], () => false)[0] ?? null;
+}
+
+/**
+ * Titles are a courtesy: a daemon that stalls or pages forever costs them and nothing else. `complete`
+ * says whether the last page was reached, for the callers that count rather than decorate.
+ */
+export async function listAgents(paseo: PaseoApi): Promise<{ entries: unknown[]; complete: boolean }> {
   const deadline = Date.now() + AGENT_BUDGET_MS;
   const entries: unknown[] = [];
   let cursor: string | undefined;
@@ -167,12 +182,12 @@ async function listAgents(paseo: PaseoApi): Promise<unknown[]> {
       const payload = result as { entries?: unknown; pageInfo?: { nextCursor?: string | null } };
       if (Array.isArray(payload.entries)) entries.push(...payload.entries);
       cursor = payload.pageInfo?.nextCursor ?? undefined;
-      if (cursor === undefined) break;
+      if (cursor === undefined) return { entries, complete: true };
     }
   } catch {
-    return entries;
+    return { entries, complete: false };
   }
-  return entries;
+  return { entries, complete: false };
 }
 
 /** The SDK waits a minute by default, which is twice as long as the RPC calling it is allowed to take. */
