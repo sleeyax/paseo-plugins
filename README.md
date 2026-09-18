@@ -41,6 +41,12 @@ paseo plugin add "/absolute/path/to/paseo-plugins/plugins/discord-rich-presence"
 
 After making changes, run `paseo plugin reload <id>`. Paseo does not hot-reload plugins, and reloading is the compile check for the client and server bundles built from `index.client.tsx` and `index.server.ts`.
 
+## Releasing a plugin
+
+A plugin's `version` in its own `package.json` is its update identity: [Paseo Cafe](https://github.com/paseo-cafe/paseo-cafe) compares it against the installed copy's, and only a higher version offers an update.
+Bumping it is what publishes: do it at the end of a PR, or once over a batch of PRs that have already landed.
+Until it moves, installations stay on the old code however many commits land here.
+
 ## Skills
 
 `skills/` holds agent skills for working on this repository, in the [Agent Skills](https://agentskills.io) format, so any harness that reads them can use them.
