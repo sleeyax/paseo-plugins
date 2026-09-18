@@ -6,6 +6,7 @@ import type { AgentSideConnection, ContentBlock, PromptResponse } from "@agentcl
 import * as nodePty from "node-pty";
 import { type ContextWindow, contextWindow, formatTokens } from "./context-window.ts";
 import { createDeferred, type Deferred } from "./deferred.ts";
+import { DialogWatcher } from "./dialog-cards.ts";
 import { type HookPayload, type HookRegistration, type HookResponse, HookServer } from "./hook-server.ts";
 import { InteractionBridge } from "./interactions.ts";
 import { writeLog } from "./log.ts";
@@ -14,9 +15,10 @@ import { markRuntimeDirectory, runtimePrefix } from "./runtime-directories.ts";
 import { INHERIT_EFFORT_ID, INHERIT_MODEL_ID } from "./session-options.ts";
 import { claudeIsWaitingFor } from "./session-status.ts";
 import { TERMINAL_COLS, TERMINAL_ROWS, TerminalScreen } from "./terminal-screen.ts";
+import { sendCardWithdrawn, sendModelChanged, sendNotice } from "./vendor-updates.ts";
 import { SubagentWatcher } from "./subagent-watcher.ts";
 import { TranscriptReader } from "./transcript-reader.ts";
-import { TranscriptTranslator } from "./transcript-translator.ts";
+import { type ModelFallback, TranscriptTranslator } from "./transcript-translator.ts";
 import { TranscriptWatcher } from "./transcript-watcher.ts";
 
 const STARTUP_TIMEOUT_MS = 15_000;
@@ -67,15 +69,36 @@ const COMPLETION_DISMISS = " ";
 // empties it, and costs nothing on the empty box that is the ordinary case.
 const CLEAR_INPUT_LINE = "\u0015";
 // Ctrl-U kills the line the cursor is on, and that is one *visual* line: Claude word-wraps a prompt too long
-// for the width, and a single key then takes the last of those lines and leaves the rest sitting there. A box
-// is emptied by one key per line it has grown to, and since it is drawn on the screen it can never have grown
-// past the height of it -- so a screenful of them empties any box, in one write, every key past the last line
-// landing on an empty box where Ctrl-U does nothing.
-const CLEAR_INPUT_BOX = CLEAR_INPUT_LINE.repeat(TERMINAL_ROWS);
+// for the width, and a single key then takes the last of those lines and leaves the rest sitting there. So a
+// box is emptied by one key per line it has grown to, and since it is drawn on the screen it can never have
+// grown past the height of it, which is the bound below.
+//
+// They have to arrive as keys, which means one key per write with a gap behind it. A screenful written in one
+// go reaches Claude as *text*: the 40 control characters land in the input box as 40 literal U+0015 and go to
+// Claude with the prompt, which is a clear that prepends garbage rather than clearing anything. Measured on
+// Claude Code v2.1.269 and visible in its own transcripts -- around 60 prompts since 2026-09-13 begin with
+// exactly forty U+0015, which `jq 'select(.type=="user") | .message.content | explode | index(21)'` reads out
+// of `~/.claude/projects/*/*.jsonl`.
+const CLEAR_INPUT_KEY_MS = 25;
+// How many readings of an empty box end the clear. The screen is sampled rather than followed, so a single
+// empty reading can be a render that has not caught up with a paste; a few in a row, a key apart, are the
+// cheapest evidence there is that the box really is empty. A box the screen never shows empty -- a terminal
+// nothing has painted, a reading that keeps coming back full -- takes the whole screenful and stops there.
+const CLEAR_INPUT_CONFIRMATIONS = 3;
+// How many keys a box that stops changing is given before the run ends.
+//
+// Not everything in Claude's input box is in Claude's input box. It offers a prompt of its own in an
+// empty one -- grey ghost text, which reads exactly like typed text on a screen scraped for its
+// characters -- and Ctrl-U does not remove it, because there is nothing there to remove. Without this
+// every prompt sent to a session that was showing one paid the whole screenful, a second of keys, and
+// then logged a box it had failed to empty. A key that changes nothing on the screen below the box did
+// nothing, and a few of those in a row is the end of what this can do, whatever the reason.
+const CLEAR_INPUT_UNCHANGED = 4;
 const ESCAPE = "\u001b";
 const CARRIAGE_RETURN = "\r";
 const CONTROL_D = "\u0004";
 const CURSOR_DOWN = "\u001b[B";
+const CURSOR_UP = "\u001b[A";
 const ENTER = "\r";
 const STARTUP_POLL_INTERVAL_MS = 25;
 // Claude re-renders its status line after the Stop hook rather than before it, measured at ~320ms, so the reading for the turn that just ended only lands once the file changes again.
@@ -92,12 +115,23 @@ const WORKSPACE_TRUST_SELECTION_TIMEOUT_MS = 3_000;
 // Claude puts its bypass permissions disclaimer up the same way it puts the trust screen up, and it settles no faster.
 const BYPASS_PERMISSIONS_KEY_DELAY_MS = 500;
 const BYPASS_PERMISSIONS_SELECTION_TIMEOUT_MS = 3_000;
+// Claude puts its external-imports question up the same way, and it settles no faster than the other two.
+const EXTERNAL_IMPORTS_KEY_DELAY_MS = 500;
+const EXTERNAL_IMPORTS_SELECTION_TIMEOUT_MS = 3_000;
 // Claude asks how to resume a long or old conversation before it opens one, and answers that dialog the same way it answers the trust screen.
 const STALE_RESUME_KEY_DELAY_MS = 200;
 const STALE_RESUME_SELECTION_TIMEOUT_MS = 3_000;
 // A resumed session paints its whole conversation before its input box exists, and text inside that conversation can satisfy every readiness signal on its own.
 // Readiness therefore also requires Claude to have stopped painting, because a paste sent mid-restore is dropped without an echo to notice it by.
 const READY_QUIET_MS = 400;
+/**
+ * How long a card that only tells somebody something stays up when nobody answers it.
+ *
+ * Nothing waits for one -- Claude has already done whatever the card is about -- so its whole purpose
+ * is the push a new permission request sends. Left up forever it would keep the session unsuspendable,
+ * since a session with a card open is one somebody may still be answering.
+ */
+const ACKNOWLEDGEMENT_MS = 10 * 60_000;
 
 /** One of the menus Claude opens on its way up, as the adapter has to answer it. */
 type StartupMenu = {
@@ -123,11 +157,18 @@ export type RuntimeDependencies = {
   submitDelayMs?: number;
   latePasteMs?: number;
   dialogDismissMs?: number;
+  clearInputKeyMs?: number;
+  dialogPollMs?: number;
+  dialogAnswerKeyMs?: number;
+  dialogAnswerTimeoutMs?: number;
+  dialogSettleMs?: number;
   transcriptPollIntervalMs?: number;
   workspaceTrustKeyDelayMs?: number;
   workspaceTrustSelectionTimeoutMs?: number;
   bypassPermissionsKeyDelayMs?: number;
   bypassPermissionsSelectionTimeoutMs?: number;
+  externalImportsKeyDelayMs?: number;
+  externalImportsSelectionTimeoutMs?: number;
   staleResumeKeyDelayMs?: number;
   staleResumeSelectionTimeoutMs?: number;
   readyQuietMs?: number;
@@ -166,11 +207,14 @@ export class ClaudeRuntime {
   private readonly submitDelayMs: number;
   private readonly latePasteMs: number;
   private readonly dialogDismissMs: number;
+  private readonly clearInputKeyMs: number;
   private readonly transcriptPollIntervalMs: number | undefined;
   private readonly workspaceTrustKeyDelayMs: number;
   private readonly workspaceTrustSelectionTimeoutMs: number;
   private readonly bypassPermissionsKeyDelayMs: number;
   private readonly bypassPermissionsSelectionTimeoutMs: number;
+  private readonly externalImportsKeyDelayMs: number;
+  private readonly externalImportsSelectionTimeoutMs: number;
   private readonly staleResumeKeyDelayMs: number;
   private readonly staleResumeSelectionTimeoutMs: number;
   private readonly readyQuietMs: number;
@@ -190,6 +234,8 @@ export class ClaudeRuntime {
   private effort: string;
   private readonly onClaudeSessionChange: ((claudeSessionId: string) => Promise<void>) | undefined;
   private readonly interactions: InteractionBridge;
+  /** Claude's own questions, as cards; it watches only while the process it is about is up. */
+  private readonly dialogs: DialogWatcher;
   private readonly translator: TranscriptTranslator;
   private transcript: TranscriptWatcher;
   private readonly screen = new TerminalScreen();
@@ -211,6 +257,8 @@ export class ClaudeRuntime {
   private backgroundHold: NodeJS.Timeout | null = null;
   private heldAssistantMessage: string | undefined;
   private heldAt = 0;
+  /** Cards that say something happened and wait for nobody: a prompt or a timeout takes one down. */
+  private readonly acknowledgements = new Map<string, () => void>();
   /** When Claude last called a hook, which it does only while it is doing something. */
   private lastHookAt = 0;
   private intentionalExit: Deferred<void> | null = null;
@@ -235,6 +283,22 @@ export class ClaudeRuntime {
     this.effort = dependencies.effort ?? INHERIT_EFFORT_ID;
     this.onClaudeSessionChange = dependencies.onClaudeSessionChange;
     this.interactions = new InteractionBridge(sessionId, cwd, connection, dependencies.autoAccept);
+    this.dialogs = new DialogWatcher({
+      sessionId,
+      connection,
+      interactions: this.interactions,
+      waitingFor: () => claudeIsWaitingFor(this.pty?.pid, this.claudeConfigDir),
+      screen: () => this.screen.snapshot(),
+      lines: () => this.screen.lines(),
+      escape: () => this.pty?.write(ESCAPE),
+      press: (key) => this.pty?.write(key === "up" ? CURSOR_UP : key === "down" ? CURSOR_DOWN : ENTER),
+      answeredByStartup: (screen) =>
+        isWorkspaceTrustScreen(screen) || isBypassPermissionsScreen(screen) || isExternalImportsScreen(screen) || isStaleResumeScreen(screen),
+      ...(dependencies.dialogPollMs === undefined ? {} : { pollIntervalMs: dependencies.dialogPollMs }),
+      ...(dependencies.dialogAnswerKeyMs === undefined ? {} : { answerKeyMs: dependencies.dialogAnswerKeyMs }),
+      ...(dependencies.dialogAnswerTimeoutMs === undefined ? {} : { answerTimeoutMs: dependencies.dialogAnswerTimeoutMs }),
+      ...(dependencies.dialogSettleMs === undefined ? {} : { settleMs: dependencies.dialogSettleMs }),
+    });
     this.spawnPty = dependencies.spawnPty ?? nodePty.spawn;
     this.startupTimeoutMs = dependencies.startupTimeoutMs ?? STARTUP_TIMEOUT_MS;
     this.readinessTimeoutMs = dependencies.readinessTimeoutMs ?? STARTUP_TIMEOUT_MS;
@@ -243,11 +307,14 @@ export class ClaudeRuntime {
     this.submitDelayMs = dependencies.submitDelayMs ?? SUBMIT_DELAY_MS;
     this.latePasteMs = dependencies.latePasteMs ?? LATE_PASTE_MS;
     this.dialogDismissMs = dependencies.dialogDismissMs ?? DIALOG_DISMISS_MS;
+    this.clearInputKeyMs = dependencies.clearInputKeyMs ?? CLEAR_INPUT_KEY_MS;
     this.transcriptPollIntervalMs = dependencies.transcriptPollIntervalMs;
     this.workspaceTrustKeyDelayMs = dependencies.workspaceTrustKeyDelayMs ?? WORKSPACE_TRUST_KEY_DELAY_MS;
     this.workspaceTrustSelectionTimeoutMs = dependencies.workspaceTrustSelectionTimeoutMs ?? WORKSPACE_TRUST_SELECTION_TIMEOUT_MS;
     this.bypassPermissionsKeyDelayMs = dependencies.bypassPermissionsKeyDelayMs ?? BYPASS_PERMISSIONS_KEY_DELAY_MS;
     this.bypassPermissionsSelectionTimeoutMs = dependencies.bypassPermissionsSelectionTimeoutMs ?? BYPASS_PERMISSIONS_SELECTION_TIMEOUT_MS;
+    this.externalImportsKeyDelayMs = dependencies.externalImportsKeyDelayMs ?? EXTERNAL_IMPORTS_KEY_DELAY_MS;
+    this.externalImportsSelectionTimeoutMs = dependencies.externalImportsSelectionTimeoutMs ?? EXTERNAL_IMPORTS_SELECTION_TIMEOUT_MS;
     this.staleResumeKeyDelayMs = dependencies.staleResumeKeyDelayMs ?? STALE_RESUME_KEY_DELAY_MS;
     this.staleResumeSelectionTimeoutMs = dependencies.staleResumeSelectionTimeoutMs ?? STALE_RESUME_SELECTION_TIMEOUT_MS;
     this.readyQuietMs = dependencies.readyQuietMs ?? READY_QUIET_MS;
@@ -258,6 +325,9 @@ export class ClaudeRuntime {
     this.runtimeRoot = dependencies.runtimeRoot ?? os.tmpdir();
     this.translator = dependencies.translator ?? new TranscriptTranslator(sessionId, cwd, connection);
     this.transcript = this.createTranscriptWatcher(claudeSessionId, dependencies.transcriptFilePath);
+    // Only a runtime reports these, which is the whole of why a replayed session never does: it has one
+    // translator and no runtime at all until somebody prompts it.
+    this.translator.setModelFallbackHandler((fallback) => void this.reportModelFallback(fallback));
   }
 
   get started(): boolean {
@@ -294,6 +364,10 @@ export class ClaudeRuntime {
     this.cancelRequested = false;
     this.contextWaitCancelled = false;
     this.interactions.beginTurn();
+    // `beginTurn` lets go of every card this side is waiting on, and this is what says so to the client
+    // for the ones nobody was going to answer. A message is being sent; the acknowledgement it would
+    // have interrupted has been read by definition.
+    await this.withdrawAcknowledgements();
     this.assistantBaseline = this.translator.assistantChunks;
     this.translator.trackBackgroundWork();
     try {
@@ -378,6 +452,9 @@ export class ClaudeRuntime {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.dialogs.stop();
+    this.translator.setModelFallbackHandler(null);
+    await this.withdrawAcknowledgements();
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
     this.cancelTimer = null;
     this.ready?.reject(new Error(`Session ${this.sessionId} closed before Claude became ready`));
@@ -401,6 +478,81 @@ export class ClaudeRuntime {
     await this.settleOpenToolCalls();
     this.screen.dispose();
     await this.removeRuntimeDirectory();
+  }
+
+  /**
+   * Claude changed the model underneath this session, which is a thing that happens to a person rather
+   * than something they did: `switchModelsOnFlag` retries a message the model's safeguards flagged on a
+   * fallback model and writes a line to the transcript, and that line was all there was.
+   *
+   * Three things go out for one. A notice, which is Paseo's timeline notification and sends no push, so
+   * the session carries the record of what happened whether or not anybody was looking. The model the
+   * session's picker shows, where the switch was for the session rather than for one message -- the
+   * launch flag is untouched, so a restart puts the model back to the one that was chosen, which is
+   * what makes this a reading rather than a decision. And a card with a single OK, purely because a new
+   * permission request is what makes Paseo push to a phone, and a model silently swapped mid-run is
+   * worth waking somebody for.
+   *
+   * None of it blocks Claude: nothing is awaited on the transcript's path, and the card waits for an
+   * answer nothing needs.
+   */
+  private async reportModelFallback(fallback: ModelFallback): Promise<void> {
+    if (this.closed) return;
+    writeLog({ level: "warn", message: "Claude switched the model under this session", sessionId: this.sessionId, subtype: fallback.subtype, title: fallback.title, model: fallback.model });
+    await sendNotice(this.connection, this.sessionId, {
+      id: fallback.id,
+      severity: "warning",
+      title: fallback.title,
+      description: fallback.description,
+    });
+    if (fallback.model) await sendModelChanged(this.connection, this.sessionId, fallback.model);
+    await this.acknowledge(fallback.id, fallback.title, fallback.description);
+  }
+
+  /**
+   * A card that tells rather than asks. Its one option is a declining one, like every card whose answer
+   * is not a decision, and nothing is done with the answer: the point of it is the push.
+   */
+  private async acknowledge(id: string, title: string, description: string): Promise<void> {
+    const request = this.interactions.openRequest(
+      {
+        toolCall: {
+          toolCallId: id,
+          title,
+          kind: "other",
+          status: "pending",
+          rawInput: { notice: description },
+        },
+        options: [{ optionId: "acknowledge", name: "OK", kind: "reject_once" }],
+      },
+      // Nothing is held up behind this card, so a session with one open is not a session anybody is
+      // waiting for: it goes on suspending on its own schedule, and a question Claude opens afterwards
+      // still gets a card of its own rather than being skipped as already asked about.
+      { blocking: false },
+    );
+    this.acknowledgements.set(id, request.withdraw);
+    const expiry = setTimeout(() => void this.withdrawAcknowledgement(id), ACKNOWLEDGEMENT_MS);
+    expiry.unref();
+    const response = await request.response;
+    // A card somebody answered is gone from the client by itself. One resolved here without an answer is
+    // not: `cancelPending` lets go of every card this side is waiting on at the end of every turn, and
+    // saying nothing then would leave this one on screen for good. So it stays on the list, where a
+    // prompt or the timeout takes it down on the client too.
+    if (response.outcome.outcome === "cancelled" && this.acknowledgements.has(id)) return;
+    clearTimeout(expiry);
+    this.acknowledgements.delete(id);
+  }
+
+  private async withdrawAcknowledgement(id: string): Promise<void> {
+    const withdraw = this.acknowledgements.get(id);
+    if (!withdraw) return;
+    this.acknowledgements.delete(id);
+    withdraw();
+    await sendCardWithdrawn(this.connection, this.sessionId, id);
+  }
+
+  private async withdrawAcknowledgements(): Promise<void> {
+    for (const id of [...this.acknowledgements.keys()]) await this.withdrawAcknowledgement(id);
   }
 
   private async ensureStarted(): Promise<void> {
@@ -454,12 +606,16 @@ export class ClaudeRuntime {
       this.trustPrompt = null;
     }
     await this.waitForTerminalReady();
+    // Only now: everything above is a dialog the adapter answers itself, and a card for one of those
+    // would ask Paseo about a question that is already being answered.
+    this.dialogs.start();
     await this.transcript.start();
     this.resumeNextLaunch = true;
     writeLog({ level: "info", message: "Started interactive Claude session", sessionId: this.sessionId, claudePid: this.pty?.pid, cwd: this.cwd });
   }
 
   private async failedStartup(message: string): Promise<never> {
+    this.dialogs.stop();
     // The message carries the terminal snapshot, and it has only ever travelled to Paseo as an error.
     // A handshake that failed is the thing nobody can reconstruct afterwards, so the log keeps it too.
     writeLog({ level: "error", message, sessionId: this.sessionId });
@@ -539,6 +695,7 @@ export class ClaudeRuntime {
   private handleExit(pty: PtyProcess, exitCode: number, signal?: number): void {
     if (this.closed) return;
     const current = this.pty === pty;
+    if (current) this.dialogs.stop();
     if (this.intentionalExit) {
       if (current) this.pty = null;
       this.intentionalExit.resolve();
@@ -790,6 +947,7 @@ export class ClaudeRuntime {
   private async stopForRestart(): Promise<void> {
     const pty = this.pty;
     if (!pty) return;
+    this.dialogs.stop();
     this.intentionalExit = createDeferred<void>();
     pty.write(CONTROL_D);
     await Promise.race([this.intentionalExit.promise, new Promise<void>((resolve) => setTimeout(resolve, 500))]);
@@ -825,24 +983,57 @@ export class ClaudeRuntime {
    * likely to notice is not theirs. Measured against Claude Code v2.1.269 at this terminal size: a
    * 193-character prompt wraps after 115, and one Ctrl-U leaves exactly those 115 characters behind.
    *
-   * The keys go in whatever the screen says, because the screen is sampled and a paste too recent to
-   * have been rendered is exactly the residue worth clearing; the snapshot is read only to name it in
-   * the log, since a box that had anything in it is worth a line either way. That sampling is also why
-   * the box is not cleared a line at a time and read back between keys: the residue worth clearing is
-   * the one the screen cannot yet see, so the count cannot be taken from it, and a whole screenful is
-   * sent blind instead.
+   * Those keys go one write at a time. Written as one string they are not keys at all: Claude reads the
+   * burst as pasted text and puts every one of the 40 control characters into the box, so the clear that
+   * was meant to empty it is what fills it, and the prompt goes to Claude behind forty U+0015. See the
+   * constants above for the evidence in Claude's own transcripts.
+   *
+   * The box is read back between keys, which is also what ends the run early -- an empty box is the
+   * ordinary case and a key on one does nothing, so paying 40 keys for it would put a second on the front
+   * of every prompt. The reading is not trusted on its own, because the screen is sampled and a paste too
+   * recent to have been rendered is exactly the residue worth clearing: the run ends on a few empty
+   * readings in a row, and a box that never reads empty gets the screenful the bound allows and no more.
+   *
+   * It also ends where the keys have stopped changing anything. Claude puts a suggested prompt in an
+   * empty box as grey ghost text, which is not content and cannot be killed, but reads as content to
+   * anything that scrapes the characters off a screen -- so a box showing one would otherwise take every
+   * key of the bound, every time, and report itself uncleared afterwards. What is compared is the screen
+   * from the box down rather than the box's own line, because Ctrl-U kills the last of the lines a long
+   * prompt wrapped onto and leaves the first, which is the line the box is read from: on a wrapped
+   * residue that line reads the same between keys while the box is visibly emptying.
    */
-  private clearInputBox(): void {
+  private async clearInputBox(): Promise<void> {
     const held = inputBoxContent(this.screen.snapshot());
+    let keys = 0;
+    let empties = 0;
+    let unchanged = 0;
+    let previous = inputBoxTail(this.screen.snapshot());
+    while (keys < TERMINAL_ROWS && empties < CLEAR_INPUT_CONFIRMATIONS && unchanged < CLEAR_INPUT_UNCHANGED) {
+      this.pty?.write(CLEAR_INPUT_LINE);
+      keys += 1;
+      await delay(this.clearInputKeyMs);
+      const screen = this.screen.snapshot();
+      // A screen with no input box on it at all -- a terminal Claude has painted nothing to yet -- says
+      // nothing is being held any more than an empty box does, and is counted the same way.
+      empties = (inputBoxContent(screen) || "") === "" ? empties + 1 : 0;
+      const tail = inputBoxTail(screen);
+      unchanged = tail === previous ? unchanged + 1 : 0;
+      previous = tail;
+    }
     if (held) {
       writeLog({
         level: "warn",
         message: "Cleared something out of Claude's input box before sending a prompt",
         sessionId: this.sessionId,
         held: held.slice(0, PROMPT_ECHO_CHARS),
+        keys,
+        // Whether the box was empty when the keys stopped, rather than the run simply having run out.
+        emptied: empties >= CLEAR_INPUT_CONFIRMATIONS,
+        // And whether they stopped because nothing was moving, which is what a suggestion Claude is
+        // offering looks like from here: read as held, and not there to be cleared.
+        unchanged: unchanged >= CLEAR_INPUT_UNCHANGED,
       });
     }
-    this.pty?.write(CLEAR_INPUT_BOX);
   }
 
   /**
@@ -856,12 +1047,12 @@ export class ClaudeRuntime {
   private async submit(text: string): Promise<void> {
     const activityBefore = this.activityAt;
     const echo = promptEcho(text);
-    const paste = (): void => {
-      this.clearInputBox();
+    const paste = async (): Promise<void> => {
+      await this.clearInputBox();
       this.pty?.write(`${BRACKETED_PASTE_START}${text}${COMPLETION_DISMISS}${BRACKETED_PASTE_END}`);
     };
     if ((await this.takeTheKeyboardBack(activityBefore)) === "delivered") return;
-    paste();
+    await paste();
     let pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), PASTE_ECHO_MS);
     for (let attempt = 0; attempt < SUBMIT_ATTEMPTS; attempt += 1) {
       await delay(this.submitDelayMs);
@@ -874,7 +1065,7 @@ export class ClaudeRuntime {
         if (keyboard === "dismissed") {
           // The paste went into the question rather than into the box, so it goes again now the box has
           // the keys back; Claude has nothing of this prompt yet, and the key below would send an empty box.
-          paste();
+          await paste();
           pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), PASTE_ECHO_MS);
           continue;
         }
@@ -891,6 +1082,17 @@ export class ClaudeRuntime {
       if (!inputBoxVisible(this.screen.snapshot())) return;
       pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), this.latePasteMs);
       if (!pasted) {
+        // An echo that never came is the shape a question opening behind the paste has: the paste went
+        // into the question instead of the box, so there was never an echo to wait for. Asked here
+        // rather than only before the key, because the wait above is two seconds long and a question
+        // Claude opened during it would otherwise fail a prompt this can still deliver.
+        const keyboard = await this.takeTheKeyboardBack(activityBefore);
+        if (keyboard === "delivered") return;
+        if (keyboard === "dismissed") {
+          await paste();
+          pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), PASTE_ECHO_MS);
+          continue;
+        }
         if (this.submissionMovedOn(activityBefore)) return;
         throw new Error(`Claude never took the prompt for session ${this.sessionId}: it did not appear in Claude's input box.`);
       }
@@ -928,6 +1130,9 @@ export class ClaudeRuntime {
         await delay(STARTUP_POLL_INTERVAL_MS);
         if ((await claudeIsWaitingFor(this.pty?.pid, this.claudeConfigDir)) === null) {
           writeLog({ level: "warn", message: "Closed something Claude had open, to get the keyboard back for a prompt", sessionId: this.sessionId, waitingFor });
+          // The card for that question stands for an answer nobody can give now, and the question went
+          // unanswered to make room for this message, which is worth a line in the session's timeline.
+          await this.dialogs.dismissedForPrompt(waitingFor);
           return "dismissed";
         }
       } while (Date.now() < deadline);
@@ -1041,6 +1246,7 @@ export class ClaudeRuntime {
     let deadline = Date.now() + this.startupTimeoutMs;
     let trustHandled = false;
     let bypassHandled = false;
+    let externalImportsHandled = false;
     while (true) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new Error(this.startupTimeoutMessage());
@@ -1063,6 +1269,13 @@ export class ClaudeRuntime {
         if (!accepted) throw new Error("Claude asks for the Bypass Permissions disclaimer before it will start in that mode, and it was not accepted in Paseo.");
         await this.acceptBypassPermissions();
         // As with workspace trust: the window that was running covered a handshake, not a person reading a warning.
+        deadline = Date.now() + this.startupTimeoutMs;
+        continue;
+      }
+      if (!externalImportsHandled && isExternalImportsScreen(this.screen.snapshot())) {
+        externalImportsHandled = true;
+        await this.answerExternalImports();
+        // Same reason again: a person was reading a list of paths, not a handshake that was slow.
         deadline = Date.now() + this.startupTimeoutMs;
         continue;
       }
@@ -1095,6 +1308,59 @@ export class ClaudeRuntime {
     if (answer === "stuck") {
       throw new Error(`Claude did not select "Yes, I accept" on its Bypass Permissions disclaimer after it was accepted in Paseo. Terminal output:\n${this.screen.snapshot()}`);
     }
+  }
+
+  /**
+   * Claude asks whether this project's CLAUDE.md may reach outside the workspace for the files it
+   * `@`-imports, and that is the same kind of question as the trust screen: an import is read into
+   * Claude's context as instructions, the files are chosen by whoever wrote the CLAUDE.md, and no
+   * default the adapter could pick would be answering for anybody. So it goes to Paseo as a card, with
+   * the paths Claude listed in it.
+   *
+   * Refusing is where this parts company with workspace trust. Trust is the session -- Claude exits
+   * without it, so a denial fails the start -- but this dialog's No is a session that runs with the
+   * imports left out. So a refusal takes that and carries on: a person who said no has said what they
+   * want, and failing the start on top of it would refuse them the session as well. A card nobody
+   * answers lands there too, which is half the reason for choosing it -- an unattended session comes up
+   * on the safe side rather than sitting at a dialog until the handshake times out.
+   *
+   * What the session loses is not left silent. The notice puts the refusal and the files in the
+   * timeline, because a Claude missing the instructions its CLAUDE.md promised is otherwise a session
+   * behaving oddly for no visible reason.
+   */
+  private async answerExternalImports(): Promise<void> {
+    const imports = externalImportPaths(this.screen.snapshot());
+    const allowed = await this.interactions.requestExternalImports(imports);
+    const option = allowed ? "Yes, allow external imports" : "No, disable external imports";
+    const answer = await this.answerStartupMenu({
+      onScreen: isExternalImportsScreen,
+      selected: allowed ? isExternalImportsAllowed : isExternalImportsDisabled,
+      keyDelayMs: this.externalImportsKeyDelayMs,
+      timeoutMs: this.externalImportsSelectionTimeoutMs,
+      exited: "Claude exited before its external-imports question could be answered",
+    });
+    // The question is gone and Claude is starting on an answer the adapter did not give, which for this
+    // one is a session either way: it has the imports or it has not, and which is not on screen to read.
+    if (answer === "gone") {
+      writeLog({ level: "warn", message: "Claude's external-imports question was answered before the adapter could take it", sessionId: this.sessionId });
+      return;
+    }
+    // Stuck is the dialog still standing, and Claude completes no handshake behind one, so the start is
+    // lost whatever this says. An error naming the option beats waiting out the startup window for it.
+    if (answer === "stuck") {
+      throw new Error(`Claude did not select "${option}" on its external-imports question after it was answered in Paseo. Terminal output:\n${this.screen.snapshot()}`);
+    }
+    writeLog({ level: "info", message: "Answered Claude's external-imports question", sessionId: this.sessionId, allowed, imports });
+    if (allowed) return;
+    await sendNotice(this.connection, this.sessionId, {
+      id: `external-imports-${randomUUID()}`,
+      severity: "warning",
+      title: "External CLAUDE.md imports are disabled for this session",
+      description: [
+        "This project's CLAUDE.md imports files from outside the workspace, and that was not approved, so Claude started without them.",
+        ...(imports.length > 0 ? [`Left out:\n${imports.map((file) => `- ${file}`).join("\n")}`] : []),
+      ].join("\n\n"),
+    });
   }
 
   private async confirmWorkspaceTrust(): Promise<void> {
@@ -1196,6 +1462,16 @@ function inputBoxContent(screen: string): string | null {
   return null;
 }
 
+/**
+ * The screen from Claude's input box down: the box, whatever it has wrapped onto, and the footer under
+ * it. What a Ctrl-U that did something changes, and what one that did nothing leaves exactly as it was.
+ */
+function inputBoxTail(screen: string): string {
+  const lines = screen.split("\n");
+  const index = lines.findLastIndex((line) => /^\s*❯/.test(line));
+  return (index < 0 ? lines : lines.slice(index)).join("\n");
+}
+
 function inputBoxHolds(screen: string, echo: string): boolean {
   return inputBoxContent(screen)?.startsWith(echo) ?? false;
 }
@@ -1222,6 +1498,57 @@ function isWorkspaceTrustScreen(screen: string): boolean {
     /Yes,\s*I trust this folder/i.test(screen) &&
     /Enter to confirm/i.test(screen)
   );
+}
+
+/**
+ * Claude puts this up before it reads a CLAUDE.md that `@`-imports anything outside the working
+ * directory, and it comes *before* the SessionStart hook, so a session whose project has one never
+ * started at all until the startup loop learned to recognise it.
+ *
+ * The phrases are joined with `\s+` rather than spaces because a snapshot is a screen: Claude wraps its
+ * own sentences at the terminal width, and the question and the two options are all long enough to land
+ * with a newline inside them on a narrower one than this adapter asks for.
+ */
+function isExternalImportsScreen(screen: string): boolean {
+  return (
+    /Allow\s+external\s+CLAUDE\.md\s+file\s+imports\?/i.test(screen) &&
+    /External\s+imports:/i.test(screen) &&
+    /No,\s*disable\s+external\s+imports/i.test(screen) &&
+    /Yes,\s*allow\s+external\s+imports/i.test(screen) &&
+    /Enter to confirm/i.test(screen)
+  );
+}
+
+function isExternalImportsAllowed(screen: string): boolean {
+  return /(?:^|\n)[ \t]*❯[ \t]*Yes,[ \t]*allow external imports[ \t]*(?:$|\n)/i.test(screen);
+}
+
+/** Where Claude's own marker starts, so a refusal is confirmed without moving it. */
+function isExternalImportsDisabled(screen: string): boolean {
+  return /(?:^|\n)[ \t]*❯[ \t]*No,[ \t]*disable external imports[ \t]*(?:$|\n)/i.test(screen);
+}
+
+/**
+ * The files Claude lists under `External imports:`, which are the whole of what the card is asking
+ * about. Read by walking down from that heading for as long as the lines look like paths, because the
+ * list has no closing line of its own -- what follows it is the `Important:` warning and Claude's
+ * security link, and neither of those begins the way a path does.
+ *
+ * A path longer than the screen is wide is the one thing this reads short: Claude wraps it, and the
+ * continuation stops the walk rather than joining the line above. The card is then missing a tail, not
+ * a file, so the person still sees which import they are being asked about.
+ */
+function externalImportPaths(screen: string): string[] {
+  const lines = screen.split("\n");
+  const heading = lines.findIndex((line) => /^\s*External\s+imports:/i.test(line));
+  if (heading < 0) return [];
+  const paths: string[] = [];
+  for (const line of lines.slice(heading + 1)) {
+    const text = line.trim();
+    if (!/^[~/.]/.test(text)) break;
+    paths.push(text);
+  }
+  return paths;
 }
 
 /**

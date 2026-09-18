@@ -12,10 +12,14 @@ import { StateStore } from "./state-store.ts";
 import { subagentsDirectory } from "./subagent-transcript.ts";
 import { TERMINAL_COLS, TERMINAL_ROWS } from "./terminal-screen.ts";
 import { escapeProjectDirName } from "./transcript-reader.ts";
+import { NOTICE_METHOD } from "./vendor-updates.ts";
 
-/** What the runtime clears Claude's input box with before every paste: Ctrl-U once per line the box could have grown to. */
+/** What the runtime clears Claude's input box with before every paste: Ctrl-U, a key per write, until the box reads empty. */
 const CLEAR_INPUT_LINE = "\u0015";
-const CLEAR_INPUT_BOX = CLEAR_INPUT_LINE.repeat(TERMINAL_ROWS);
+/** The clear stops after this many readings of an empty box, which is all an empty one costs. */
+const CLEAR_INPUT_CONFIRMATIONS = 3;
+/** And after this many keys that changed nothing, which is what a box it cannot empty costs. */
+const CLEAR_INPUT_UNCHANGED = 4;
 
 class FakePty {
   readonly pid: number;
@@ -26,10 +30,10 @@ class FakePty {
   /**
    * The same without that clear. Nearly every test here counts or names the writes one prompt makes, and
    * a key sent ahead of all of them says nothing about any one of them; the tests about the clear itself
-   * read `keystrokes`.
+   * read `keystrokes`, through `keySequence` below.
    */
   get writes(): string[] {
-    return this.keystrokes.filter((write) => write !== CLEAR_INPUT_BOX);
+    return this.keystrokes.filter((write) => write !== CLEAR_INPUT_LINE);
   }
 
   private readonly dataHandlers: Array<(data: string) => void> = [];
@@ -68,6 +72,29 @@ class FakePty {
   emitExit(): void {
     for (const handler of this.exitHandlers) handler({ exitCode: 0 });
   }
+}
+
+/**
+ * The keys a prompt sent, with each run of clear keys collapsed into a single `clear`. The clear is one
+ * key per write now -- a burst of them reaches Claude as text rather than as keys -- and how many it takes
+ * is whatever the box on the screen said, so a test naming the writes around it reads that run as one
+ * thing, and the tests about the clear itself count `clearKeys`.
+ */
+function keySequence(keystrokes: string[]): string[] {
+  const sequence: string[] = [];
+  for (const key of keystrokes) {
+    if (key === CLEAR_INPUT_LINE) {
+      if (sequence.at(-1) !== "clear") sequence.push("clear");
+      continue;
+    }
+    sequence.push(key);
+  }
+  return sequence;
+}
+
+/** How many keys the clear took, which is bounded by the height of the screen. */
+function clearKeys(keystrokes: string[]): number {
+  return keystrokes.filter((key) => key === CLEAR_INPUT_LINE).length;
 }
 
 type SpawnRecord = {
@@ -279,6 +306,7 @@ test("asks through ACP before accepting Claude workspace trust", async () => {
     startupTimeoutMs: 500,
     readinessTimeoutMs: 0,
     submitDelayMs: 0, contextRefreshTimeoutMs: 0,
+    clearInputKeyMs: 0,
     workspaceTrustKeyDelayMs: 0,
     workspaceTrustSelectionTimeoutMs: 50,
   });
@@ -369,6 +397,190 @@ test("fails closed when Claude workspace trust is denied", async () => {
     assert.deepEqual(pty.writes, []);
     assert.equal(pty.killed, true);
     assert.equal((await readdir(runtimeRoot)).some((name) => name.startsWith("claude-tty-acp-")), false);
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+const EXTERNAL_IMPORTS = ["/home/node/rbms-legacy-lab/AGENTS.md", "/srv/house-style/CONVENTIONS.md"];
+
+test("asks through ACP before letting a CLAUDE.md import files from outside the workspace", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-imports-test-"));
+  const cwd = "/work/imports";
+  const permissionRequests: RequestPermissionRequest[] = [];
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const connection = {
+    sessionUpdate: async () => undefined,
+    requestPermission: async (request: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
+      permissionRequests.push(request);
+      return { outcome: { outcome: "selected", optionId: "allow-external-imports" } };
+    },
+    extNotification: async () => undefined,
+  } as unknown as AgentSideConnection;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    let answered = false;
+    const pty = new FakePty(5700, (data) => {
+      if (data === "[B") setImmediate(() => pty.emitData(externalImportsScreen("allow")));
+      // Claude reads the CLAUDE.md, and so reaches its SessionStart hook, only once this is answered.
+      if (data === "\r" && !answered) {
+        answered = true;
+        setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+      }
+    });
+    spawned = pty;
+    setImmediate(() => pty.emitData(externalImportsScreen("disable")));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(connection, {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    clearInputKeyMs: 0,
+    externalImportsKeyDelayMs: 0,
+    externalImportsSelectionTimeoutMs: 50,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => permissionRequests.length === 1 && spawned !== null && spawned.writes.length === 4);
+    assert.equal(permissionRequests[0]!.toolCall.title, "Let this project's CLAUDE.md import files from outside it?");
+    // The files are the question, so the card has to carry the ones Claude listed rather than the words around them.
+    assert.deepEqual((permissionRequests[0]!.toolCall.rawInput as { imports?: string[] }).imports, EXTERNAL_IMPORTS);
+    assert.deepEqual(permissionRequests[0]!.options, [
+      { optionId: "disable-external-imports", name: "No, disable external imports", kind: "reject_once" },
+      { optionId: "allow-external-imports", name: "Yes, allow external imports", kind: "reject_once" },
+    ]);
+    assert.deepEqual((spawned as unknown as FakePty).writes, ["[B", "\r", "[200~hello [201~", "\r"]);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+// The one consent card a refusal does not fail the start on: Claude runs without the imports, and a
+// session that runs is worth more than the files it was refused.
+test("starts without the external imports, and says so, when the card is declined", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-imports-declined-test-"));
+  const vendor: Array<{ method: string; params: Record<string, unknown> }> = [];
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  const connection = {
+    sessionUpdate: async () => undefined,
+    requestPermission: async (): Promise<RequestPermissionResponse> => ({ outcome: { outcome: "selected", optionId: "disable-external-imports" } }),
+    extNotification: async (method: string, params: Record<string, unknown>) => {
+      vendor.push({ method, params });
+    },
+  } as unknown as AgentSideConnection;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    let answered = false;
+    const pty = new FakePty(5800, (data) => {
+      if (data === "\r" && !answered) {
+        answered = true;
+        setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+      }
+    });
+    spawned = pty;
+    setImmediate(() => pty.emitData(externalImportsScreen("disable")));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(connection, {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    clearInputKeyMs: 0,
+    externalImportsKeyDelayMs: 0,
+    externalImportsSelectionTimeoutMs: 50,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/imports-declined", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 3);
+    // Claude's own marker starts on No, so the refusal is confirmed where it stands and no row is walked.
+    assert.deepEqual((spawned as unknown as FakePty).writes, ["\r", "[200~hello [201~", "\r"]);
+    assert.equal((spawned as unknown as FakePty).killed, false);
+    const notice = vendor.find((update) => update.method === NOTICE_METHOD)?.params.notice as { title: string; description: string } | undefined;
+    assert.equal(notice?.title, "External CLAUDE.md imports are disabled for this session");
+    // Which files the session is missing, or the notice explains nothing anybody can act on.
+    for (const file of EXTERNAL_IMPORTS) assert.ok(notice?.description.includes(file), `notice names ${file}`);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+// Claude answers its own dialogs sometimes -- a remembered project, a key that arrived from somewhere
+// else -- and the answer this side was given is then about a question nobody is asking.
+test("presses nothing when Claude's external-imports question goes before the card is answered", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-imports-gone-test-"));
+  const vendor: Array<{ method: string; params: Record<string, unknown> }> = [];
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  let asked = false;
+  const connection = {
+    sessionUpdate: async () => undefined,
+    requestPermission: async (): Promise<RequestPermissionResponse> => {
+      asked = true;
+      // Claude has moved on by the time the answer comes back, which is the whole of this case.
+      spawned?.emitData(freshModeScreen("auto mode on"));
+      return { outcome: { outcome: "selected", optionId: "disable-external-imports" } };
+    },
+    extNotification: async (method: string, params: Record<string, unknown>) => {
+      vendor.push({ method, params });
+    },
+  } as unknown as AgentSideConnection;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    const pty = new FakePty(5900);
+    spawned = pty;
+    setImmediate(() => {
+      pty.emitData(externalImportsScreen("disable"));
+      setTimeout(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }), 50);
+    });
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(connection, {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    startupTimeoutMs: 1_000,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    clearInputKeyMs: 0,
+    externalImportsKeyDelayMs: 0,
+    externalImportsSelectionTimeoutMs: 50,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/imports-gone", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2, 3_000);
+    // The dialog was recognised and carded; what follows is about what became of the answer.
+    assert.equal(asked, true);
+    // Only the prompt: an Enter sent at a dialog that has gone lands wherever Claude is now.
+    assert.deepEqual((spawned as unknown as FakePty).writes, ["[200~hello [201~", "\r"]);
+    // And nothing is claimed about a session whose answer the adapter never gave.
+    assert.deepEqual(vendor.filter((update) => update.method === NOTICE_METHOD), []);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
   } finally {
     await agent.close();
     await rm(runtimeRoot, { force: true, recursive: true });
@@ -709,6 +921,23 @@ function workspaceTrustScreen(cwd: string): string {
   ].join("\r\n");
 }
 
+/** Claude's external-imports question, as captured from a session that stopped at one. */
+function externalImportsScreen(selected: "disable" | "allow"): string {
+  return [
+    "[2J[H",
+    "Allow external CLAUDE.md file imports?",
+    "This project's CLAUDE.md imports files outside the current working directory. Never allow this for third-party",
+    "repositories.",
+    "External imports:",
+    ...EXTERNAL_IMPORTS.map((file) => `  ${file}`),
+    "Important: Only use Claude Code with files you trust. Accessing untrusted files may pose security risks",
+    "https://code.claude.com/docs/en/security",
+    selected === "disable" ? "❯ No, disable external imports" : "  No, disable external imports",
+    selected === "disable" ? "    Yes, allow external imports" : "❯ Yes, allow external imports",
+    "Enter to confirm · Esc to cancel",
+  ].join("\r\n");
+}
+
 async function runHookClient(clientPath: string, payload: Record<string, unknown>): Promise<{ code: number; stdout: string }> {
   const child = spawn(process.execPath, [clientPath], { stdio: ["pipe", "pipe", "inherit"] });
   let stdout = "";
@@ -740,16 +969,21 @@ test("clears what an interrupt left in Claude's input box before pasting the nex
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0, clearInputKeyMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/clear", mcpServers: [] });
     const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
     await waitFor(() => pty !== undefined && pty.writes.length === 2);
     // The clear goes first, so what Claude reads is this prompt and not it run together with the old one.
-    assert.deepEqual(pty.keystrokes, [CLEAR_INPUT_BOX, "\u001b[200~hello \u001b[201~", "\r"]);
-    // A key per line of the box, because Ctrl-U only kills the line the cursor is on and Claude wraps a long prompt across several.
-    assert.equal(pty.keystrokes[0], CLEAR_INPUT_LINE.repeat(TERMINAL_ROWS));
+    assert.deepEqual(keySequence(pty.keystrokes), ["clear", "\u001b[200~hello \u001b[201~", "\r"]);
+    // A key per line of the box, because Ctrl-U only kills the line the cursor is on and Claude wraps a
+    // long prompt across several. This fake never redraws, so the keys stop once they are visibly doing
+    // nothing -- give or take the one whose reading caught the screen still being painted. The screenful
+    // is still the bound, and is what a box that goes on changing is allowed.
+    assert.ok(clearKeys(pty.keystrokes) <= CLEAR_INPUT_UNCHANGED + 1, `cleared with ${clearKeys(pty.keystrokes)} keys`);
+    // And each of them its own write: in one write Claude reads them as text and types them into the box.
+    assert.ok(pty.keystrokes.every((key) => key === CLEAR_INPUT_LINE || !key.includes(CLEAR_INPUT_LINE)));
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
     assert.deepEqual(await turn, { stopReason: "end_turn" });
   } finally {
@@ -776,8 +1010,9 @@ test("clears the input box even when nothing is showing in it", async () => {
     const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
     await waitFor(() => pty !== undefined && pty.writes.length === 2);
     // Unconditional, because the screen is sampled: a paste too recent to have been drawn is exactly the
-    // residue worth clearing, and an empty box costs nothing to clear.
-    assert.equal(pty.keystrokes[0], CLEAR_INPUT_BOX);
+    // residue worth clearing, and an empty box costs only the keys that confirm it is one.
+    assert.equal(keySequence(pty.keystrokes)[0], "clear");
+    assert.equal(clearKeys(pty.keystrokes), CLEAR_INPUT_CONFIRMATIONS);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
     assert.deepEqual(await turn, { stopReason: "end_turn" });
   } finally {
@@ -831,6 +1066,107 @@ test("clears a residue Claude had wrapped, not just the last line of it", async 
     // The whole of the old message went, not just the line the cursor was on. One Ctrl-U would have left
     // the front of it in the box, and Claude would have read that run together with this prompt.
     assert.deepEqual(submitted, ["hello "]);
+    // Three keys for the three lines it had grown to, and two more for the readings that end the run --
+    // the third of those readings is the one the last of the three keys made. The bound is a screenful;
+    // what a clear costs on a box the screen can be read is what the box was holding.
+    assert.equal(clearKeys(pty.keystrokes), 3 + CLEAR_INPUT_CONFIRMATIONS - 1);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("stops clearing a box holding a suggestion Claude is offering rather than text anybody typed", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-clear-suggestion-test-"));
+  let agent!: ClaudeTtyAgent;
+  let pty!: FakePty;
+  const submitted: string[] = [];
+  // Claude offers a prompt of its own in an empty box, in grey, and Ctrl-U does not take it away:
+  // there is nothing in the box to take. On a screen read for its characters it is indistinguishable
+  // from something typed, so the keys have to stop on their own once they stop changing anything.
+  const SUGGESTION = "Try /rewind to undo the last change";
+
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    let box = "";
+    const draw = (): void => pty.emitData(`\u001b[2J\u001b[H\u276f ${box === "" ? SUGGESTION : box}\r\n  \u23f8 manual mode on\r\n`);
+    pty = new FakePty(6360, (text) => {
+      const paste = /^\u001b\[200~(.*)\u001b\[201~$/s.exec(text);
+      if (paste) box += paste[1]!;
+      else if (text === "\r") {
+        submitted.push(box);
+        box = "";
+      }
+      // Ctrl-U kills what was typed, and the suggestion is not that: the screen comes back the same.
+      draw();
+    });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(draw);
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/clear-suggestion", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => submitted.length > 0);
+    // The prompt still goes in whole, and it cost four keys rather than the forty a box nothing can
+    // empty used to take on the front of every message.
+    assert.deepEqual(submitted, ["hello "]);
+    // Four keys that changed nothing, plus the one whose reading caught the screen still settling --
+    // rather than the forty a box nothing can empty used to cost on the front of every message.
+    assert.ok(clearKeys(pty.keystrokes) <= CLEAR_INPUT_UNCHANGED + 1, `cleared with ${clearKeys(pty.keystrokes)} keys`);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("clears the box a key at a time, because Claude reads a burst of them as text", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-clear-keys-test-"));
+  let agent!: ClaudeTtyAgent;
+  let pty!: FakePty;
+  const submitted: string[] = [];
+
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    // Claude v2.1.269 as it reads what arrives on its stdin: a write carrying the one control character is
+    // that key, and a write carrying more than one character is text and goes into the box as itself. That
+    // is how a screenful of Ctrl-U written in one go came to stand at the head of the prompt behind it --
+    // around 60 prompts in ~/.claude/projects since 2026-09-13 begin with exactly forty literal U+0015.
+    let box = "residue";
+    const draw = (): void => pty.emitData(`\u001b[2J\u001b[H\u276f ${box}\r\n  \u23f8 manual mode on\r\n`);
+    pty = new FakePty(6350, (text) => {
+      const paste = /^\u001b\[200~(.*)\u001b\[201~$/s.exec(text);
+      if (text === CLEAR_INPUT_LINE) box = "";
+      else if (paste) box += paste[1]!;
+      else if (text === "\r") {
+        submitted.push(box);
+        box = "";
+      } else box += text;
+      draw();
+    });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(draw);
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/clear-keys", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
+    await waitFor(() => submitted.length > 0);
+    // What Claude was handed is the prompt, with neither the residue in front of it nor the keys that took
+    // the residue away. A single write of forty of them lands here as forty characters of prompt.
+    assert.deepEqual(submitted, ["hello "]);
+    assert.ok(!submitted[0]!.includes(CLEAR_INPUT_LINE));
+    // Every clear key its own write, and nothing else carrying one.
+    assert.ok(pty.keystrokes.every((key) => !key.includes(CLEAR_INPUT_LINE) || key === CLEAR_INPUT_LINE));
+    assert.ok(clearKeys(pty.keystrokes) > 0);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
     assert.deepEqual(await turn, { stopReason: "end_turn" });
   } finally {
@@ -892,7 +1228,7 @@ test("closes a question Claude has open, then sends the prompt into the box behi
     await waitFor(() => pty !== undefined && pty.writes.length === 3);
     // The question is closed before a single key of the prompt goes anywhere near it: the clear would
     // walk its selection, the space that ends the paste would toggle the checkbox, and Enter would confirm.
-    assert.deepEqual(pty.keystrokes, [ESCAPE_KEY, CLEAR_INPUT_BOX, "\u001b[200~commit this \u001b[201~", "\r"]);
+    assert.deepEqual(keySequence(pty.keystrokes), [ESCAPE_KEY, "clear", "\u001b[200~commit this \u001b[201~", "\r"]);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
     assert.deepEqual(await turn, { stopReason: "end_turn" });
   } finally {
@@ -977,16 +1313,267 @@ test("re-pastes a prompt the question behind it swallowed, instead of sending an
     await waitFor(() => pty !== undefined && pty.writes.length === 4);
     // The submit key was withheld while the question was up, and the prompt pasted again once it was gone:
     // Claude had none of it, and Enter on the empty box behind the question would have sent nothing.
-    assert.deepEqual(pty.keystrokes, [
-      CLEAR_INPUT_BOX,
+    assert.deepEqual(keySequence(pty.keystrokes), [
+      "clear",
       "\u001b[200~commit this \u001b[201~",
       ESCAPE_KEY,
-      CLEAR_INPUT_BOX,
+      "clear",
       "\u001b[200~commit this \u001b[201~",
       "\r",
     ]);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
     assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("re-pastes a prompt whose echo never came because a question opened behind it", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-late-echo-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const claudePid = 6700;
+  const statePath = await writeClaudeSessionState(configDirectory, claudePid, { status: "idle" });
+  const vendor: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const connection = {
+    sessionUpdate: async () => undefined,
+    extNotification: async (method: string, params: Record<string, unknown>) => {
+      vendor.push({ method, params });
+    },
+  } as unknown as AgentSideConnection;
+  let agent!: ClaudeTtyAgent;
+  let pty!: FakePty;
+  let swallowed = false;
+  let dialogUp = false;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    // The race the state file could not see in time: nothing had the keyboard when the prompt was
+    // cleared and pasted, and the question opened during the paste -- so there is no echo of the prompt
+    // coming, ever, and the two seconds spent waiting for one are two seconds the question was up.
+    pty = new FakePty(claudePid, (text) => {
+      if (text.startsWith("\u001b[200~")) {
+        if (!swallowed || dialogUp) return;
+        pty.emitData("\u001b[2J\u001b[H\u276f commit this\r\n");
+        return;
+      }
+      if (text === "\r" && !swallowed) {
+        swallowed = true;
+        dialogUp = true;
+        writeFileSync(statePath, JSON.stringify({ pid: claudePid, status: "waiting", waitingFor: "dialog open" }));
+        pty.emitData(AUTO_MODE_SETUP_SCREEN);
+        return;
+      }
+      if (text === ESCAPE_KEY && dialogUp) {
+        dialogUp = false;
+        writeFileSync(statePath, JSON.stringify({ pid: claudePid, status: "idle" }));
+        pty.emitData("\u001b[2J\u001b[H\u276f\r\n  \u23f8 auto mode on\r\n");
+        return;
+      }
+      if (text === "\r") pty.emitData("\u001b[2J\u001b[H\u276f\r\n");
+    });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => pty.emitData("\u001b[2J\u001b[H\u276f\r\n  \u23f8 auto mode on\r\n"));
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(connection, {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    claudeConfigDir: configDirectory,
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    latePasteMs: 50,
+    // Long enough that the poll never gets there first: this is the submit path's own check.
+    dialogPollMs: 10_000,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/late-echo", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "commit this" }] });
+    await waitFor(() => pty !== undefined && pty.writes.length === 5, 4_000);
+    // The first submit key went into a box with nothing in it, the wait for a late echo found the
+    // question instead, and the prompt was pasted again once the keyboard was back -- rather than the
+    // turn failing with a message Claude never saw.
+    assert.deepEqual(keySequence(pty.keystrokes), [
+      "clear",
+      "\u001b[200~commit this \u001b[201~",
+      "\r",
+      ESCAPE_KEY,
+      "clear",
+      "\u001b[200~commit this \u001b[201~",
+      "\r",
+    ]);
+    // And the question that was closed to make room is said in the timeline rather than lost.
+    const notice = vendor.find((update) => update.method === "_claude_tty/notice");
+    assert.ok(String((notice?.params.notice as { title: string } | undefined)?.title).includes("Dismissed"));
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("raises a card for a question Claude opens on its own, and closes it with Escape", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-dialog-card-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const claudePid = 6800;
+  const statePath = await writeClaudeSessionState(configDirectory, claudePid, { status: "idle" });
+  const permissionRequests: RequestPermissionRequest[] = [];
+  const connection = {
+    sessionUpdate: async () => undefined,
+    extNotification: async () => undefined,
+    requestPermission: async (request: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
+      permissionRequests.push(request);
+      return { outcome: { outcome: "selected", optionId: "dialog-dismiss" } };
+    },
+  } as unknown as AgentSideConnection;
+  let agent!: ClaudeTtyAgent;
+  let pty!: FakePty;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    pty = new FakePty(claudePid, (text) => {
+      if (text.startsWith("\u001b[200~")) pty.emitData("\u001b[2J\u001b[H\u276f commit this\r\n");
+      if (text === "\r") pty.emitData("\u001b[2J\u001b[H\u276f\r\n");
+      if (text === ESCAPE_KEY) {
+        writeFileSync(statePath, JSON.stringify({ pid: claudePid, status: "idle" }));
+        pty.emitData("\u001b[2J\u001b[H\u276f\r\n  \u23f8 auto mode on\r\n");
+      }
+    });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => pty.emitData("\u001b[2J\u001b[H\u276f\r\n  \u23f8 auto mode on\r\n"));
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(connection, {
+    spawnPty,
+    runtimeRoot,
+    stateDirectory: path.join(runtimeRoot, "state"),
+    claudeConfigDir: configDirectory,
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    dialogPollMs: 10,
+    dialogSettleMs: 200,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/dialog-card", mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "commit this" }] });
+    await waitFor(() => pty !== undefined && pty.writes.length === 2);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+
+    // Claude puts a nudge up the moment the turn ends, which is exactly when it does not report them
+    // while one is running. Nothing else in this process would ever see it.
+    pty.emitData(AUTO_MODE_SETUP_SCREEN);
+    writeFileSync(statePath, JSON.stringify({ pid: claudePid, status: "waiting", waitingFor: "dialog open" }));
+    await waitFor(() => permissionRequests.length === 1, 4_000);
+    const request = permissionRequests[0]!;
+    assert.equal(request.toolCall.title, "Claude Code reads this project, your recent Claude sessions, and optionally your shell history and other repositories.");
+    assert.deepEqual(
+      request.options.map((option) => `${option.optionId}:${option.kind}`),
+      ["dialog-dismiss:reject_once", "dialog-choice-0:reject_once", "dialog-choice-1:reject_once"],
+    );
+    // Dismissed in Paseo, so Escape goes in and Claude stops saying it is waiting.
+    await waitFor(() => pty.keystrokes.at(-1) === ESCAPE_KEY, 4_000);
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("says so three ways when Claude swaps the model under a running session", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-model-fallback-test-"));
+  const configDirectory = path.join(root, "claude");
+  const cwd = "/work/model-fallback";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(path.join(root, "runtime"), { recursive: true });
+  const vendor: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const permissionRequests: RequestPermissionRequest[] = [];
+  const connection = {
+    sessionUpdate: async () => undefined,
+    extNotification: async (method: string, params: Record<string, unknown>) => {
+      vendor.push({ method, params });
+    },
+    // The card is never answered: nothing waits for it, and what it is for is the push a new permission
+    // request sends. So this promise is left hanging on purpose.
+    requestPermission: (request: RequestPermissionRequest) => {
+      permissionRequests.push(request);
+      return new Promise<RequestPermissionResponse>(() => undefined);
+    },
+  } as unknown as AgentSideConnection;
+  let agent!: ClaudeTtyAgent;
+  const spawns: SpawnRecord[] = [];
+  const spawnPty = (file: string, args: string[], options: IPtyForkOptions): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    const pty = new FakePty(6900 + spawns.length);
+    spawns.push({ file, args, options, pty });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(connection, {
+    spawnPty,
+    runtimeRoot: path.join(root, "runtime"),
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "go" }] });
+    await waitFor(() => spawns.length === 1 && spawns[0]!.pty.writes.length === 2);
+    await appendFile(
+      path.join(projectDirectory, `${session.sessionId}.jsonl`),
+      `${JSON.stringify({
+        type: "system",
+        uuid: "system-fallback-1",
+        subtype: "model_refusal_fallback",
+        level: "warning",
+        content: "Fable 5's safeguards flagged this message, so it was retried on Opus 4.8.",
+        direction: "retry",
+        scope: "session",
+        originalModel: "claude-fable-5",
+        fallbackModel: "claude-opus-4-8",
+        timestamp: new Date().toISOString(),
+      })}\n`,
+    );
+
+    // The notice, which is the timeline's record of it and sends no push.
+    await waitFor(() => vendor.some((update) => update.method === "_claude_tty/notice"));
+    const notice = vendor.find((update) => update.method === "_claude_tty/notice")!.params.notice as { severity: string; title: string; description: string };
+    assert.equal(notice.severity, "warning");
+    assert.equal(notice.title, "Model switched: Fable 5 → Opus 4.8");
+    assert.equal(notice.description, "Fable 5's safeguards flagged this message, so it was retried on Opus 4.8.");
+    // The model the session is on from here, which ACP has no update for and the plugin puts in the picker.
+    const model = vendor.find((update) => update.method === "_claude_tty/model");
+    assert.equal(model?.params.model, "claude-opus-4-8");
+    // And a card, which is the only thing in Paseo that pushes to a phone.
+    await waitFor(() => permissionRequests.length === 1);
+    assert.equal(permissionRequests[0]!.toolCall.title, "Model switched: Fable 5 → Opus 4.8");
+    assert.deepEqual(permissionRequests[0]!.options, [{ optionId: "acknowledge", name: "OK", kind: "reject_once" }]);
+
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+
+    // The card nobody answered does not stand between the session and the next message: it is taken down
+    // as the prompt goes in, on both sides.
+    const second = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "again" }] });
+    await waitFor(() => vendor.some((update) => update.method === "_claude_tty/card_withdrawn"));
+    assert.equal(vendor.find((update) => update.method === "_claude_tty/card_withdrawn")!.params.toolCallId, permissionRequests[0]!.toolCall.toolCallId);
+    await waitFor(() => spawns[0]!.pty.writes.length === 4);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done again" });
+    assert.deepEqual(await second, { stopReason: "end_turn" });
   } finally {
     await agent.close();
     await rm(root, { force: true, recursive: true });
@@ -1017,7 +1604,7 @@ test("sends the prompt as usual when Claude says nothing else has the keyboard",
     const session = await agent.newSession({ cwd: "/work/no-dialog", mcpServers: [] });
     const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "commit this" }] });
     await waitFor(() => pty !== undefined && pty.writes.length === 2);
-    assert.deepEqual(pty.keystrokes, [CLEAR_INPUT_BOX, "\u001b[200~commit this \u001b[201~", "\r"]);
+    assert.deepEqual(keySequence(pty.keystrokes), ["clear", "\u001b[200~commit this \u001b[201~", "\r"]);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
     assert.deepEqual(await turn, { stopReason: "end_turn" });
   } finally {
@@ -1400,7 +1987,7 @@ test("stays ready once a status line has taken Claude's shortcut hint away", asy
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 1_000, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 1_000, submitDelayMs: 0, contextRefreshTimeoutMs: 0, clearInputKeyMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/ready", mcpServers: [] });
@@ -3063,6 +3650,7 @@ test("asks through ACP before accepting Claude's bypass permissions disclaimer",
     readinessTimeoutMs: 0,
     submitDelayMs: 0,
     contextRefreshTimeoutMs: 0,
+    clearInputKeyMs: 0,
     bypassPermissionsKeyDelayMs: 0,
     bypassPermissionsSelectionTimeoutMs: 50,
   });
@@ -3150,6 +3738,7 @@ test("fails the start rather than run in another mode when the bypass disclaimer
     readinessTimeoutMs: 0,
     submitDelayMs: 0,
     contextRefreshTimeoutMs: 0,
+    clearInputKeyMs: 0,
     bypassPermissionsKeyDelayMs: 0,
     bypassPermissionsSelectionTimeoutMs: 50,
   });

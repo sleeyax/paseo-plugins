@@ -139,6 +139,10 @@ Startup is complete once the `SessionStart` hook has arrived and Claude's intera
 If Claude stops first at its workspace-trust screen, the adapter surfaces the exact cwd as an ACP permission card in Paseo.
 Approving the card selects **Yes, I trust this folder** in the PTY and gives Claude a fresh startup window; denying or cancelling it fails closed without changing Claude's trust state.
 
+A project whose CLAUDE.md `@`-imports a file from outside the working directory stops at a second question of the same kind — **Allow external CLAUDE.md file imports?** — and it is carded too, with the paths Claude listed in it: an import is read into Claude's context as instructions, and "external imports" with nothing named is not something anybody can approve.
+Refusing this one does not fail the start, because **No, disable external imports** is a session that runs without those files — so a refusal takes it, and a notice in the session's timeline names the files that were left out.
+An unanswered card lands there too, and that is half the point of the choice: an unattended session comes up on the safe side rather than sitting at a dialog until the handshake times out.
+
 Readiness also requires the screen to have stopped changing, and that is not a nicety.
 A resumed session paints its entire conversation before its input box exists, and text inside that conversation can satisfy every readiness signal on its own — a footer quoted in a message, a token count, the words `auto mode on`.
 A prompt pasted into that window is dropped, and the paste then never echoes -- which is the one thing the submit loop reads, and now what it refuses to proceed without.
@@ -155,7 +159,13 @@ A prompt is flattened into one block of text: images and embedded resources beco
 The adapter clears Claude's input box with Ctrl-U, writes that text into the PTY wrapped in bracketed paste, waits briefly, then writes Enter, exactly as a person pasting into the terminal would.
 The clear is what keeps a prompt from being read as the end of another one: Claude appends a bracketed paste to whatever the box already holds, and the box is not reliably empty -- interrupting a turn puts the prompt it interrupted back for editing, and a submit a cancel abandons between its paste and its Enter leaves that paste behind.
 Paseo interrupts before it replaces a turn, so in a session it is steering both are one message away, and what Claude would otherwise receive is the two run together as a single prompt nobody wrote.
-It goes in whatever the screen shows, because the screen is sampled and a paste too recent to have been drawn is exactly the residue worth clearing; a box that did have something in it is named in the log.
+One Ctrl-U is not enough, because it kills the visual line the cursor is on and Claude wraps a long prompt across several; the keys go in one per line the box has grown to, bounded by the height of the screen, which is as tall as a box drawn on it can be.
+They also go in one key per write with a gap behind them, because a burst of them is not keys at all: Claude reads a single write carrying forty control characters as pasted text and types every one of them into the box, so the clear that was meant to empty it is what fills it and the prompt reaches Claude behind forty U+0015.
+That is what around 60 prompts in `~/.claude/projects` did between 2026-09-13 and this being fixed.
+The box is read back between keys, since an empty one is the ordinary case and a key on it does nothing, and paying forty keys for it would put a second on the front of every prompt; the reading alone is not trusted, because the screen is sampled and a paste too recent to have been drawn is exactly the residue worth clearing, so the run ends on a few empty readings in a row and a box that never reads empty gets the screenful the bound allows.
+It also ends where the keys have stopped changing anything, which is what a box holding a prompt *Claude* is suggesting looks like: that is grey ghost text rather than content, Ctrl-U does not remove it, and on a screen read for its characters it is indistinguishable from something typed — so without that stop every prompt to a session showing one paid the whole screenful and then reported a box it had failed to empty.
+What is compared is the screen from the box down rather than the box's own line, because Ctrl-U kills the last of the lines a long prompt wrapped onto and leaves the first, which is the line the box is read from.
+A box that did have something in it is named in the log, with the number of keys it took, whether it ended up empty, and whether the keys had simply stopped doing anything.
 The paste ends with a space so Claude's completion menu is closed rather than swallowing that Enter, and the adapter watches its input box on the headless screen and presses Enter again while the prompt is still sitting there, because Claude drops the key while it is settling a paste.
 
 That echo is also what says the prompt went in at all, and it is not always prompt: Claude reads a bracketed paste at once but only shows it a render later, and on a loaded host that render is what slips.
@@ -247,6 +257,58 @@ The adapter runs a single loopback HTTP server whose URL carries a per-process s
 
 `PermissionRequest` becomes an ACP permission request offering Allow once, Claude's own permission suggestions as always-allow options, and Deny, and the answer becomes the hook's decision — unless [Auto Accept](#auto-accept) is on, which answers Allow once without asking.
 `PreToolUse` intercepts two tools before they run: `AskUserQuestion` renders as one permission card for the whole call, and `ExitPlanMode` renders as a plan approval.
+
+### Claude's own dialogs become cards
+
+Not everything Claude asks comes through a hook.
+The nudges it raises between turns — a plugin it suggests for the project, an LSP it noticed, an effort level it would rather use, a setup question about what it may read — are drawn in the terminal, in the input box's place, and Claude then holds the keyboard until one of them is answered.
+Nothing outside the adapter's process can reach that PTY, so until this a session that met one was a session every later prompt failed against, with the message lost and the question answered by whatever keys the next prompt sent into it.
+
+So Claude's own state file is polled while the session's process is up, and a wait that is not one of the adapter's own becomes a permission card in Paseo: one option per row read off the screen, plus **Dismiss (Esc)**, and the dialog as drawn carried on the card so a dialog nothing here could parse is still readable and still dismissable.
+
+Reading one takes two things the screen says and nothing else does.
+Claude draws a dialog under a rule that runs the whole width, and the first line under that rule is its title — without it the card is titled after whatever the conversation happened to end with, which is what `/model` produced.
+And it tells a row from a row's own detail by colour: `/rewind` puts a checkpoint's line and the line summarising its changes in the same column, one in the default colour and one in the grey it writes everything secondary in, so the line naming the keys is read for which grey that is and a row written entirely in it is detail rather than a choice.
+Both were measured against Claude Code v2.1.269 driven through those two commands in a PTY, and both fixtures are in the parser's tests.
+Every option is a declining one, because Paseo's automatic permission modes accept an allow option without showing anybody anything, and these are the questions that must never be answered by a machine.
+Answering moves Claude's own marker to the row and presses Enter, and then reads the state file back, because that is the only proof the question really went.
+Which key to press comes from the screen rather than from a guess: the marker is somewhere in the list and the row is somewhere in the list, so the direction is whichever way closes the gap.
+Pressing Down until the marker comes round — which is how the startup dialogs are answered — cannot answer these, because Claude's lists do not wrap: `/rewind` opens with the marker on its last row, where Down does nothing at all.
+A row the marker will not reach is escaped rather than pressed at, and so is a card answered with an option this session has no row for.
+Answering one of these routinely opens the next — `/rewind` asks which checkpoint and then asks what to restore — so the dialog that follows gets a card of its own, while the one just answered does not get a second card if it is still on screen.
+
+A list longer than the window Claude draws it in is offered as what the window was showing, and the card says so; `↑ 4 more above` is a fact about the window rather than a row or part of the question, so it is kept out of both.
+Which rows those are changes while the card is up — the list scrolls — so answering looks for the row wherever the window has moved to: the marker is walked one way until the row is drawn again and then the other, and only a row neither end turns up is escaped.
+
+What says a card is still answerable is not the words on the screen.
+Claude rewrites its own dialog while it is up: a relative timestamp ticks, the line under the question follows whichever row the marker is on, and that row grows what it can do inline — `Summarize from here` becomes `Summarize from here: add context (optional)` once the marker reaches it.
+A reading taken a minute later agrees with the carded one about almost none of that, and requiring it to was dropping answers to questions nobody had closed.
+So a card belongs to a *waiting episode*: Claude holds the keyboard from the moment it opens a question until whatever that opens is finally answered, every poll that finds it no longer waiting starts the next episode, and an answer from an episode that has ended presses nothing.
+The title still has to match, the card's own id is one ACP request answered once, and the chosen row is found by what it starts with rather than by what it said — which is how a row Claude has rewritten is still the row that was offered.
+Two rows that begin the same way and no exact match is nothing found, and nothing found is an escape rather than a guess.
+Rows Claude never drew are not offered at all, because enumerating them would mean walking its selection around a question nobody has answered yet, and this whole surface exists because keys landing in Claude's dialogs is what went wrong in the first place.
+
+The card is taken back down whenever the question stops being one this session is waiting on: Claude times two of its nudges out after thirty seconds, a prompt arriving closes whatever is open to get the keyboard back, and a turn ending lets go of every card the adapter was waiting on at once.
+That last one is the easiest to leave behind and the worst to: Paseo goes on showing a card the adapter has stopped waiting for, and the daemon rebuilds its list of pending cards from the provider's own, so a card left open there comes back on screen the next time anything is answered.
+ACP has no way to withdraw a permission request — the agent asks and waits, and only the client ever ends one — so the plugin answers it on the daemon's side, over the same vendor channel the tool-call mirror uses.
+A question closed to deliver a prompt also puts a notice in the session's timeline naming what was closed, since the answer Claude was waiting for would otherwise simply disappear.
+
+What the adapter answers itself is never carded: the workspace trust screen, the bypass disclaimer, the external-imports question and the resume question are all on the startup path, and the watcher only starts once that path is behind it.
+Neither is a wait a hook is already asking about — a permission, an `AskUserQuestion`, a plan — because the card for that is already on screen.
+Every transition into a dialog is logged with the screen it was on, because the list of these grows with every Claude release and the log is how the next one gets read properly.
+
+### A model Claude swaps for itself is said three ways
+
+With `switchModelsOnFlag` on, a message the model's own safeguards flag is not refused: Claude retries it on a fallback model and writes one line into the transcript — `model_refusal_fallback`, with its own sentence, the two models, a direction and a scope.
+`model_fallback` is the same machinery for a model that could not be used at all, and `model_consent_fallback` for a switch somebody agreed to.
+Until this the line arrived in the conversation as a sentence from Claude and nothing else, which is a strange way to learn that the last half hour was answered by a different model.
+
+A switch that happens while the session is running produces a **notice** in the timeline (`Model switched: Fable 5 → Opus 4.8`, with Claude's sentence under it), a **model change** for the session's picker where the switch was for the session rather than for one message, and a **card with a single OK**, which exists because a new permission request is the only thing in Paseo that pushes to a phone.
+Nothing waits for that card: Claude has already done the thing it is about, it is withdrawn as the next prompt goes in, and it withdraws itself after ten minutes so a session cannot be left unsuspendable by a card nobody clicked.
+The picker is a reading, not a decision — the model the session was launched with is untouched, so changing the model, mode or effort, or any other restart, puts Claude back on it.
+
+None of it happens for a switch read back out of history.
+A session being loaded replays its whole transcript, and a compaction has it re-read from the start, so a switch is only reported when the record was written after the session's translator was made and while Claude is actually running; anything older keeps the sentence in the conversation exactly as before.
 
 ### State on disk
 
@@ -341,7 +403,8 @@ Filling the real meter needs Paseo's generic ACP provider to honour `usage_updat
 | `Could not start claude` | Set `CLAUDE_BIN` to an absolute executable path visible to the daemon. |
 | Workspace trust permission appears | Approve only when the displayed folder is a project you created or trust; Claude remembers the choice. |
 | Bypass Permissions disclaimer card appears | Claude has not been told this host accepts the mode. Accept it to start the session, or pick another mode; the answer is remembered for the host. |
-| SessionStart handshake timeout | If no workspace trust or Bypass Permissions card appeared, check Claude organization hook policy, inherited settings, loopback access, and the terminal snapshot in the adapter log. |
+| External CLAUDE.md imports card appears | This project's CLAUDE.md imports files from outside the working directory; the card names them. Approve only files you trust — declining starts the session without them and says so in the timeline. |
+| SessionStart handshake timeout | If no workspace trust, Bypass Permissions or external-imports card appeared, check Claude organization hook policy, inherited settings, loopback access, and the terminal snapshot in the adapter log. |
 | Claude opens a login screen | Authenticate as the Paseo daemon user and verify `HOME` or `CLAUDE_CONFIG_DIR`. |
 | Persisted session not found | Select the host that created it and verify `CLAUDE_TTY_ACP_STATE_DIR`. |
 | Session belongs to another cwd | Load it with its original absolute project path. |

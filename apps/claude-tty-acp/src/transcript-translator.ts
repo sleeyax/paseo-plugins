@@ -11,6 +11,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 import { writeLog } from "./log.ts";
 import { questionText } from "./question-text.ts";
+import { MODELS } from "./session-options.ts";
 import {
   launchedAgent,
   launchedBackgroundShell,
@@ -59,6 +60,18 @@ const TOOL_KINDS: Record<string, ToolKind> = {
   Write: "edit",
 };
 
+/**
+ * The system records Claude writes when it changes the model underneath a session.
+ *
+ * `model_refusal_fallback` is the one a person meets: a message the model's own safeguards flagged is
+ * silently retried on a fallback model, under `switchModelsOnFlag`. `model_fallback` is the same
+ * machinery for a model that could not be used at all -- `model_not_found` and its siblings -- and
+ * `model_consent_fallback` records a switch somebody consented to. Each carries Claude's own sentence
+ * as `content`, the two models as `originalModel` and `fallbackModel`, a `direction` (`retry`,
+ * `revert`, `sticky`) and a `scope` (`session`, `local`).
+ */
+const MODEL_FALLBACK_SUBTYPES = new Set(["model_refusal_fallback", "model_fallback", "model_consent_fallback"]);
+
 /** The tools that hand work to a subagent, whose own transcript is where that work then happens. */
 const AGENT_TOOLS = new Set(["Agent", "Task"]);
 
@@ -85,6 +98,25 @@ const STOPPED_AGENT = "Claude stopped this agent.";
  * which is what both of Paseo's bridges do with an extension they were not written for.
  */
 export const TOOL_CALL_MIRROR_METHOD = "_claude_tty/tool_call";
+
+/**
+ * A model Claude swapped under a running session, as everything that has to be said about one.
+ *
+ * It is handed to the runtime rather than emitted here, because what it turns into -- a notice, a card,
+ * the model Paseo shows in the picker -- is said on channels the translator does not own, and because
+ * the runtime only exists while Claude does: a session replaying its history has no runtime, which is
+ * the second half of why none of this happens on a replay.
+ */
+export type ModelFallback = {
+  /** Stable across re-reads of the record, so the notice for one switch is one notice. */
+  id: string;
+  subtype: string;
+  title: string;
+  /** Claude's own sentence about the switch. */
+  description: string;
+  /** The model Paseo should show for the session from here, or null where the record says nothing about that. */
+  model: string | null;
+};
 
 /**
  * A subagent and the tool call standing for it. Nested subagents share their spawner's card, so one
@@ -125,12 +157,21 @@ export class TranscriptTranslator {
   private readonly stoppedTasksByToolCall = new Map<string, string>();
   /** The diff each edit's tool call carried, until its result has sent it again. */
   private readonly diffsByToolCall = new Map<string, ToolCallContent[]>();
+  /** The nested agents' reports already written onto a spawner's card, because one notification is delivered many times over. */
+  private readonly notedNestedReports = new Set<string>();
   private lastSubagentActivity = 0;
   private lastBackgroundShellActivity = 0;
   private lastAssistantActivity = 0;
   private lastActivity = 0;
   private trackingBackgroundWork = false;
   private lastPlan = "";
+  /**
+   * When this translator was made, which is what tells a record written now from one being replayed.
+   * A loaded session replays its whole transcript through this, and a compaction has it re-read from
+   * the start again; a card or a push for a model switch that happened days ago is noise at best.
+   */
+  private readonly liveFrom = Date.now();
+  private modelFallbackHandler: ((fallback: ModelFallback) => void) | null = null;
   private lastUsage = "";
   private assistantChunkCount = 0;
   private suppressedAssistantText: string | null = null;
@@ -219,6 +260,14 @@ export class TranscriptTranslator {
    */
   trackBackgroundWork(): void {
     this.trackingBackgroundWork = true;
+  }
+
+  /**
+   * Where a model switch goes while Claude is running. Set by the runtime as it is built and cleared
+   * when it stops, so a switch is only ever reported by the session that is actually having one.
+   */
+  setModelFallbackHandler(handler: ((fallback: ModelFallback) => void) | null): void {
+    this.modelFallbackHandler = handler;
   }
 
   suppressNextAssistantText(text: string): void {
@@ -441,11 +490,41 @@ export class TranscriptTranslator {
       notification.taskId ??
       (notification.toolCallId === null ? null : this.subagentsByToolCall.get(notification.toolCallId) ?? null);
     const card = agentId === null ? undefined : this.subagents.get(agentId);
-    if (card === undefined || card.status !== "in_progress") return;
+    if (card === undefined || agentId === null || card.status !== "in_progress") return;
+    // A nested agent's report is written into *this* session's transcript rather than its spawner's,
+    // and the card it resolves through is the spawner's, shared with it by the adoption. Settling
+    // that card on it would call the spawner finished at the very moment it is being woken to carry
+    // on -- the report is what wakes it -- and would take its transcript out of the watcher's reading
+    // with it, leaving the card saying "completed" for however many hours the spawner still had to
+    // run, and the turn free to end on a session that is still working. So it is a step and no more.
+    if (card.agentId !== agentId) {
+      await this.noteNestedReport(card, agentId, notification);
+      return;
+    }
     card.status = notificationFailed(notification.status) ? "failed" : "completed";
     card.outstanding = false;
     this.lastSubagentActivity = Date.now();
     card.log.append(notification.summary ?? `Agent ${notification.status ?? "finished"}`);
+    await this.publishSubagent(card);
+  }
+
+  /**
+   * Puts a nested agent's report on the card it shares with its spawner, and counts it as the
+   * spawner working: the spawner writes again as soon as it has read the report, and a hold that
+   * ran its bound out in between would end the turn with all of that still to come.
+   *
+   * Deduplicated by the line itself, keyed to the agent and the call that launched it, because one
+   * notification is written many times over and none of the repeats is news. What that cannot tell
+   * apart is a nested agent messaged back into work that then finishes again saying exactly what it
+   * said the first time, which costs the repeat its line and nothing else.
+   */
+  private async noteNestedReport(card: SubagentCard, agentId: string, notification: TaskNotification): Promise<void> {
+    const line = `↳ ${notification.summary ?? `Agent ${notification.status ?? "finished"}`}`;
+    const key = `${agentId}:${notification.toolCallId ?? ""}:${line}`;
+    if (this.notedNestedReports.has(key)) return;
+    this.notedNestedReports.add(key);
+    this.lastSubagentActivity = Date.now();
+    card.log.append(line);
     await this.publishSubagent(card);
   }
 
@@ -693,7 +772,50 @@ export class TranscriptTranslator {
     const subtype = stringValue(record.subtype);
     if (!content || subtype === "turn_duration") return;
     const key = `${stringValue(record.uuid) || stableUuid(JSON.stringify(record))}:system`;
+    if (subtype !== null && MODEL_FALLBACK_SUBTYPES.has(subtype) && this.reportModelFallback(record, subtype, content, key)) return;
     await this.emitContent("agent_message_chunk", key, key, { type: "text", text: content });
+  }
+
+  /**
+   * A model swapped under the session, reported once and only while it is happening.
+   *
+   * Returns whether it was taken, and a switch that was taken does not also go into the conversation:
+   * the notice carries Claude's own sentence as its description, and saying the same thing twice in one
+   * timeline is worse than saying it once in the place that means "this happened to your session".
+   * A switch read back out of history keeps that sentence exactly as it always has, because a
+   * conversation that loses it says nothing about which model answered what.
+   */
+  private reportModelFallback(record: TranscriptRecord, subtype: string, content: string, key: string): boolean {
+    const handler = this.modelFallbackHandler;
+    if (!handler || !this.isLive(record) || this.emitted.has(key)) return false;
+    // The conversation's key too, so a re-read of this record cannot put the sentence in after all.
+    this.emitted.add(key);
+    const original = stringValue(record.originalModel);
+    const fallback = stringValue(record.fallbackModel);
+    const direction = stringValue(record.direction);
+    const scope = stringValue(record.scope);
+    handler({
+      id: `model-fallback-${stableUuid(key)}`,
+      subtype,
+      title:
+        direction === "revert"
+          ? `Model switched back to ${modelName(original ?? fallback)}`
+          : `Model switched: ${modelName(original)} → ${modelName(fallback)}`,
+      description: content,
+      // A switch Claude made for one message says nothing about what the session is on; a session-scoped
+      // one does, and a revert puts back what the session was launched with.
+      model: direction === "revert" ? original : scope === "session" ? fallback : null,
+    });
+    this.lastActivity = Date.now();
+    return true;
+  }
+
+  /** Whether this record was written by the session that is running rather than read back out of it. */
+  private isLive(record: TranscriptRecord): boolean {
+    const written = Date.parse(stringValue(record.timestamp) ?? "");
+    // A record with no timestamp reads as history: a notice that never came is a smaller thing than a
+    // card raised for a switch that happened last week, every time a session is opened.
+    return Number.isFinite(written) && written >= this.liveFrom;
   }
 
   private async translateAttachment(record: TranscriptRecord): Promise<void> {
@@ -757,6 +879,12 @@ export class TranscriptTranslator {
     this.unknownKinds.add(kind);
     writeLog({ level: "warn", message: "Unknown Claude transcript kind", sessionId: this.sessionId, kind });
   }
+}
+
+/** What Paseo calls the model, where this build knows it, and Claude's own id where it does not. */
+function modelName(modelId: string | null): string {
+  if (!modelId) return "another model";
+  return MODELS.find((model) => model.modelId === modelId)?.name ?? modelId;
 }
 
 function stableUuid(value: string): string {
