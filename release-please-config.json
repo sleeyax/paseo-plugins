@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "ae4111dcd1d86e09b0a4221039b1eac68735bbd2",
+  "packages": {
+    "plugins/catppuccin-theme": {
+      "release-type": "node",
+      "component": "catppuccin-theme"
+    },
+    "plugins/claude-tty": {
+      "release-type": "node",
+      "component": "claude-tty"
+    },
+    "plugins/discord-rich-presence": {
+      "release-type": "node",
+      "component": "discord-rich-presence"
+    },
+    "apps/claude-tty-acp": {
+      "release-type": "node",
+      "component": "claude-tty-acp"
+    }
+  },
+  "plugins": [
+    {
+      "type": "linked-versions",
+      "groupName": "claude-tty",
+      "components": ["claude-tty", "claude-tty-acp"]
+    }
+  ]
+}

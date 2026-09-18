@@ -44,8 +44,15 @@ After making changes, run `paseo plugin reload <id>`. Paseo does not hot-reload 
 ## Releasing a plugin
 
 A plugin's `version` in its own `package.json` is its update identity: [Paseo Cafe](https://github.com/paseo-cafe/paseo-cafe) compares it against the installed copy's, and only a higher version offers an update.
-Bumping it is what publishes: do it at the end of a PR, or once over a batch of PRs that have already landed.
 Until it moves, installations stay on the old code however many commits land here.
+
+[release-please](https://github.com/googleapis/release-please) does the bumping, from the conventional commits on `main`: a `feat` takes a minor, a `fix` takes a patch, and a `chore` or `docs` releases nothing.
+It keeps a single release pull request open and adds to it as more commits land, so a release can cover one pull request or a batch of them.
+Merging it is the release: the new versions and each package's `CHANGELOG.md` are written, tagged, and published as GitHub releases.
+Nothing reaches npm, since every package here is private.
+
+Which package a commit bumps comes from the files it touches rather than its scope, so keep a change inside the plugin it belongs to.
+`claude-tty` and the `claude-tty-acp` adapter it runs are versioned together, because a change to the adapter changes what the plugin ships.
 
 ## Skills
 
