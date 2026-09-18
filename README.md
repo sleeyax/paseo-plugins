@@ -41,6 +41,21 @@ paseo plugin add "/absolute/path/to/paseo-plugins/plugins/discord-rich-presence"
 
 After making changes, run `paseo plugin reload <id>`. Paseo does not hot-reload plugins, and reloading is the compile check for the client and server bundles built from `index.client.tsx` and `index.server.ts`.
 
+## Skills
+
+`skills/` holds agent skills for working on this repository, in the [Agent Skills](https://agentskills.io) format, so any harness that reads them can use them.
+`.claude/skills/` and `.agents/skills/` are symlinks into it — the first is where Claude Code looks, the second is where Codex, Cursor, OpenCode and GitHub Copilot do — and editing the file under `skills/` updates every harness at once.
+
+| Skill | Description |
+| --- | --- |
+| `update-plugins` | Rebuild the apps and reload the plugins this host has installed from this checkout. |
+
+Working in this repository needs no installation; the symlinks are committed. To use a skill from another checkout, install it by name:
+
+```sh
+npx skills add sleeyax/paseo-plugins --skill update-plugins
+```
+
 ## Plugin settings
 
 A plugin whose settings the host owns — `registerSettings` in `index.server.ts`, read in a screen `addSettingsScreen` contributes — keeps them in `$PASEO_HOME/plugin-settings/<plugin-id>/<settings-id>.json`, written by the daemon and deleted with the plugin.
