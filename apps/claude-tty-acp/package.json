@@ -1,7 +1,7 @@
 {
   "name": "@paseo-plugins/claude-tty-acp",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "ACP adapter for interactive Claude Code sessions",
   "type": "module",
   "bin": {

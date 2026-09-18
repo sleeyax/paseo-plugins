@@ -1,0 +1,6 @@
+{
+  "plugins/catppuccin-theme": "0.0.1",
+  "plugins/claude-tty": "0.0.1",
+  "plugins/discord-rich-presence": "0.0.1",
+  "apps/claude-tty-acp": "0.0.1"
+}
