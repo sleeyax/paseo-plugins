@@ -16,14 +16,23 @@
     },
     "apps/claude-tty-acp": {
       "release-type": "node",
-      "component": "claude-tty-acp"
+      "component": "claude-tty-acp",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "src/constants.ts"
+        }
+      ]
     }
   },
   "plugins": [
     {
       "type": "linked-versions",
       "groupName": "claude-tty",
-      "components": ["claude-tty", "claude-tty-acp"]
+      "components": [
+        "claude-tty",
+        "claude-tty-acp"
+      ]
     }
   ]
 }
