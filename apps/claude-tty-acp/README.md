@@ -21,7 +21,7 @@ The price is that every native affordance has to be reconstructed from terminal 
 - Node.js 22 or newer
 - pnpm
 - A current Claude Code CLI, authenticated on the same host as the Paseo daemon
-- Paseo 0.8 or newer
+- Paseo 0.9 or newer
 
 ## Installation
 
