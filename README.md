@@ -71,5 +71,5 @@ npx skills add sleeyax/paseo-plugins --skill update-plugins
 
 ## Plugin settings
 
-A plugin whose settings the host owns — `registerSettings` in `index.server.ts`, read in a screen `addSettingsScreen` contributes — keeps them in `$PASEO_HOME/plugin-settings/<plugin-id>/<settings-id>.json`, written by the daemon and deleted with the plugin.
-A plugin with a store of its own keeps it in `~/.cache/paseo-plugins/<plugin-id>/settings.json`, which nothing cleans up.
+Every plugin here keeps its settings in the store Paseo owns, under `$PASEO_HOME/plugin-settings/<plugin-id>/`, written by the daemon and deleted with the plugin.
+Versions from before Paseo 0.9 kept some of them in `~/.cache/paseo-plugins/<plugin-id>/` instead, which nothing reads any more and nothing cleans up.

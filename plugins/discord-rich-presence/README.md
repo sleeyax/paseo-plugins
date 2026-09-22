@@ -22,6 +22,8 @@ The plugin uses a shared Paseo Discord application by default. Open **Discord Ri
 
 Native, Snap, and Flatpak Discord installations are supported. The plugin reconnects automatically when Discord starts.
 
+It needs Paseo 0.9 or newer. Earlier versions of the plugin kept their settings under `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/discord-rich-presence/`, which this version never reads: after updating, set the detail levels and application ID again, then delete that directory. Until you do, every project shows at the default level, **Detailed**.
+
 ## Settings
 
 **Detail level** decides how much of your work reaches your profile:
