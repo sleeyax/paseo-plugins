@@ -4,6 +4,7 @@ import type { ProviderRegistration } from "@getpaseo/plugin/server/provider";
 import { PROVIDER_ID, PROVIDER_LABEL } from "../shared/provider.ts";
 import { resolveAdapter } from "./adapter.ts";
 import { adapterCommand, cardAnswersDirectory, defaultStateDirectory } from "./paths.ts";
+import type { Settings } from "./settings.ts";
 import { withPermissionCards } from "./permission-bridge.ts";
 import { sessionNotices } from "./session-notices.ts";
 import { withSteerFallback } from "./steering.ts";
@@ -23,7 +24,7 @@ const INITIAL_COMMANDS_TIMEOUT_MS = 10_000;
 /** Read from the plugin directory and sanitised by the daemon when the plugin starts. */
 const PROVIDER_ICON = "icon.svg";
 
-export function claudeTtyProvider(): ProviderRegistration {
+export function claudeTtyProvider(settings: Settings): ProviderRegistration {
   return {
     id: PROVIDER_ID,
     label: PROVIDER_LABEL,
@@ -44,7 +45,7 @@ export function claudeTtyProvider(): ProviderRegistration {
      * name is a setting, which — unlike the checkout — changes under a running plugin.
      */
     async getCatalogCacheKey() {
-      const adapter = await resolveAdapter();
+      const adapter = await resolveAdapter(settings);
       if (adapter.buildWitness === null) return `${PROVIDER_ID}:unresolved`;
       try {
         const built = await stat(adapter.buildWitness);
@@ -63,7 +64,7 @@ export function claudeTtyProvider(): ProviderRegistration {
      * the next daemon start.
      */
     async connect(request) {
-      const adapter = await resolveAdapter();
+      const adapter = await resolveAdapter(settings);
       if (adapter.executable === null) throw new Error(adapter.problem!);
       const details = toolCallDetails();
       const notices = sessionNotices();

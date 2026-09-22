@@ -3,8 +3,8 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { settingsDocument } from "../shared/settings.ts";
 import { resolveAdapter } from "./adapter.ts";
+import { fakeSettings, type FakeSettings } from "./fake-settings.ts";
 
 /** A checkout the resolver would accept, with the wrapper and the build in whichever state is asked for. */
 async function makeCheckout(root: string, { wrapper = true, built = true } = {}): Promise<string> {
@@ -25,25 +25,28 @@ async function writeExecutable(filePath: string): Promise<string> {
   return filePath;
 }
 
-/** A host: the daemon's configuration, and the settings document the store would have written. */
+/** A host: the daemon's configuration, and the settings store the plugin registered. */
 async function withHost(
-  run: (host: { home: string; env: { PASEO_HOME: string }; install: (pluginPath: string | null) => Promise<void>; configure: (executable: string) => Promise<void> }) => Promise<void>,
+  run: (host: {
+    home: string;
+    env: { PASEO_HOME: string };
+    settings: FakeSettings;
+    install: (pluginPath: string | null) => Promise<void>;
+    configure: (executable: string) => Promise<void>;
+  }) => Promise<void>,
 ): Promise<void> {
   const home = await mkdtemp(path.join(os.tmpdir(), "claude-tty-adapter-"));
+  const settings = fakeSettings();
   try {
     await run({
       home,
       env: { PASEO_HOME: home },
+      settings,
       install: async (pluginPath) => {
         const plugins = pluginPath === null ? {} : { "claude-tty": { source: "directory", path: pluginPath } };
         await writeFile(path.join(home, "config.json"), JSON.stringify({ plugins }));
       },
-      configure: async (executable) => {
-        const values = settingsDocument.schema.parse({ adapterExecutable: executable });
-        const file = path.join(home, "plugin-settings", "claude-tty", "settings.json");
-        await mkdir(path.dirname(file), { recursive: true });
-        await writeFile(file, JSON.stringify({ version: settingsDocument.version, values }));
-      },
+      configure: (executable) => settings.save({ adapterExecutable: executable }),
     });
   } finally {
     await rm(home, { force: true, recursive: true });
@@ -64,7 +67,7 @@ test("runs the checkout's adapter when nothing is configured, which is what a cl
     await withCheckout(async (root) => {
       await host.install(await makeCheckout(root));
 
-      const adapter = await resolveAdapter(host.env);
+      const adapter = await resolveAdapter(host.settings, host.env);
       assert.equal(adapter.executable, path.join(root, "apps", "claude-tty-acp", "bin", "claude-tty-acp"));
       assert.equal(adapter.source, "checkout");
       assert.equal(adapter.checkout.root, root);
@@ -83,7 +86,7 @@ test("runs a configured adapter instead, and stops minding that there is no chec
       const executable = await writeExecutable(path.join(elsewhere, "claude-tty-acp"));
       await host.configure(executable);
 
-      const adapter = await resolveAdapter(host.env);
+      const adapter = await resolveAdapter(host.settings, host.env);
       assert.equal(adapter.executable, executable);
       assert.equal(adapter.source, "configured");
       assert.equal(adapter.problem, null);
@@ -103,7 +106,7 @@ test("prefers the configured adapter over the checkout's, which is what makes it
         const executable = await writeExecutable(path.join(elsewhere, "claude-tty-acp"));
         await host.configure(executable);
 
-        const adapter = await resolveAdapter(host.env);
+        const adapter = await resolveAdapter(host.settings, host.env);
         assert.equal(adapter.executable, executable);
         assert.equal(adapter.source, "configured");
         assert.equal(adapter.checkout.root, root);
@@ -118,7 +121,7 @@ test("falls back to the checkout when the setting is emptied again", async () =>
       await host.install(await makeCheckout(root));
       await host.configure("   ");
 
-      const adapter = await resolveAdapter(host.env);
+      const adapter = await resolveAdapter(host.settings, host.env);
       assert.equal(adapter.source, "checkout");
       assert.equal(adapter.executable, path.join(root, "apps", "claude-tty-acp", "bin", "claude-tty-acp"));
     });
@@ -130,7 +133,7 @@ test("says a configured path is missing rather than leaving it to the spawn", as
     await host.install(null);
     await host.configure("/nowhere/claude-tty-acp");
 
-    const adapter = await resolveAdapter(host.env);
+    const adapter = await resolveAdapter(host.settings, host.env);
     assert.equal(adapter.executable, "/nowhere/claude-tty-acp");
     assert.equal(adapter.built, false);
     assert.match(adapter.problem!, /^\/nowhere\/claude-tty-acp does not exist\./);
@@ -146,7 +149,7 @@ test("says a configured path is not executable, which a spawn would only say lat
       await chmod(executable, 0o644);
       await host.configure(executable);
 
-      const adapter = await resolveAdapter(host.env);
+      const adapter = await resolveAdapter(host.settings, host.env);
       assert.match(adapter.problem!, /is not executable\.$/);
     });
   });
@@ -157,7 +160,7 @@ test("resolves a configured path that is relative, so the answer is one a daemon
     await host.install(null);
     await host.configure("./claude-tty-acp");
 
-    const adapter = await resolveAdapter(host.env);
+    const adapter = await resolveAdapter(host.settings, host.env);
     assert.equal(adapter.executable, path.resolve("./claude-tty-acp"));
   });
 });
@@ -167,7 +170,7 @@ test("still reports an unbuilt checkout, whose wrapper is committed and says not
     await withCheckout(async (root) => {
       await host.install(await makeCheckout(root, { built: false }));
 
-      const adapter = await resolveAdapter(host.env);
+      const adapter = await resolveAdapter(host.settings, host.env);
       assert.equal(adapter.built, false);
       assert.equal(adapter.buildWitness, path.join(root, "apps", "claude-tty-acp", "dist", "cli.js"));
       assert.match(adapter.problem!, /is not built — run the build in the checkout\.$/);
@@ -179,7 +182,7 @@ test("has nothing to run, and says which setting would give it something", async
   await withHost(async (host) => {
     await host.install(null);
 
-    const adapter = await resolveAdapter(host.env);
+    const adapter = await resolveAdapter(host.settings, host.env);
     assert.equal(adapter.executable, null);
     assert.equal(adapter.source, null);
     assert.equal(adapter.buildWitness, null);
@@ -187,28 +190,26 @@ test("has nothing to run, and says which setting would give it something", async
   });
 });
 
-test("reads a document the store has not written yet as nothing configured", async () => {
+test("reads a document nobody has saved yet as nothing configured", async () => {
   await withHost(async (host) => {
     await withCheckout(async (root) => {
       await host.install(await makeCheckout(root));
       // A host that has never opened the settings screen has no document at all, which is the
       // normal state and must not be the difference between a working plugin and a broken one.
-      const adapter = await resolveAdapter(host.env);
+      const adapter = await resolveAdapter(host.settings, host.env);
       assert.equal(adapter.source, "checkout");
       assert.equal(adapter.problem, null);
     });
   });
 });
 
-test("reads a malformed document as nothing configured rather than failing every session over it", async () => {
+test("reads an invalid document as nothing configured rather than failing every session over it", async () => {
   await withHost(async (host) => {
     await withCheckout(async (root) => {
       await host.install(await makeCheckout(root));
-      const file = path.join(host.home, "plugin-settings", "claude-tty", "settings.json");
-      await mkdir(path.dirname(file), { recursive: true });
-      await writeFile(file, "{ not json");
+      await host.settings.corrupt();
 
-      const adapter = await resolveAdapter(host.env);
+      const adapter = await resolveAdapter(host.settings, host.env);
       assert.equal(adapter.source, "checkout");
       assert.equal(adapter.problem, null);
     });

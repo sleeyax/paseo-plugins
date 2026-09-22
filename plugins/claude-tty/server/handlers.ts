@@ -8,14 +8,15 @@ import type {
 import { lastDoctorReport, runDoctor } from "./doctor.ts";
 import { listSessions, quarantineSession, releaseLock, releaseStaleLocks, stopSession } from "./sessions.ts";
 import { removeState } from "./uninstall.ts";
+import type { Settings } from "./settings.ts";
 import { readStatus } from "./status.ts";
 
-export function statusHandler(paseo: PaseoApi): Promise<StatusPayload> {
-  return readStatus(paseo);
+export function statusHandler(paseo: PaseoApi, settings: Settings): Promise<StatusPayload> {
+  return readStatus(paseo, settings);
 }
 
-export function doctorHandler(): Promise<DoctorPayload> {
-  return runDoctor();
+export function doctorHandler(settings: Settings): Promise<DoctorPayload> {
+  return runDoctor(settings);
 }
 
 export function sessionsHandler(paseo: PaseoApi): Promise<SessionsPayload> {

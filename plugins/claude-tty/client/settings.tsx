@@ -86,8 +86,7 @@ function Adapter({ theme, settings }: { theme: PluginSurfaceProps["theme"]; sett
 }
 
 function IdleSuspension({ theme, settings }: { theme: PluginSurfaceProps["theme"]; settings: Saved }) {
-  const adapter = useStatus()?.settings ?? null;
-  const override = adapter?.envOverrideMs ?? null;
+  const override = useStatus()?.settings.envOverrideMs ?? null;
   const selected = String(settings.values.idleTimeoutMs);
   const options = OPTIONS.some((option) => option.value === selected)
     ? OPTIONS
@@ -109,7 +108,6 @@ function IdleSuspension({ theme, settings }: { theme: PluginSurfaceProps["theme"
           disabled={settings.saving}
           onValueChange={(value) => void settings.save({ ...settings.values, idleTimeoutMs: Number(value) }, settings.revision)}
         />
-        {adapter ? <SettingsRow label="Stored in" hint={adapter.file} /> : null}
       </SettingsCard>
       <Note color={theme.colors.foregroundMuted}>
         Suspension stops the PTY and its background tasks but keeps the logical session. Your next

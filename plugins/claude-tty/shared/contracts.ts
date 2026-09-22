@@ -24,10 +24,8 @@ export const StatusSchema = z.object({
     claude: z.string().nullable(),
   }),
   stateDirectory: z.string(),
-  /** What the settings screen cannot see for itself: where the host keeps the document, and what overrides it. */
+  /** What the settings screen cannot see for itself: what overrides the document. */
   settings: z.object({
-    /** The document the host settings store owns, which is also the path the adapter is handed. */
-    file: z.string(),
     /** Set when the daemon's environment pins the timeout, which the adapter honours over the setting. */
     envOverrideMs: z.number().int().nonnegative().nullable(),
   }),

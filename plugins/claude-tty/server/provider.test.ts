@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fakeSettings } from "./fake-settings.ts";
 import { claudeTtyProvider } from "./provider.ts";
 
 /**
@@ -23,8 +24,9 @@ test("shares one catalogue across workspaces and gives a rebuilt adapter a key o
     JSON.stringify({ plugins: { "claude-tty": { path: path.join(checkout, "plugins", "claude-tty") } } }),
   );
   process.env.PASEO_HOME = path.join(home, "paseo");
+  const provider = claudeTtyProvider(fakeSettings());
   const key = async (cwd: string): Promise<string | undefined> =>
-    claudeTtyProvider().getCatalogCacheKey?.({ scope: "workspace", cwd });
+    provider.getCatalogCacheKey?.({ scope: "workspace", cwd });
 
   // An adapter nobody has built yet still answers with one key, so the failure is reported once.
   const unbuilt = await key("/work/one");
