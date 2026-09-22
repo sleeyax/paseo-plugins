@@ -11,7 +11,6 @@ import {
   daemonConfigPath,
   defaultStateDirectory,
   executableCandidates,
-  legacySettingsFilePath,
   repoRootFromPluginPath,
   settingsFilePath,
   subagentsDirectory,
@@ -46,11 +45,6 @@ test("finds the host's settings document beside the daemon configuration", () =>
   assert.equal(daemonConfigPath(env), "/srv/paseo/config.json");
   assert.equal(settingsFilePath(env), "/srv/paseo/plugin-settings/claude-tty/settings.json");
   assert.equal(settingsFilePath({ HOME: "/home/paseo" }), "/home/paseo/.paseo/plugin-settings/claude-tty/settings.json");
-});
-
-test("finds the settings file an older install kept in the cache directory", () => {
-  assert.equal(legacySettingsFilePath({ XDG_CACHE_HOME: "/srv/cache" }), "/srv/cache/paseo-plugins/claude-tty/settings.json");
-  assert.equal(legacySettingsFilePath({ HOME: "/home/paseo" }), "/home/paseo/.cache/paseo-plugins/claude-tty/settings.json");
 });
 
 test("spawns the adapter with the two paths it cannot work out for itself", () => {
