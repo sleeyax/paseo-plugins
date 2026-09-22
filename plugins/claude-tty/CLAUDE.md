@@ -61,7 +61,7 @@ In process, `process.env` is the plugin worker's — one environment shared by e
 
 The blast radius is the second reason. Plugin server code runs in a forked child, so a native crash does not take the daemon down — but on child close the daemon fails every provider connection, **removes the plugin**, and closes every agent on it, with no automatic restart anywhere in its plugin runtime.
 Today one wedged adapter is one wedged session with a Stop button.
-`connector` is also undocumented: `public-docs/plugins/v0.8/*` shows only the `command` form.
+`connector` is also undocumented: `public-docs/plugins/*` shows only the `command` form.
 Revisit only if a future SDK gives `AcpConnector` a context argument carrying the session config.
 
 ## The pickers are config options, and the category decides which picker
@@ -90,7 +90,7 @@ The copy is sent ahead of the update rather than behind it for the same reason: 
 
 ## A message sent mid-turn needs `prompt.steer` offered, and then turned down
 
-`public-docs/plugins/v0.8/providers.md` says to omit `prompt.steer` when steering is unsupported, so that Paseo can replace the active turn instead. The 0.8.0 daemon does not do that.
+`public-docs/plugins/providers.md` says to omit `prompt.steer` when steering is unsupported, so that Paseo can replace the active turn instead. The 0.8.0 daemon does not do that.
 Every plugin session has a `steerActiveTurn`. The app's composer sends a mid-turn message with `activeTurnBehavior: "steer"`, and so does the daemon when an agent reports back to its caller, and both reach that method.
 It checks the session's capabilities first and *throws* `Provider does not support prompt.steer`, so the message is never sent and no turn is replaced.
 Only an *answered* steer that is not `{ type: "steer" }` for the running turn counts as `unavailable`, and `unavailable` is what makes the daemon interrupt the turn and send the message as the next one.
@@ -336,7 +336,7 @@ Icons, `Modal`, `useToast` and `copyText` come from `@getpaseo/plugin/client/rea
 
 `pnpm test` is `node --test "{client,server,shared}/**/*.test.ts"` through Node's type stripping, so no TypeScript that has to be emitted and relative imports keep their `.ts` extension.
 A test that resolves the plugin root walks up from `import.meta.dirname`, so it counts the directory it sits in and no `src/` above it.
-`@getpaseo/client` is on 0.8.0 across the workspace, which is what `@getpaseo/plugin` takes as a peer.
+`@getpaseo/client` is on 0.9.1 across the workspace, which is what `@getpaseo/plugin` takes as a peer.
 
 `server/acp-provider.test.ts` is the one exception to all of that: it runs the adapter's own `tsc` build and then spawns the result, because the bridge it exercises takes a command rather than a module, and a stale `dist/` would otherwise decide the result.
 It points the adapter at a throwaway state directory so the run touches none of yours.

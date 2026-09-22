@@ -1,6 +1,7 @@
 {
   "id": "claude-tty",
-  "requirements": { "paseo": ">=0.8.0" },
+  "description": "Run Claude Code in its real terminal UI as a Paseo agent, with suspend/resume and card-based permission prompts.",
+  "requirements": { "paseo": ">=0.9.0" },
   "build": [
     ["pnpm", "install", "--frozen-lockfile"],
     ["pnpm", "--filter", "@paseo-plugins/claude-tty-acp", "build"]

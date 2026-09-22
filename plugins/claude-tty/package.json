@@ -8,8 +8,8 @@
     "test": "node --test \"{client,server,shared}/**/*.test.ts\""
   },
   "devDependencies": {
-    "@getpaseo/client": "^0.8.0",
-    "@getpaseo/plugin": "0.8.0",
+    "@getpaseo/client": "^0.9.1",
+    "@getpaseo/plugin": "0.9.1",
     "@tanstack/react-query": "^5.90.11",
     "@types/node": "^26.2.0",
     "@types/react": "~19.2.0",

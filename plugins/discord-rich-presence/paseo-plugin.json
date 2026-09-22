@@ -1,4 +1,5 @@
 {
   "id": "discord-rich-presence",
-  "requirements": { "paseo": ">=0.8.0" }
+  "description": "Show your current Paseo activity on Discord.",
+  "requirements": { "paseo": ">=0.9.0" }
 }

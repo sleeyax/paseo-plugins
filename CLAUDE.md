@@ -7,8 +7,8 @@ Since Paseo 0.8 those entries are `index.client.tsx` and `index.server.ts`, eith
 Dependencies belong to the package that uses them, not the root, because the daemon's esbuild resolves from the plugin directory.
 `pnpm typecheck` and `pnpm test` at the root fan out to every package; the package-level scripts are the ones to run while working on a single plugin.
 
-Paseo documents the plugin contract at `public-docs/plugins/v0.8/reference.md` in `getpaseo/paseo`: which modules each runtime may import, the theme tokens, the host UI components, and the CLI.
-The docs are versioned per breaking plugin release, and `v0.8/migration.md` beside it is the runtime-entry migration.
+Paseo documents the plugin contract at `public-docs/plugins/reference.md` in `getpaseo/paseo`: which modules each runtime may import, the settings store, the theme tokens, the host UI components, and the CLI.
+`providers.md` beside it covers ACP providers, `publishing.md` npm distribution, and `migration.md` the runtime-entry migration.
 Read it before inferring a rule from a failed build.
 Each package carries its own CLAUDE.md, which records only what that reference does not.
 
