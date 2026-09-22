@@ -1,14 +1,10 @@
 import { defineSettings } from "@getpaseo/plugin";
 import { z } from "zod";
 
-/**
- * These three are mirrored by `apps/claude-tty-acp/src/idle-timeout.ts`, which reads the document the
- * daemon stores for the definition below; the adapter is bundled from its own package and cannot
- * import them. Keep the two copies in step: a `MAX_IDLE_TIMEOUT_MS` that drifts lets this side save a
- * value the adapter then refuses.
- */
+/** The adapter's own override, which beats the setting; its name is the adapter's, in `src/idle-timeout.ts`. */
 export const IDLE_TIMEOUT_ENV = "CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS";
 export const DEFAULT_IDLE_TIMEOUT_MS = 60 * 60 * 1_000;
+/** The longest delay `setTimeout` takes, which is what the adapter arms a suspension with. */
 export const MAX_IDLE_TIMEOUT_MS = 2_147_483_647;
 
 export const IDLE_TIMEOUT_OPTIONS = [
@@ -21,22 +17,19 @@ export const IDLE_TIMEOUT_OPTIONS = [
   { value: 0, label: "Never" },
 ] as const;
 
-/**
- * What a Bypass Permissions session starts its Auto Accept toggle from. The adapter mirrors the keys and
- * these values in `apps/claude-tty-acp/src/auto-accept.ts`; keep the two in step.
- */
+/** What a Bypass Permissions session starts its Auto Accept toggle from. */
 export const BYPASS_AUTO_ACCEPT_OPTIONS = [
   { value: "inherit", label: "Same as other sessions" },
   { value: "on", label: "On" },
   { value: "off", label: "Off" },
 ] as const;
 
-/** Names the document the daemon keeps at `$PASEO_HOME/plugin-settings/claude-tty/<id>.json`. */
 export const SETTINGS_ID = "settings";
 
 /**
- * The host owns the store: it validates, writes atomically and tells every connected client, so this
- * plugin neither reads nor writes the file. What it does is hand the adapter the path.
+ * The host owns the store: it validates, writes atomically and tells every connected client. The
+ * server reads it through the handle `registerSettings` returns, and hands the adapter a resolved
+ * copy in `server/settings-snapshot.ts`.
  */
 export const settingsDocument = defineSettings({
   id: SETTINGS_ID,

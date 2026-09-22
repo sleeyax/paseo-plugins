@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fakeSettings } from "./fake-settings.ts";
+import { mirrorSettings } from "./settings-snapshot.ts";
 import { claudeTtyProvider } from "./provider.ts";
 
 /**
@@ -24,7 +25,8 @@ test("shares one catalogue across workspaces and gives a rebuilt adapter a key o
     JSON.stringify({ plugins: { "claude-tty": { path: path.join(checkout, "plugins", "claude-tty") } } }),
   );
   process.env.PASEO_HOME = path.join(home, "paseo");
-  const provider = claudeTtyProvider(fakeSettings());
+  const settings = fakeSettings();
+  const provider = claudeTtyProvider(settings, mirrorSettings(settings, path.join(home, "state", "settings.json")));
   const key = async (cwd: string): Promise<string | undefined> =>
     provider.getCatalogCacheKey?.({ scope: "workspace", cwd });
 

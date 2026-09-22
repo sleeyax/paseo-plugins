@@ -47,7 +47,7 @@ Without it the daemon keys the cache on `["target", <cwd>]` and fetches once per
 The key is the adapter's build — the build witness's path, mtime and size, one `stat` — rather than a bare constant, because the catalogue is compiled into the adapter and a rebuilt adapter is where a different one comes from; a constant would serve the old catalogue for the rest of the daemon's life.
 `adapterBuildWitness` is what "the build" means for a path: the executable in a checkout is a committed shell wrapper whose mtime never moves, so the `dist/cli.js` it runs is the file to watch, while a configured executable is its own witness because there is nothing else here to know about it.
 Nothing else invalidates it. The daemon refetches when something asks it to refresh (`force`), and marks catalogues stale when the settings snapshot is refreshed; there is no expiry.
-It is a separate IPC call on essentially every provider snapshot read, so it must stay at the settings document and one `stat`.
+It is a separate IPC call on essentially every provider snapshot read, so it must stay at one settings `read()` and one `stat`.
 An adapter that is not built yet answers with a shared key of its own rather than with none, so that failure is reported once instead of once per workspace, and the build that fixes it changes the key.
 
 ## The adapter stays a subprocess, and `connector:` cannot replace it
@@ -117,17 +117,20 @@ Paseo cancels a turn before it replaces one, and `server/steering.ts` makes that
 Its test drives the real bridge, and the canary beside it asserts the bridge's own behaviour, so both fail the day this is fixed upstream and the wrapper can go.
 The adapter had the same hole of its own: `settleOpenToolCalls` and a failed subagent card sent `tool_call_update` with no `rawOutput`, which is the same null error by the same route, and both now send one.
 
-## The host owns the settings, and the adapter is told where they are
+## The host owns the settings, and the adapter gets a resolved copy
 
-`registerSettings` hands the daemon a schema and nothing else: it returns `void`, `PluginServerContext` has no way to read a value back, and the `settings.changed` the store emits travels to the *clients* — `subscribeSettings` in the daemon's `session.ts` turns it into a `plugin_settings_changed` broadcast — never back into the plugin runtime.
-So there is no watcher to hang a mirror file off, and this plugin neither reads nor writes the document.
+`registerSettings` returns a handle with `read()` and `subscribe()`, and the server reads the document through nothing else: where the store keeps it is the daemon's business, and plugin code is never told.
+`subscribe()` fires on a save, a reset and a migration the store persisted, not on a hand edit of the file, which has no watcher.
 
-The store runs inside the plugin's own subprocess and keeps one file per definition at `$PASEO_HOME/plugin-settings/<plugin id>/<settings id>.json`, holding `{ "version", "values" }` where `version` is the definition's rather than the file format's.
-Verified on a 0.8.0 daemon with a throwaway plugin: a missing file reads as the schema's defaults at revision `missing`, a write lands that envelope, and `paseo plugin remove` deletes the directory.
-`server/paths.ts` rebuilds that path from `PASEO_HOME`, the way `daemonConfigPath` already did.
+The adapter is a detached process the ACP shim spawns, so it cannot hold the handle.
+`server/settings-snapshot.ts` writes `{ idleTimeoutMs, autoAccept, bypassAutoAccept }` into the adapter's state directory, with the defaults applied and `inherit` resolved to null, and `connect()` passes that path as `--settings-file`.
+It rewrites the file on every `subscribe()` event and before every connection, and the adapter re-reads it at every suspension and every permission request, which is what reaches the sessions already open.
+The adapter therefore knows three field names and nothing of this schema, its defaults or its option labels.
+An invalid document leaves the last good snapshot in place, and on a host that never had one there is no file, which the adapter reads as its own defaults with auto-accept off.
 
-The adapter is a detached process the ACP shim spawns, so it is handed the path as `--settings-file` in the command `connect()` builds, and re-reads it at every suspension.
-The alternatives were both worse: `runAcpProvider` takes no `env`, and a value passed at spawn would only reach the next adapter rather than the sessions already open, which is the behaviour the idle timeout is documented to have.
+The alternatives were worse.
+`runAcpProvider` takes no `env`, and a value passed at spawn would only reach the next adapter rather than the sessions already open, which is the behaviour the idle timeout is documented to have.
+A `connector` could carry a pushed notification instead of a file, but it is undocumented and costs the spawn environment, as the section on `connector` above explains.
 
 The setting is global, not per session, and it is now a choice rather than the only option.
 A per-session `ProviderSetting` is only ever *listed* from the ACP session's own `configOptions` — `toProviderConfigState` in the SDK's ACP connection builds `settings` from every option whose category is neither `model` nor `thought_level` — and the adapter does advertise config options since it started publishing its model and effort selectors, so the `session/set_config_option` surface that was missing is there.

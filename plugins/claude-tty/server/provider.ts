@@ -5,6 +5,7 @@ import { PROVIDER_ID, PROVIDER_LABEL } from "../shared/provider.ts";
 import { resolveAdapter } from "./adapter.ts";
 import { adapterCommand, cardAnswersDirectory, defaultStateDirectory } from "./paths.ts";
 import type { Settings } from "./settings.ts";
+import type { SettingsMirror } from "./settings-snapshot.ts";
 import { withPermissionCards } from "./permission-bridge.ts";
 import { sessionNotices } from "./session-notices.ts";
 import { withSteerFallback } from "./steering.ts";
@@ -24,7 +25,7 @@ const INITIAL_COMMANDS_TIMEOUT_MS = 10_000;
 /** Read from the plugin directory and sanitised by the daemon when the plugin starts. */
 const PROVIDER_ICON = "icon.svg";
 
-export function claudeTtyProvider(settings: Settings): ProviderRegistration {
+export function claudeTtyProvider(settings: Settings, snapshot: SettingsMirror): ProviderRegistration {
   return {
     id: PROVIDER_ID,
     label: PROVIDER_LABEL,
@@ -58,13 +59,15 @@ export function claudeTtyProvider(settings: Settings): ProviderRegistration {
     },
     /**
      * The command names the adapter this host runs — the one its settings point at, or the one in the
-     * checkout this plugin was installed from — and the settings document the host keeps, neither of
-     * which is knowable before the plugin runs, so the ACP shim is built per connection rather than
-     * at registration. That also makes a changed setting reach the next connection rather than only
-     * the next daemon start.
+     * checkout this plugin was installed from — which is not knowable before the plugin runs, so the
+     * ACP shim is built per connection rather than at registration. That also makes a changed setting
+     * reach the next connection rather than only the next daemon start.
+     *
+     * The snapshot is written again first, so an adapter spawned after its state directory was removed
+     * still finds the settings rather than its own defaults.
      */
     async connect(request) {
-      const adapter = await resolveAdapter(settings);
+      const [adapter] = await Promise.all([resolveAdapter(settings), snapshot.refresh()]);
       if (adapter.executable === null) throw new Error(adapter.problem!);
       const details = toolCallDetails();
       const notices = sessionNotices();
