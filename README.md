@@ -72,4 +72,4 @@ npx skills add sleeyax/paseo-plugins --skill update-plugins
 ## Plugin settings
 
 Plugins keep their settings in `$PASEO_HOME/plugin-settings/<plugin-id>/`, managed by Paseo and removed with the plugin.
-Versions from before Paseo 0.9 used `~/.cache/paseo-plugins/<plugin-id>/` instead, which is no longer read and can be deleted.
+Versions from before Paseo 0.9 used `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/<plugin-id>/` instead; each plugin's README says whether it carries those settings over.
