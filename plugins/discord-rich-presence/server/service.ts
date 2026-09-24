@@ -72,7 +72,7 @@ export class PresenceService {
     if (this.stopped) return;
     this.settings = followedSettings(this.settings, state);
     if (state.status !== "ready") {
-      console.warn(`discord-rich-presence kept its current settings, because the saved ones are invalid: ${state.error}`);
+      console.warn(`discord-rich-presence ignored invalid settings: ${state.error}`);
       return;
     }
     this.applyConnection();
