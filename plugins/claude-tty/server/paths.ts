@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { ADAPTER_STATE_DIRECTORY, PLUGIN_ID } from "../shared/identity.ts";
@@ -71,9 +72,13 @@ export function cardAnswersDirectory(stateDirectory: string): string {
   return path.join(stateDirectory, "card-answers");
 }
 
-/** Where the settings the adapter runs by are left for it, in `server/settings-snapshot.ts`'s shape. */
-export function settingsSnapshotPath(stateDirectory: string): string {
-  return path.join(stateDirectory, "settings.json");
+/**
+ * Where the settings the adapter runs by are left for it, in `server/settings-snapshot.ts`'s shape.
+ * The state directory is per user, but each Paseo home has settings of its own, so the file is named after the home.
+ */
+export function settingsSnapshotPath(stateDirectory: string, env: Env = process.env): string {
+  const home = createHash("sha256").update(paseoHome(env)).digest("hex").slice(0, 16);
+  return path.join(stateDirectory, "settings", `${home}.json`);
 }
 
 /** Mirrors the adapter's own `claudeConfigDir`, which decides where Claude keeps its transcripts. */
@@ -143,7 +148,7 @@ export function adapterCommand(executable: string, env: Env = process.env): [str
   return [
     executable,
     ADAPTER_SETTINGS_FLAG,
-    settingsSnapshotPath(defaultStateDirectory(env)),
+    settingsSnapshotPath(defaultStateDirectory(env), env),
     ADAPTER_ANSWERS_FLAG,
     cardAnswersDirectory(defaultStateDirectory(env)),
   ];

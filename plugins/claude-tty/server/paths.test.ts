@@ -12,6 +12,7 @@ import {
   defaultStateDirectory,
   executableCandidates,
   repoRootFromPluginPath,
+  settingsSnapshotPath,
   subagentsDirectory,
   transcriptPath,
   workspacesDirectory,
@@ -49,10 +50,17 @@ test("spawns the adapter with the two paths it cannot work out for itself", () =
   assert.deepEqual(adapterCommand(executable, { PASEO_HOME: "/srv/paseo", HOME: "/home/paseo" }), [
     "/opt/paseo-plugins/apps/claude-tty-acp/bin/claude-tty-acp",
     "--settings-file",
-    "/home/paseo/.local/state/claude-tty-acp/settings.json",
+    settingsSnapshotPath("/home/paseo/.local/state/claude-tty-acp", { PASEO_HOME: "/srv/paseo" }),
     "--answers-dir",
     "/home/paseo/.local/state/claude-tty-acp/card-answers",
   ]);
+});
+
+test("gives every Paseo home a settings snapshot of its own in the shared state directory", () => {
+  const snapshot = (env: Record<string, string>) => settingsSnapshotPath("/srv/state", { HOME: "/home/paseo", ...env });
+  assert.match(snapshot({ PASEO_HOME: "/srv/paseo" }), /^\/srv\/state\/settings\/[0-9a-f]{16}\.json$/);
+  assert.notEqual(snapshot({ PASEO_HOME: "/srv/paseo" }), snapshot({ PASEO_HOME: "/srv/paseo-dev" }));
+  assert.equal(snapshot({}), snapshot({ PASEO_HOME: "~/.paseo" }));
 });
 
 test("reads a wrapper's build off the dist beside it, and anything else off itself", () => {
