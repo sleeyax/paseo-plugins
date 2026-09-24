@@ -39,6 +39,8 @@ export class PresenceService {
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private intervalTimer: ReturnType<typeof setInterval> | null = null;
+  /** The host may run the cleanup while start is still awaiting, and start must not bring anything back up after it. */
+  private stopped = false;
 
   constructor(private readonly store: Settings) {
     this.daemon = new DaemonConnection({ onUpdate: () => this.scheduleRefresh() });
@@ -48,7 +50,9 @@ export class PresenceService {
   async start(): Promise<void> {
     this.unsubscribe = this.store.subscribe((state) => this.follow(state));
     await this.follow(await this.store.read());
+    if (this.stopped) return;
     await this.daemon.start();
+    if (this.stopped) return;
     this.intervalTimer = setInterval(() => void this.refresh(), REFRESH_INTERVAL_MS);
     this.intervalTimer.unref?.();
     await this.refresh();
@@ -65,6 +69,7 @@ export class PresenceService {
 
   /** An invalid document keeps the current settings, so a bad save never exposes a hidden project. */
   private async follow(state: PluginSettingsState<typeof settingsDocument.schema>): Promise<void> {
+    if (this.stopped) return;
     if (state.status !== "ready") {
       console.warn(`discord-rich-presence kept its current settings, because the saved ones are invalid: ${state.error}`);
       return;
@@ -102,7 +107,7 @@ export class PresenceService {
 
   private async publish(): Promise<void> {
     const settings = this.settings;
-    if (!settings) return;
+    if (!settings || this.stopped) return;
     const now = Date.now();
     this.activity = renderActivity(this.snapshot, settings, this.startedAt, now);
     const payload = this.activity ? JSON.stringify(this.activity) : null;
@@ -131,6 +136,7 @@ export class PresenceService {
   }
 
   async stop(): Promise<void> {
+    this.stopped = true;
     this.unsubscribe?.();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     if (this.writeTimer) clearTimeout(this.writeTimer);
