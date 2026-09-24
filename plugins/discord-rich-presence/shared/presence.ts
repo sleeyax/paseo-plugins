@@ -30,10 +30,8 @@ export type Project = {
   displayName: string;
 };
 
-/** A project told to ignore the default and use this level instead. */
-export type ProjectDetailLevel = Project & {
-  level: DetailLevel;
-};
+/** Per-project level overrides, keyed by root path. */
+export type ProjectDetailLevels = Record<string, { displayName: string; level: DetailLevel }>;
 
 /** A project the settings surface can assign a level to. */
 export type KnownProject = Project & {
@@ -45,7 +43,7 @@ export type PresenceSettings = {
   enabled: boolean;
   applicationId: string | null;
   defaultDetailLevel: DetailLevel;
-  projectDetailLevels: ProjectDetailLevel[];
+  projectDetailLevels: ProjectDetailLevels;
 };
 
 export type PresenceSnapshot = {
@@ -102,15 +100,14 @@ export const DEFAULT_SETTINGS: PresenceSettings = {
   enabled: true,
   applicationId: MANAGED_APPLICATION_ID,
   defaultDetailLevel: "detailed",
-  projectDetailLevels: [],
+  projectDetailLevels: {},
 };
 
 /** The level set on a project, or null when it follows the default. */
 export function levelSetOn(settings: PresenceSettings, projectRootPath: string): DetailLevel | null {
-  return (
-    settings.projectDetailLevels.find((project) => project.rootPath === projectRootPath)?.level ??
-    null
-  );
+  return Object.hasOwn(settings.projectDetailLevels, projectRootPath)
+    ? settings.projectDetailLevels[projectRootPath]!.level
+    : null;
 }
 
 export function detailLevelFor(settings: PresenceSettings, projectRootPath: string): DetailLevel {

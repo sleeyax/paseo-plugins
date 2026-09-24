@@ -1,3 +1,4 @@
+import type { PluginSettings } from "@getpaseo/plugin/server";
 import type {
   KnownProject,
   PresenceActivity,
@@ -5,19 +6,20 @@ import type {
   PresenceSnapshot,
 } from "../shared/presence.ts";
 import { renderActivity } from "../shared/presence.ts";
-import { knownProjects } from "../shared/settings.ts";
+import { knownProjects, type settingsDocument } from "../shared/settings.ts";
 import { decideWrite, MIN_WRITE_INTERVAL_MS } from "../shared/throttle.ts";
 import { DaemonConnection, type DaemonState } from "./daemon.ts";
 import { DiscordConnection, type DiscordState } from "./discord.ts";
-import { SettingsStore } from "./settings-store.ts";
+import { followedSettings, type SettingsState } from "./followed-settings.ts";
 
 /** A burst of agent events is one presence write, and the debounce doubles as the rate-limit floor. */
 const REFRESH_DEBOUNCE_MS = MIN_WRITE_INTERVAL_MS;
 /** Covers anything the update stream misses, including a subscription lost to a reconnect. */
 const REFRESH_INTERVAL_MS = 60_000;
 
+export type Settings = PluginSettings<typeof settingsDocument.schema>;
+
 export type PresenceStatus = {
-  settings: PresenceSettings;
   discord: DiscordState;
   daemon: DaemonState;
   activity: PresenceActivity | null;
@@ -25,11 +27,12 @@ export type PresenceStatus = {
 };
 
 export class PresenceService {
-  private readonly store = new SettingsStore();
   private readonly startedAt = Date.now();
   private readonly daemon: DaemonConnection;
   private readonly discord: DiscordConnection;
+  /** Null until a valid document is read, so nothing is shown before then. */
   private settings: PresenceSettings | null = null;
+  private unsubscribe: (() => void) | null = null;
   private snapshot: PresenceSnapshot = { workspaces: [], agents: [], projects: [] };
   private activity: PresenceActivity | null = null;
   private lastPayload: string | null = null;
@@ -37,37 +40,43 @@ export class PresenceService {
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private intervalTimer: ReturnType<typeof setInterval> | null = null;
+  /** The host may run the cleanup while start is still awaiting, and start must not bring anything back up after it. */
+  private stopped = false;
 
-  constructor() {
+  constructor(private readonly store: Settings) {
     this.daemon = new DaemonConnection({ onUpdate: () => this.scheduleRefresh() });
     this.discord = new DiscordConnection({ onReady: () => this.publish() });
   }
 
   async start(): Promise<void> {
-    this.settings = await this.store.read();
-    this.applyConnection();
+    this.unsubscribe = this.store.subscribe((state) => this.follow(state));
+    await this.follow(await this.store.read());
+    if (this.stopped) return;
     await this.daemon.start();
+    if (this.stopped) return;
     this.intervalTimer = setInterval(() => void this.refresh(), REFRESH_INTERVAL_MS);
     this.intervalTimer.unref?.();
     await this.refresh();
   }
 
-  async status(): Promise<PresenceStatus> {
-    const settings = this.settings ?? (await this.store.read());
+  status(): PresenceStatus {
     return {
-      settings,
       discord: this.discord.currentState(),
       daemon: this.daemon.currentState(),
       activity: this.activity,
-      projects: knownProjects(settings, this.snapshot),
+      projects: knownProjects(this.settings?.projectDetailLevels ?? {}, this.snapshot),
     };
   }
 
-  async update(settings: PresenceSettings): Promise<PresenceStatus> {
-    this.settings = await this.store.write(settings);
+  private async follow(state: SettingsState): Promise<void> {
+    if (this.stopped) return;
+    this.settings = followedSettings(this.settings, state);
+    if (state.status !== "ready") {
+      console.warn(`discord-rich-presence ignored invalid settings: ${state.error}`);
+      return;
+    }
     this.applyConnection();
     await this.refresh();
-    return this.status();
   }
 
   private applyConnection(): void {
@@ -98,7 +107,7 @@ export class PresenceService {
 
   private async publish(): Promise<void> {
     const settings = this.settings;
-    if (!settings) return;
+    if (!settings || this.stopped) return;
     const now = Date.now();
     this.activity = renderActivity(this.snapshot, settings, this.startedAt, now);
     const payload = this.activity ? JSON.stringify(this.activity) : null;
@@ -127,6 +136,8 @@ export class PresenceService {
   }
 
   async stop(): Promise<void> {
+    this.stopped = true;
+    this.unsubscribe?.();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     if (this.writeTimer) clearTimeout(this.writeTimer);
     if (this.intervalTimer) clearInterval(this.intervalTimer);
@@ -134,9 +145,3 @@ export class PresenceService {
     await this.daemon.stop();
   }
 }
-
-export const service = new PresenceService();
-
-void service.start().catch((error: unknown) => {
-  console.error("discord-rich-presence failed to start", error);
-});

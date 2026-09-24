@@ -152,6 +152,7 @@ export function Select<Value extends string>({
   onValueChange,
   label,
   accessibilityLabel,
+  disabled,
 }: {
   palette: Palette;
   options: readonly SelectOption<Value>[];
@@ -160,6 +161,7 @@ export function Select<Value extends string>({
   /** What the closed trigger reads, when it says more than the selected option's label. */
   label?: string;
   accessibilityLabel: string;
+  disabled?: boolean;
 }) {
   const trigger = useRef<View>(null);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
@@ -180,8 +182,9 @@ export function Select<Value extends string>({
     <View ref={trigger} collapsable={false}>
       <Pressable
         onPress={open}
+        disabled={disabled}
         accessibilityRole="button"
-        accessibilityState={{ expanded: anchor !== null }}
+        accessibilityState={{ expanded: anchor !== null, disabled: Boolean(disabled) }}
         accessibilityLabel={accessibilityLabel}
         style={pressable(({ hovered, pressed }) => ({
           flexDirection: "row",
@@ -193,7 +196,8 @@ export function Select<Value extends string>({
           borderRadius: radius.md,
           borderWidth: 1,
           borderColor: palette.borderAccent,
-          backgroundColor: hovered || pressed ? palette.surface2 : "transparent",
+          backgroundColor: !disabled && (hovered || pressed) ? palette.surface2 : "transparent",
+          opacity: disabled ? 0.5 : 1,
         }))}
       >
         <Text numberOfLines={1} style={{ color: palette.foreground, fontSize: fontSize.base }}>

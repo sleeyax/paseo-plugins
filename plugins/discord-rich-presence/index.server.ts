@@ -1,17 +1,16 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import * as contracts from "./shared/contracts.ts";
-import {
-  setEnabledHandler,
-  setProjectLevelHandler,
-  setSettingsHandler,
-  statusHandler,
-} from "./server/handlers.ts";
+import { settingsDocument } from "./shared/settings.ts";
+import { statusHandler } from "./server/handlers.ts";
+import { PresenceService } from "./server/service.ts";
 
 export default function contribute(server: PluginServerContext) {
-  server.handle(contracts.getStatus, () => statusHandler());
-  server.handle(contracts.setSettings, (input) => setSettingsHandler(input));
-  server.handle(contracts.setEnabled, (input) => setEnabledHandler(input));
-  server.handle(contracts.setProjectLevel, (input) => setProjectLevelHandler(input));
+  const service = new PresenceService(server.registerSettings(settingsDocument));
+  void service.start().catch((error: unknown) => {
+    console.error("discord-rich-presence failed to start", error);
+  });
 
-  return () => {};
+  server.handle(contracts.getStatus, () => statusHandler(service));
+
+  return () => service.stop();
 }

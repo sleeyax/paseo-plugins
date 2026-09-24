@@ -1,6 +1,6 @@
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { useRpc } from "@getpaseo/plugin/client";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRpc, useSettings } from "@getpaseo/plugin/client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import { ScrollView, Text, TextInput, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
@@ -11,8 +11,9 @@ import {
   DETAIL_LEVEL_LABELS,
   type DetailLevel,
   MANAGED_APPLICATION_ID,
+  type PresenceSettings,
 } from "../shared/presence.ts";
-import { coerceApplicationId } from "../shared/settings.ts";
+import { coerceApplicationId, settingsDocument, withProjectDetailLevel } from "../shared/settings.ts";
 import { DiscordPreview } from "./preview.tsx";
 import {
   MAX_CONTENT_WIDTH,
@@ -42,11 +43,11 @@ const REFETCH_MS = 5_000;
 
 type Connection = { text: string; tone: "accent" | "muted" | "danger" };
 
-function connectionOf(status: PresenceStatusPayload): Connection {
-  if (!status.settings.applicationId) {
+function connectionOf(status: PresenceStatusPayload, settings: PresenceSettings): Connection {
+  if (!settings.applicationId) {
     return { text: "No application ID — add one below", tone: "muted" };
   }
-  if (!status.settings.enabled) return { text: "Off — your profile shows nothing", tone: "muted" };
+  if (!settings.enabled) return { text: "Off — your profile shows nothing", tone: "muted" };
   if (status.daemon.status === "failed") {
     return { text: `Cannot read Paseo: ${status.daemon.error ?? "unknown error"}`, tone: "danger" };
   }
@@ -128,11 +129,13 @@ function ProjectLevelRow({
   palette,
   project,
   defaultLevel,
+  disabled,
   onChange,
 }: {
   palette: Palette;
   project: KnownProject;
   defaultLevel: DetailLevel;
+  disabled: boolean;
   onChange: (level: DetailLevel | null) => void;
 }) {
   const effective = project.level ?? defaultLevel;
@@ -155,6 +158,7 @@ function ProjectLevelRow({
               ? `Detail level for ${project.displayName}: follows the default, ${label}`
               : `Detail level for ${project.displayName}: ${label}`
           }
+          disabled={disabled}
           onValueChange={(choice) => onChange(choice === FOLLOWS_DEFAULT ? null : choice)}
         />
       }
@@ -204,29 +208,37 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
   const palette = usePalette(theme);
   const queryClient = useQueryClient();
   const getStatus = useRpc(contracts.getStatus);
-  const setSettings = useRpc(contracts.setSettings);
-  const setProjectLevel = useRpc(contracts.setProjectLevel);
+  const stored = useSettings(settingsDocument);
 
   const query = useQuery({
     queryKey: STATUS_QUERY_KEY,
     queryFn: () => getStatus({}),
     refetchInterval: REFETCH_MS,
   });
-  const apply = useMutation({
-    mutationFn: (next: PresenceStatusPayload["settings"]) => setSettings(next),
-    onSuccess: (next) => queryClient.setQueryData(STATUS_QUERY_KEY, next),
-  });
-  const setLevel = useMutation({
-    mutationFn: (input: { rootPath: string; displayName: string; level: DetailLevel | null }) =>
-      setProjectLevel(input),
-    onSuccess: (next) => queryClient.setQueryData(STATUS_QUERY_KEY, next),
-  });
 
   const status = query.data ?? null;
   const [draftId, setDraftId] = useState<string | null>(null);
-  const connection = useMemo(() => (status ? connectionOf(status) : null), [status]);
+  const settings = stored.status === "ready" ? stored.values : null;
+  const connection = useMemo(
+    () => (status && settings ? connectionOf(status, settings) : null),
+    [status, settings],
+  );
 
-  if (!status || !connection) {
+  if (stored.status === "error" || stored.status === "invalid") {
+    return (
+      <View style={{ flex: 1, backgroundColor: palette.surface0, padding: spacing[4], gap: spacing[3] }}>
+        <Text style={{ color: palette.statusDanger, fontSize: fontSize.base }}>{stored.error}</Text>
+        <View style={{ flexDirection: "row", gap: spacing[2] }}>
+          <Button palette={palette} label="Read them again" variant="default" onPress={() => void stored.reload()} />
+          {stored.status === "invalid" ? (
+            <Button palette={palette} label="Restore the defaults" variant="ghost" onPress={() => void stored.reset()} />
+          ) : null}
+        </View>
+      </View>
+    );
+  }
+
+  if (!status || !settings || !connection || stored.status !== "ready") {
     return (
       <View style={{ flex: 1, backgroundColor: palette.surface0, padding: spacing[4] }}>
         <Text style={{ color: palette.foregroundMuted, fontSize: fontSize.base }}>Loading…</Text>
@@ -234,7 +246,12 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
     );
   }
 
-  const settings = status.settings;
+  // Refreshes the preview now rather than on the next poll.
+  const save = async (next: PresenceSettings) => {
+    const saved = await stored.save(next, stored.revision);
+    if (saved) void queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
+    return saved;
+  };
   const savedId = settings.applicationId ?? "";
   const applicationId = draftId ?? savedId;
   const parsedId = coerceApplicationId(applicationId);
@@ -244,10 +261,9 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
     ? (BADGE_COLORS[status.activity.smallImageKey] ?? null)
     : null;
 
-  const saveApplicationId = () => {
+  const saveApplicationId = async () => {
     if (idInvalid || !idChanged) return;
-    apply.mutate({ ...settings, applicationId: parsedId });
-    setDraftId(null);
+    if (await save({ ...settings, applicationId: parsedId })) setDraftId(null);
   };
 
   return (
@@ -263,6 +279,10 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
         gap: spacing[6],
       }}
     >
+      {stored.saveError ? (
+        <Text style={{ color: palette.statusDanger, fontSize: fontSize.base }}>{stored.saveError}</Text>
+      ) : null}
+
       <Card palette={palette}>
         <Row
           palette={palette}
@@ -278,7 +298,8 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
             <Switch
               palette={palette}
               value={settings.enabled}
-              onValueChange={(enabled) => apply.mutate({ ...settings, enabled })}
+              disabled={stored.saving}
+              onValueChange={(enabled) => void save({ ...settings, enabled })}
               accessibilityLabel="Show my activity on Discord"
             />
           }
@@ -314,9 +335,8 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
                 value={settings.defaultDetailLevel}
                 options={DEFAULT_LEVEL_OPTIONS}
                 accessibilityLabel={`Detail level for all projects: ${DETAIL_LEVEL_LABELS[settings.defaultDetailLevel]}`}
-                onValueChange={(defaultDetailLevel) =>
-                  apply.mutate({ ...settings, defaultDetailLevel })
-                }
+                disabled={stored.saving}
+                onValueChange={(defaultDetailLevel) => void save({ ...settings, defaultDetailLevel })}
               />
             }
           />
@@ -329,13 +349,8 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
                 palette={palette}
                 project={project}
                 defaultLevel={settings.defaultDetailLevel}
-                onChange={(level) =>
-                  setLevel.mutate({
-                    rootPath: project.rootPath,
-                    displayName: project.displayName,
-                    level,
-                  })
-                }
+                disabled={stored.saving}
+                onChange={(level) => void save(withProjectDetailLevel(settings, project, level))}
               />
             ))
           )}
@@ -366,23 +381,23 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
               palette={palette}
               value={applicationId}
               onChangeText={setDraftId}
-              onSubmit={saveApplicationId}
+              onSubmit={() => void saveApplicationId()}
             />
             <Button
               palette={palette}
               label="Save"
               variant="default"
-              disabled={!idChanged || idInvalid}
-              onPress={saveApplicationId}
+              disabled={!idChanged || idInvalid || stored.saving}
+              onPress={() => void saveApplicationId()}
             />
             {savedId !== MANAGED_APPLICATION_ID ? (
               <Button
                 palette={palette}
                 label="Use the shared one"
                 variant="ghost"
-                onPress={() => {
-                  apply.mutate({ ...settings, applicationId: MANAGED_APPLICATION_ID });
-                  setDraftId(null);
+                disabled={stored.saving}
+                onPress={async () => {
+                  if (await save({ ...settings, applicationId: MANAGED_APPLICATION_ID })) setDraftId(null);
                 }}
               />
             ) : null}

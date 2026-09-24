@@ -56,7 +56,7 @@ function settings(overrides: Partial<PresenceSettings> = {}): PresenceSettings {
 }
 
 function hiding(rootPath: string): PresenceSettings {
-  return settings({ projectDetailLevels: [{ rootPath, displayName: rootPath, level: "hidden" }] });
+  return settings({ projectDetailLevels: { [rootPath]: { displayName: rootPath, level: "hidden" } } });
 }
 
 test("renders nothing until an application id is configured", () => {
@@ -212,9 +212,9 @@ test("the projects level still badges the workspace it named", () => {
 test("a project renders at its own level, not the default", () => {
   const quiet = settings({
     defaultDetailLevel: "projects",
-    projectDetailLevels: [
-      { rootPath: "/home/dev/paseo-plugins", displayName: "paseo-plugins", level: "detailed" },
-    ],
+    projectDetailLevels: {
+      "/home/dev/paseo-plugins": { displayName: "paseo-plugins", level: "detailed" },
+    },
   });
   assert.equal(renderActivity(snapshot(), quiet, START, NOW)?.details, "paseo-plugins — main");
 });
@@ -247,10 +247,10 @@ test("the project promoted past a hidden one is rendered at its own level", () =
     ],
   });
   const mixed = settings({
-    projectDetailLevels: [
-      { rootPath: "/work/client", displayName: "client-work", level: "hidden" },
-      { rootPath: "/home/dev/paseo-plugins", displayName: "paseo-plugins", level: "projects" },
-    ],
+    projectDetailLevels: {
+      "/work/client": { displayName: "client-work", level: "hidden" },
+      "/home/dev/paseo-plugins": { displayName: "paseo-plugins", level: "projects" },
+    },
   });
   assert.equal(renderActivity(many, mixed, START, NOW)?.details, "paseo-plugins");
 });

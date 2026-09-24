@@ -1,6 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import * as contracts from "./shared/contracts.ts";
 import { DiscordPresenceSurface } from "./client/settings.tsx";
+import { setProjectLevel, updateSettings } from "./client/settings-writes.ts";
 
 export const SURFACE_ID = "settings";
 
@@ -21,7 +21,7 @@ export default function contribute(client: PluginClientContext) {
     keywords: ["discord", "presence", "status", "privacy"],
     context: "global",
     async onSelect({ rpc }) {
-      await rpc(contracts.setEnabled, { enabled: false });
+      await updateSettings(rpc, (settings) => ({ ...settings, enabled: false }));
     },
   });
 
@@ -32,7 +32,7 @@ export default function contribute(client: PluginClientContext) {
     keywords: ["discord", "presence", "status"],
     context: "global",
     async onSelect({ rpc }) {
-      await rpc(contracts.setEnabled, { enabled: true });
+      await updateSettings(rpc, (settings) => ({ ...settings, enabled: true }));
     },
   });
 
@@ -42,13 +42,7 @@ export default function contribute(client: PluginClientContext) {
     icon: "Eye",
     keywords: ["discord", "presence", "project", "detail", "privacy"],
     context: "workspace",
-    async onSelect({ rpc, workspace }) {
-      await rpc(contracts.setProjectLevel, {
-        rootPath: workspace.projectRootPath,
-        displayName: workspace.projectDisplayName,
-        level: "detailed",
-      });
-    },
+    onSelect: ({ rpc, workspace }) => setProjectLevel(rpc, workspace, "detailed"),
   });
 
   client.addCommandCenterItem({
@@ -57,13 +51,7 @@ export default function contribute(client: PluginClientContext) {
     icon: "Folder",
     keywords: ["discord", "presence", "project", "detail", "privacy"],
     context: "workspace",
-    async onSelect({ rpc, workspace }) {
-      await rpc(contracts.setProjectLevel, {
-        rootPath: workspace.projectRootPath,
-        displayName: workspace.projectDisplayName,
-        level: "projects",
-      });
-    },
+    onSelect: ({ rpc, workspace }) => setProjectLevel(rpc, workspace, "projects"),
   });
 
   client.addCommandCenterItem({
@@ -72,13 +60,7 @@ export default function contribute(client: PluginClientContext) {
     icon: "EyeOff",
     keywords: ["discord", "presence", "project", "hide", "privacy"],
     context: "workspace",
-    async onSelect({ rpc, workspace }) {
-      await rpc(contracts.setProjectLevel, {
-        rootPath: workspace.projectRootPath,
-        displayName: workspace.projectDisplayName,
-        level: "hidden",
-      });
-    },
+    onSelect: ({ rpc, workspace }) => setProjectLevel(rpc, workspace, "hidden"),
   });
 
   client.addCommandCenterItem({
@@ -87,13 +69,7 @@ export default function contribute(client: PluginClientContext) {
     icon: "Settings2",
     keywords: ["discord", "presence", "project", "default", "detail"],
     context: "workspace",
-    async onSelect({ rpc, workspace }) {
-      await rpc(contracts.setProjectLevel, {
-        rootPath: workspace.projectRootPath,
-        displayName: workspace.projectDisplayName,
-        level: null,
-      });
-    },
+    onSelect: ({ rpc, workspace }) => setProjectLevel(rpc, workspace, null),
   });
 
   return () => {};

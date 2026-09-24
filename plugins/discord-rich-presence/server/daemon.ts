@@ -60,6 +60,7 @@ export class DaemonConnection {
     if (this.stopped) return;
     const pid = await readJsonFile(pidFilePath(this.env));
     const config = await readJsonFile(daemonConfigPath(this.env));
+    if (this.stopped) return;
     const daemonSection = (config?.daemon ?? null) as Record<string, unknown> | null;
     const target = resolveDaemonUrl({
       env: this.env,
