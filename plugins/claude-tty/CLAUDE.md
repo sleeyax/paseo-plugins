@@ -126,6 +126,7 @@ The adapter is a detached process the ACP shim spawns, so it cannot hold the han
 `server/settings-snapshot.ts` writes `{ idleTimeoutMs, autoAccept, bypassAutoAccept }` into the adapter's state directory, with the defaults applied and `inherit` resolved to null, and `connect()` passes that path as `--settings-file`.
 The state directory is one per user and a Paseo home is not, since an install with `--id` or a dev daemon beside the real one runs as the same user, so `settingsSnapshotPath` names the file after the home and neither daemon overwrites the other's.
 It rewrites the file on every `subscribe()` event and before every connection, and the adapter re-reads it at every suspension and every permission request, which is what reaches the sessions already open.
+Only the write before a connection creates the directory, so **Remove state** is not undone by the next daemon start or settings save; a change announced with no directory has no adapter to reach.
 The adapter therefore knows three field names and nothing of this schema, its defaults or its option labels.
 An invalid document leaves the last good snapshot in place, and on a host that never had one there is no file, which the adapter reads as its own defaults with auto-accept off.
 

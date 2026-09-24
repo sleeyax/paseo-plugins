@@ -19,7 +19,6 @@ import {
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(settingsDocument);
   const snapshot = mirrorSettings(settings, settingsSnapshotPath(defaultStateDirectory()));
-  void snapshot.refresh();
 
   // Registration has to be synchronous: the daemon reads the provider list out of the reply to its
   // initialize message, and connects the provider milliseconds later.

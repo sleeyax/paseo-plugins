@@ -50,6 +50,7 @@ test("keeps the last good snapshot while the saved document is invalid", async (
   const settings = fakeSettings();
   const mirror = mirrorSettings(settings, filePath);
   t.after(() => mirror.stop());
+  await mirror.refresh();
   await settings.save({ autoAccept: true });
 
   const warn = t.mock.method(console, "warn", () => {});
@@ -68,6 +69,23 @@ test("writes nothing at all for an invalid document it has no good copy of", asy
   t.after(() => mirror.stop());
   await mirror.refresh();
   await assert.rejects(stat(filePath), { code: "ENOENT" });
+});
+
+test("leaves a removed state directory removed until the next connection refreshes it", async (t) => {
+  const filePath = await snapshotFile(t);
+  const settings = fakeSettings();
+  const mirror = mirrorSettings(settings, filePath);
+  t.after(() => mirror.stop());
+  const warn = t.mock.method(console, "warn", () => {});
+
+  await mirror.refresh();
+  await rm(path.dirname(filePath), { force: true, recursive: true });
+  await settings.save({ autoAccept: true });
+  await assert.rejects(stat(path.dirname(filePath)), { code: "ENOENT" });
+  assert.equal(warn.mock.callCount(), 0);
+
+  await mirror.refresh();
+  assert.deepEqual(await readSnapshot(filePath), { idleTimeoutMs: 60 * 60 * 1_000, autoAccept: true, bypassAutoAccept: null });
 });
 
 test("stops following the host once stopped", async (t) => {

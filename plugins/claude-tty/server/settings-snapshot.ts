@@ -26,7 +26,7 @@ export function snapshotOf(values: z.output<typeof settingsDocument.schema>): Se
 }
 
 export type SettingsMirror = {
-  /** Writes the document as it stands now; never rejects, since a session must not fail over it. */
+  /** Writes the document as it stands now, creating the directory; never rejects, since a session must not fail over it. */
   refresh(): Promise<void>;
   stop(): void;
 };
@@ -38,26 +38,31 @@ export type SettingsMirror = {
  * Every write reads the document afresh and they run one at a time, so the last write is always of the
  * latest document whatever order the triggers arrived in. An invalid document leaves the last good
  * snapshot where it is: an approval is not something to change over a document nobody can read.
+ *
+ * Only `refresh` creates the directory. A change announced while there is none has no adapter to reach,
+ * and writing it anyway would bring back the state that **Remove state** just deleted.
  */
 export function mirrorSettings(settings: Settings, filePath: string): SettingsMirror {
   let queue = Promise.resolve();
-  const refresh = () => {
-    queue = queue.then(() => writeSnapshot(settings, filePath));
+  const write = (createDirectory: boolean) => {
+    queue = queue.then(() => writeSnapshot(settings, filePath, createDirectory));
     return queue;
   };
-  const unsubscribe = settings.subscribe(() => refresh());
-  return { refresh, stop: unsubscribe };
+  const unsubscribe = settings.subscribe(() => write(false));
+  return { refresh: () => write(true), stop: unsubscribe };
 }
 
-async function writeSnapshot(settings: Settings, filePath: string): Promise<void> {
+async function writeSnapshot(settings: Settings, filePath: string, createDirectory: boolean): Promise<void> {
   try {
     const state = await settings.read();
     if (state.status !== "ready") {
       console.warn(`[claude-tty] Kept the adapter's last settings, because the saved ones are invalid: ${state.error}`);
       return;
     }
+    if (createDirectory) await mkdir(path.dirname(filePath), { recursive: true });
     await writeAtomically(filePath, `${JSON.stringify(snapshotOf(state.values))}\n`);
   } catch (error) {
+    if (!createDirectory && (error as NodeJS.ErrnoException)?.code === "ENOENT") return;
     console.warn(`[claude-tty] Could not hand the adapter its settings at ${filePath}: ${messageOf(error)}`);
   }
 }
@@ -65,7 +70,6 @@ async function writeSnapshot(settings: Settings, filePath: string): Promise<void
 /** Renamed into place, so the adapter never reads half a file. */
 async function writeAtomically(filePath: string, contents: string): Promise<void> {
   const temporary = `${filePath}.${randomUUID()}.tmp`;
-  await mkdir(path.dirname(filePath), { recursive: true });
   try {
     await writeFile(temporary, contents, { mode: 0o600 });
     await rename(temporary, filePath);
