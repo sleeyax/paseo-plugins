@@ -58,13 +58,8 @@ export function claudeTtyProvider(settings: Settings, snapshot: SettingsMirror):
       }
     },
     /**
-     * The command names the adapter this host runs — the one its settings point at, or the one in the
-     * checkout this plugin was installed from — which is not knowable before the plugin runs, so the
-     * ACP shim is built per connection rather than at registration. That also makes a changed setting
-     * reach the next connection rather than only the next daemon start.
-     *
-     * The snapshot is written again first, so an adapter spawned after its state directory was removed
-     * still finds the settings rather than its own defaults.
+     * Which adapter runs depends on the settings and the install path, neither known at registration, so the ACP shim is built per connection.
+     * The snapshot is rewritten first, in case its state directory was removed.
      */
     async connect(request) {
       const [adapter] = await Promise.all([resolveAdapter(settings), snapshot.refresh()]);

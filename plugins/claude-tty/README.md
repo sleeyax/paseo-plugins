@@ -68,7 +68,7 @@ Suspending stops the PTY and any background tasks it owns, but does not close or
 
 A session waiting on a subagent is not suspended at all. The adapter holds the turn open until every agent it launched has reported, which is also what makes Paseo show the session as busy while they work, and a suspension stands aside for an active turn and tries again later. A turn whose agents have written nothing for fifteen minutes stops waiting, so a stuck agent cannot keep a session alive indefinitely. A command Claude runs in the background holds the turn the same way, because Claude goes idle while it runs and is woken by its report; a command that has not reported after thirty minutes — a server, typically, which never will — stops being waited on.
 
-The plugin keeps a copy of these settings in the adapter's state directory and rewrites it whenever they change, and the adapter reads it each time it schedules a suspension, so a change applies to sessions that are already open rather than only to the next adapter launch. A suspension also stands aside while a permission or question card is still waiting for an answer, and tries again later.
+The adapter reads the current setting each time it schedules a suspension, so a change also applies to sessions that are already open. A suspension also stands aside while a permission or question card is still waiting for an answer, and tries again later.
 
 Setting `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` on the daemon overrides this setting for the hosts that do it, because the adapter inherits the daemon's environment and lets the variable win; the settings screen says so when something has set it.
 

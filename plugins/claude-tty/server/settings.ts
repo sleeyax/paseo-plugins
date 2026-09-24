@@ -4,10 +4,7 @@ import { configuredAdapterExecutable, type settingsDocument } from "../shared/se
 /** The handle `registerSettings` returns for this plugin's one document. */
 export type Settings = PluginSettings<typeof settingsDocument.schema>;
 
-/**
- * An invalid document is a host that has configured nothing: refusing to run an adapter over it
- * would take every session down, and the settings screen already says the document is invalid.
- */
+/** An invalid document counts as nothing configured, so a bad save can't take every session down. */
 export async function readConfiguredExecutable(settings: Pick<Settings, "read">): Promise<string | null> {
   const state = await settings.read();
   return state.status === "ready" ? configuredAdapterExecutable(state.values.adapterExecutable) : null;

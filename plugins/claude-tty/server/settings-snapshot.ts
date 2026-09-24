@@ -7,9 +7,8 @@ import { messageOf } from "./checkout.ts";
 import type { Settings } from "./settings.ts";
 
 /**
- * What the adapter is handed as `--settings-file`, with every choice already resolved, so it needs
- * neither this plugin's schema nor its defaults. `apps/claude-tty-acp/src/settings-document.ts` reads
- * it; a null `bypassAutoAccept` is a Bypass Permissions session following `autoAccept`.
+ * What the adapter reads from `--settings-file`, resolved so it needs neither this schema nor its defaults.
+ * A null `bypassAutoAccept` means Bypass Permissions sessions follow `autoAccept`.
  */
 export type SettingsSnapshot = {
   idleTimeoutMs: number;
@@ -26,21 +25,16 @@ export function snapshotOf(values: z.output<typeof settingsDocument.schema>): Se
 }
 
 export type SettingsMirror = {
-  /** Writes the document as it stands now, creating the directory; never rejects, since a session must not fail over it. */
+  /** Never rejects, so a session never fails over the snapshot. */
   refresh(): Promise<void>;
   stop(): void;
 };
 
 /**
- * Keeps the snapshot in step with the host's document: once per `refresh`, and on every change the
- * store announces, which is what reaches sessions that are already open.
- *
- * Every write reads the document afresh and they run one at a time, so the last write is always of the
- * latest document whatever order the triggers arrived in. An invalid document leaves the last good
- * snapshot where it is: an approval is not something to change over a document nobody can read.
- *
- * Only `refresh` creates the directory. A change announced while there is none has no adapter to reach,
- * and writing it anyway would bring back the state that **Remove state** just deleted.
+ * Rewrites the snapshot on every `refresh` and every change the store announces.
+ * Writes run one at a time and each reads the settings afresh, so the last write always has the latest values.
+ * An invalid document keeps the last good snapshot, so a bad save can't change an approval.
+ * Only `refresh` creates the directory, so a settings change doesn't undo **Remove state**.
  */
 export function mirrorSettings(settings: Settings, filePath: string): SettingsMirror {
   let queue = Promise.resolve();

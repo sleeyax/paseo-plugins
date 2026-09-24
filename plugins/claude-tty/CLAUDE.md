@@ -32,7 +32,7 @@ The daemon's own configuration is the one record, so `server/checkout.ts` reads 
 
 **It is no longer the only source, and failing to find it is no longer fatal.**
 `adapterExecutable` in the host settings names an adapter outright, and `server/adapter.ts` is the one place that decides between the two: the setting when it holds a path, the checkout otherwise, and neither is the end of the world on its own.
-It reads the setting through `readConfiguredExecutable` in `server/settings.ts`, and an invalid document reads as nothing configured, because refusing to run over it would take down every session on the host.
+It reads the setting through `readConfiguredExecutable` in `server/settings.ts`, which treats an invalid document as nothing configured.
 Nothing in there throws: a path that is missing, unexecutable or unbuilt comes back as a sentence on `problem`, which the panel shows and `connect()` throws only when there is no path at all.
 The checkout is still resolved and still reported, because an update still builds in it and a host running the default still wants to see it.
 
@@ -119,20 +119,17 @@ The adapter had the same hole of its own: `settleOpenToolCalls` and a failed sub
 
 ## The host owns the settings, and the adapter gets a resolved copy
 
-`registerSettings` returns a handle with `read()` and `subscribe()`, and the server reads the document through nothing else: where the store keeps it is the daemon's business, and plugin code is never told.
-`subscribe()` fires on a save, a reset and a migration the store persisted, not on a hand edit of the file, which has no watcher.
+The server reads the settings only through the `read()` and `subscribe()` handle `registerSettings` returns.
+`subscribe()` fires on saves, resets and migrations, but not on hand edits of the file.
 
-The adapter is a detached process the ACP shim spawns, so it cannot hold the handle.
-`server/settings-snapshot.ts` writes `{ idleTimeoutMs, autoAccept, bypassAutoAccept }` into the adapter's state directory, with the defaults applied and `inherit` resolved to null, and `connect()` passes that path as `--settings-file`.
-The state directory is one per user and a Paseo home is not, since an install with `--id` or a dev daemon beside the real one runs as the same user, so `settingsSnapshotPath` names the file after the home and neither daemon overwrites the other's.
-It rewrites the file on every `subscribe()` event and before every connection, and the adapter re-reads it at every suspension and every permission request, which is what reaches the sessions already open.
-Only the write before a connection creates the directory, so **Remove state** is not undone by the next daemon start or settings save; a change announced with no directory has no adapter to reach.
-The adapter therefore knows three field names and nothing of this schema, its defaults or its option labels.
-An invalid document leaves the last good snapshot in place, and on a host that never had one there is no file, which the adapter reads as its own defaults with auto-accept off.
+The adapter is a separate process and can't hold the handle, so `server/settings-snapshot.ts` writes it a resolved copy: `{ idleTimeoutMs, autoAccept, bypassAutoAccept }`, with defaults applied and `inherit` as null.
+`connect()` passes its path as `--settings-file`, and the adapter re-reads it at every suspension and permission request, so changes reach open sessions.
+The file is rewritten before every connection and on every `subscribe()` event, but only the connection creates the directory, so a settings save doesn't undo **Remove state**.
+There is one file per Paseo home, because daemons with different homes can run as the same user.
+An invalid document keeps the last good snapshot; with no file at all, the adapter uses its own defaults with auto-accept off.
 
-The alternatives were worse.
-`runAcpProvider` takes no `env`, and a value passed at spawn would only reach the next adapter rather than the sessions already open, which is the behaviour the idle timeout is documented to have.
-A `connector` could carry a pushed notification instead of a file, but it is undocumented and costs the spawn environment, as the section on `connector` above explains.
+Passing values at spawn wouldn't reach open sessions, and `runAcpProvider` takes no `env` anyway.
+A `connector` could push changes instead, but it is undocumented and costs the spawn environment, as the `connector` section explains.
 
 The setting is global, not per session, and it is now a choice rather than the only option.
 A per-session `ProviderSetting` is only ever *listed* from the ACP session's own `configOptions` — `toProviderConfigState` in the SDK's ACP connection builds `settings` from every option whose category is neither `model` nor `thought_level` — and the adapter does advertise config options since it started publishing its model and effort selectors, so the `session/set_config_option` surface that was missing is there.
@@ -141,7 +138,7 @@ What is left is the trade: an uncategorised option beside those two would put th
 ## An upgrade leaves the old provider entry behind
 
 Before this plugin registered a provider of its own, it wrote the adapter into the daemon configuration as `agents.providers.traecli`, and kept the idle timeout in `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/claude-tty/settings.json`.
-The old timeout is not carried over: the SDK gives plugin code neither the settings directory nor a way to write the document, so copying it would mean writing into the daemon's private layout, and the README tells people to set it again instead.
+The old timeout is not carried over, because the SDK gives plugin code no way to write the settings document; the README tells people to set it again.
 
 `server/upgrade.ts` reports the old entry and never removes it.
 An agent started on it cannot resume once it is gone, whether those agents are finished with is not the plugin's to judge, and removing it would bring back `paseo.config.patch` for that one purpose.

@@ -72,10 +72,7 @@ export function cardAnswersDirectory(stateDirectory: string): string {
   return path.join(stateDirectory, "card-answers");
 }
 
-/**
- * Where the settings the adapter runs by are left for it, in `server/settings-snapshot.ts`'s shape.
- * The state directory is per user, but each Paseo home has settings of its own, so the file is named after the home.
- */
+/** One file per Paseo home, because daemons with different homes can share a user's state directory. */
 export function settingsSnapshotPath(stateDirectory: string, env: Env = process.env): string {
   const home = createHash("sha256").update(paseoHome(env)).digest("hex").slice(0, 16);
   return path.join(stateDirectory, "settings", `${home}.json`);
@@ -137,9 +134,8 @@ export function adapterBuildWitness(executable: string): string {
 }
 
 /**
- * What the provider spawns. The adapter is a detached process with no way to reach the host's
- * settings store, so it is handed the snapshot's path and re-reads it whenever it needs a setting,
- * which is what lets a change reach sessions that are already connected.
+ * What the provider spawns.
+ * The adapter can't reach the host's settings store, so it gets the snapshot's path and re-reads it, which lets a change reach open sessions.
  *
  * It takes the executable rather than a checkout: which adapter runs is `server/adapter.ts`'s to
  * decide, and from this point down the answer is a path like any other.

@@ -1,10 +1,10 @@
 import { defineSettings } from "@getpaseo/plugin";
 import { z } from "zod";
 
-/** The adapter's own override, which beats the setting; its name is the adapter's, in `src/idle-timeout.ts`. */
+/** The adapter's own override, which beats the setting. */
 export const IDLE_TIMEOUT_ENV = "CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS";
 export const DEFAULT_IDLE_TIMEOUT_MS = 60 * 60 * 1_000;
-/** The longest delay `setTimeout` takes, which is what the adapter arms a suspension with. */
+/** The longest delay `setTimeout` takes. */
 export const MAX_IDLE_TIMEOUT_MS = 2_147_483_647;
 
 export const IDLE_TIMEOUT_OPTIONS = [
@@ -27,9 +27,8 @@ export const BYPASS_AUTO_ACCEPT_OPTIONS = [
 export const SETTINGS_ID = "settings";
 
 /**
- * The host owns the store: it validates, writes atomically and tells every connected client. The
- * server reads it through the handle `registerSettings` returns, and hands the adapter a resolved
- * copy in `server/settings-snapshot.ts`.
+ * The host owns the store: it validates, writes atomically and tells every connected client.
+ * The adapter gets a resolved copy from `server/settings-snapshot.ts`.
  */
 export const settingsDocument = defineSettings({
   id: SETTINGS_ID,

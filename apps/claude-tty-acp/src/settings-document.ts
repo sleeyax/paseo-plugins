@@ -4,9 +4,8 @@ import { writeLog } from "./log.ts";
 let settingsFile: string | null = null;
 
 /**
- * Paseo's Claude TTY plugin keeps a resolved copy of its settings for this adapter and passes the
- * path at spawn, rewriting the file whenever someone changes a setting. An adapter run outside Paseo
- * is given none and has only its environment.
+ * The Claude TTY plugin passes the path of its settings snapshot at spawn.
+ * An adapter run outside Paseo gets none and has only its environment.
  */
 export function useSettingsFile(filePath: string | null): void {
   settingsFile = filePath;
@@ -17,10 +16,9 @@ export function currentSettingsFile(): string | null {
 }
 
 /**
- * The plugin writes `{ idleTimeoutMs, autoAccept, bypassAutoAccept }`, every choice already resolved,
- * with a null `bypassAutoAccept` meaning Bypass Permissions follows `autoAccept`. Each reader takes the
- * field it knows and judges it itself, so one it cannot use falls back on its own. Null is a file there
- * is nothing to read from.
+ * The plugin writes `{ idleTimeoutMs, autoAccept, bypassAutoAccept }` with its defaults applied.
+ * Each reader validates the field it needs and falls back on its own default.
+ * Null means there is no file to read.
  */
 export async function readSettingsValues(filePath: string | null = settingsFile): Promise<Record<string, unknown> | null> {
   if (filePath === null) return null;
