@@ -25,7 +25,7 @@ The focused workspace is unreadable: the app heartbeats it, but the daemon keeps
 ## Settings
 
 `shared/settings.ts` defines the settings document; every field has a default.
-The schema is strict, so a bad document reads as `invalid` as a whole, and the service keeps its current settings so a hidden project is never exposed.
+The schema is strict, so a bad document reads as `invalid` as a whole; `server/followed-settings.ts` decides what the service does with that.
 The server can only read the settings.
 The settings screen saves through `useSettings`; Command Center items have no React tree and save through `client/settings-writes.ts`.
 
