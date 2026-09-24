@@ -96,6 +96,5 @@ test("stops following the host once stopped", async (t) => {
   mirror.stop();
 
   await settings.save({ idleTimeoutMs: 0 });
-  await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(((await readSnapshot(filePath)) as { idleTimeoutMs: number }).idleTimeoutMs, 60 * 60 * 1_000);
 });
