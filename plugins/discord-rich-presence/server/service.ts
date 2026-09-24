@@ -1,4 +1,4 @@
-import type { PluginSettings, PluginSettingsState } from "@getpaseo/plugin/server";
+import type { PluginSettings } from "@getpaseo/plugin/server";
 import type {
   KnownProject,
   PresenceActivity,
@@ -10,6 +10,7 @@ import { knownProjects, type settingsDocument } from "../shared/settings.ts";
 import { decideWrite, MIN_WRITE_INTERVAL_MS } from "../shared/throttle.ts";
 import { DaemonConnection, type DaemonState } from "./daemon.ts";
 import { DiscordConnection, type DiscordState } from "./discord.ts";
+import { followedSettings, type SettingsState } from "./followed-settings.ts";
 
 /** A burst of agent events is one presence write, and the debounce doubles as the rate-limit floor. */
 const REFRESH_DEBOUNCE_MS = MIN_WRITE_INTERVAL_MS;
@@ -67,14 +68,13 @@ export class PresenceService {
     };
   }
 
-  /** An invalid document keeps the current settings, so a bad save never exposes a hidden project. */
-  private async follow(state: PluginSettingsState<typeof settingsDocument.schema>): Promise<void> {
+  private async follow(state: SettingsState): Promise<void> {
     if (this.stopped) return;
+    this.settings = followedSettings(this.settings, state);
     if (state.status !== "ready") {
       console.warn(`discord-rich-presence kept its current settings, because the saved ones are invalid: ${state.error}`);
       return;
     }
-    this.settings = state.values;
     this.applyConnection();
     await this.refresh();
   }
