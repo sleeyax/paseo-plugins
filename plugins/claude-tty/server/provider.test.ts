@@ -26,7 +26,9 @@ test("shares one catalogue across workspaces and gives a rebuilt adapter a key o
   );
   process.env.PASEO_HOME = path.join(home, "paseo");
   const settings = fakeSettings();
-  const provider = claudeTtyProvider(settings, mirrorSettings(settings, path.join(home, "state", "settings.json")));
+  const mirror = mirrorSettings(settings, path.join(home, "state", "settings.json"));
+  t.after(() => mirror.stop());
+  const provider = claudeTtyProvider(settings, mirror);
   const key = async (cwd: string): Promise<string | undefined> =>
     provider.getCatalogCacheKey?.({ scope: "workspace", cwd });
 
