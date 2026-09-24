@@ -1,8 +1,7 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { configuredAdapterExecutable } from "../shared/settings.ts";
 import { fileExists, firstExecutable, resolveRepoRoot } from "./checkout.ts";
-import { adapterBinaryPath, adapterBuildWitness, settingsFilePath, type Env } from "./paths.ts";
+import { adapterBinaryPath, adapterBuildWitness, type Env } from "./paths.ts";
+import { readConfiguredExecutable, type Settings } from "./settings.ts";
 
 /** Where the executable came from: a path someone configured, or the checkout this plugin sits in. */
 export type AdapterSource = "configured" | "checkout";
@@ -33,8 +32,8 @@ export type Adapter = {
  * here throws: every way this can fail is a sentence the panel shows, because the alternative is a
  * spawn failure whose stderr the ACP shim drops.
  */
-export async function resolveAdapter(env: Env = process.env): Promise<Adapter> {
-  const [configured, checkout] = await Promise.all([readConfiguredExecutable(env), resolveRepoRoot(env)]);
+export async function resolveAdapter(settings: Pick<Settings, "read">, env: Env = process.env): Promise<Adapter> {
+  const [configured, checkout] = await Promise.all([readConfiguredExecutable(settings), resolveRepoRoot(env)]);
   const executable = configured === null ? defaultExecutable(checkout.root) : path.resolve(configured);
   const source: AdapterSource | null = executable === null ? null : configured === null ? "checkout" : "configured";
 
@@ -72,26 +71,4 @@ async function problemWith(executable: string, buildWitness: string, built: bool
   if ((await firstExecutable([executable])) === null) return `${executable} is not executable.`;
   if (!built) return `${buildWitness} is not built — run the build in the checkout.`;
   return null;
-}
-
-/**
- * The setting, read off the document the host keeps, because the SDK gives the server runtime no way
- * to read a value back out of the store it registered — the same reason the adapter is handed this
- * path rather than the value. A document that is missing, unreadable or malformed is a host that has
- * configured nothing, which is the default rather than an error: the store writes the file only once
- * somebody saves, and refusing to run an adapter over a JSON parse would be the whole host down for it.
- */
-async function readConfiguredExecutable(env: Env): Promise<string | null> {
-  let document: unknown;
-  try {
-    document = JSON.parse(await readFile(settingsFilePath(env), "utf8"));
-  } catch {
-    return null;
-  }
-  if (document === null || typeof document !== "object" || Array.isArray(document)) return null;
-  // `{ version, values }`, where the version is the schema's rather than the file format's, so each
-  // reader takes the value it knows whatever the version says — which is how the adapter reads it too.
-  const values = (document as { values?: unknown }).values;
-  if (values === null || typeof values !== "object" || Array.isArray(values)) return null;
-  return configuredAdapterExecutable((values as Record<string, unknown>).adapterExecutable);
 }

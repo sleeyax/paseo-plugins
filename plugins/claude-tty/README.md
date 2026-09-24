@@ -54,7 +54,7 @@ Earlier versions of this plugin, and the adapter's own README, registered the ad
 
 - **An agent stays on the provider it was started on.** Agents started on `traecli` keep using the old entry and cannot resume once it is gone, so remove it once none are left: under **Settings → Providers** on that host it is the Claude TTY entry with an actions menu, and **Remove provider** deletes it from the configuration. The plugin never removes it itself.
 - **The provider ID changes.** Anything that names `traecli/<model>` — a spawn script, an agent profile, a schedule — goes on starting agents on the old entry, and stops working once it is removed. Point it at `claude-tty/<model>` instead.
-- **The idle timeout carries over.** On its first start the plugin copies a timeout chosen in the old panel into the settings Paseo stores for it, unless a value has already been saved there, and deletes the old file under `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/claude-tty/`.
+- **The idle timeout does not carry over.** A timeout chosen in the old panel was kept under `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/claude-tty/`, which this version never reads. Choose it again under **Suspend idle Claude**, and delete that directory.
 
 ## Settings
 
@@ -68,7 +68,7 @@ Suspending stops the PTY and any background tasks it owns, but does not close or
 
 A session waiting on a subagent is not suspended at all. The adapter holds the turn open until every agent it launched has reported, which is also what makes Paseo show the session as busy while they work, and a suspension stands aside for an active turn and tries again later. A turn whose agents have written nothing for fifteen minutes stops waiting, so a stuck agent cannot keep a session alive indefinitely. A command Claude runs in the background holds the turn the same way, because Claude goes idle while it runs and is woken by its report; a command that has not reported after thirty minutes — a server, typically, which never will — stops being waited on.
 
-The plugin hands the adapter the path of the document Paseo writes, and the adapter reads it each time it schedules a suspension, so a change applies to sessions that are already open rather than only to the next adapter launch. A suspension also stands aside while a permission or question card is still waiting for an answer, and tries again later.
+The adapter reads the current setting each time it schedules a suspension, so a change also applies to sessions that are already open. A suspension also stands aside while a permission or question card is still waiting for an answer, and tries again later.
 
 Setting `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` on the daemon overrides this setting for the hosts that do it, because the adapter inherits the daemon's environment and lets the variable win; the settings screen says so when something has set it.
 

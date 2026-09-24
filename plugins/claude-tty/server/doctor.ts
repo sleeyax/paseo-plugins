@@ -3,6 +3,7 @@ import type { DoctorPayload } from "../shared/contracts.ts";
 import { parseDiagnosticsReport } from "./diagnostics.ts";
 import { runCommand } from "./exec.ts";
 import { resolveAdapter } from "./adapter.ts";
+import type { Settings } from "./settings.ts";
 
 const DIAGNOSE_TIMEOUT_MS = 60_000;
 
@@ -18,8 +19,8 @@ export function lastDoctorReport(): DoctorPayload | null {
  * the adapter's own host checks — Claude on the daemon's `PATH` above all — are only readable by
  * running them.
  */
-export async function runDoctor(): Promise<DoctorPayload> {
-  const adapter = await resolveAdapter();
+export async function runDoctor(settings: Settings): Promise<DoctorPayload> {
+  const adapter = await resolveAdapter(settings);
   const binary = adapter.executable;
   // The checkout is the cwd when there is one, so the adapter's own checks run where it would; a
   // configured adapter answers for a host rather than for a tree, and anywhere harmless will do.

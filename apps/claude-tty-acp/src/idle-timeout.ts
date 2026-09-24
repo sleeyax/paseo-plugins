@@ -1,14 +1,10 @@
 import { writeLog } from "./log.ts";
 import { currentSettingsFile, readSettingsValues } from "./settings-document.ts";
 
-/**
- * These three are mirrored by `plugins/claude-tty/shared/settings.ts`, which defines the settings
- * document read below; the adapter is bundled from its own package and cannot import it.
- * Keep the two copies in step: a `MAX_IDLE_TIMEOUT_MS` that drifts lets the plugin save a value the
- * adapter then refuses.
- */
 export const IDLE_TIMEOUT_ENV = "CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS";
+/** What an adapter nobody configured suspends after; under Paseo the plugin always says. */
 export const DEFAULT_IDLE_TIMEOUT_MS = 60 * 60 * 1_000;
+/** The longest delay `setTimeout` takes. */
 export const MAX_IDLE_TIMEOUT_MS = 2_147_483_647;
 
 export type Env = Record<string, string | undefined>;
@@ -43,13 +39,12 @@ export function idleTimeoutFromEnv(env: Env = process.env): number | null {
   return null;
 }
 
-/** A document whose values still carry a usable `idleTimeoutMs` is honoured whatever version it says. */
 async function idleTimeoutFromSettings(filePath: string): Promise<number | null> {
   const values = await readSettingsValues(filePath);
   if (values === null) return null;
   const value = parseIdleTimeout(values.idleTimeoutMs);
   if (value === null) {
-    writeLog({ level: "warn", message: "Ignored an out-of-range idle timeout in the Claude TTY settings document", file: filePath });
+    writeLog({ level: "warn", message: "Ignored an out-of-range idle timeout in the Claude TTY settings", file: filePath });
     return null;
   }
   return value;

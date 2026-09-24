@@ -75,8 +75,8 @@ The next prompt launches `claude --resume <id>` automatically, so the conversati
 Quiet is observed rather than inferred from prompts: the clock runs from the last thing the session actually did, whether that was the end of a prompt, a hook Claude called, a record it wrote, a turn it was woken for by a task notification, or a step one of its background agents took.
 A prompt is only what Paseo asked for; Claude goes on working after one — answering for an agent that reported, launching the next — and a suspension measured from the prompt alone stopped exactly that work an hour into it, mid-run.
 
-The timeout is read at each suspension rather than once at startup: `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` if it is set, otherwise `values.idleTimeoutMs` in the JSON document named by `--settings-file`, which is where Paseo stores the Claude TTY plugin's settings and which that plugin passes when it spawns the adapter.
-Reading it per suspension is what lets a change on that settings screen reach a session that is already connected, and it is also why an unreadable document or a malformed variable leaves the session running rather than taking the adapter down.
+The timeout is read at each suspension rather than once at startup: `CLAUDE_TTY_ACP_IDLE_TIMEOUT_MS` if it is set, otherwise `idleTimeoutMs` in the JSON file the Claude TTY plugin passes as `--settings-file`.
+Reading it per suspension is what lets a change on that settings screen reach a session that is already connected, and it is also why an unreadable file or a malformed variable leaves the session running rather than taking the adapter down.
 An adapter started without `--settings-file` — by hand, or by anything that is not that plugin — has the variable and the default and nothing else.
 
 A suspension waits for its session to be genuinely idle. It stands aside while a turn is running and while a permission or question card is still waiting for an answer — stopping Claude then would cancel the request behind that card and leave it on screen in Paseo answering to nothing — and a suspension that fails re-arms rather than giving up, because giving up once would keep that process alive for the rest of its life.
@@ -108,9 +108,9 @@ The daemon's own bridge prefers `models` and takes the effort levels only from t
 While it is on, a `PermissionRequest` is answered with Allow once instead of a card, and none of Claude's permission suggestions are applied, so switching it off again leaves no rule behind.
 That covers the prompts Claude Code keeps even in Bypass Permissions mode, such as a removal of the working directory's contents; `AskUserQuestion` and `ExitPlanMode` are for a person and still raise their cards.
 
-A session nobody has switched follows the plugin's settings for its current mode: `values.bypassAutoAccept` (`on` or `off`) for a Bypass Permissions session, and otherwise `values.autoAccept`, both in the document named by `--settings-file`.
+A session nobody has switched follows the plugin's settings for its current mode: `bypassAutoAccept` for a Bypass Permissions session unless it is null, and otherwise `autoAccept`, both in the file named by `--settings-file`.
 They are read again at every request and whenever the mode changes, and the session publishes a `config_option_update` when the answer moves, so the toggle shows what the next request gets.
-Without a readable document the answer is off.
+Without a readable file the answer is off.
 Switching the toggle is taken even mid-turn, restarts nothing, and is saved with the session, after which the settings no longer apply to it.
 
 ## Prompt content

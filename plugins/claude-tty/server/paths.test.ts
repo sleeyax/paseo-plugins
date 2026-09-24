@@ -11,9 +11,8 @@ import {
   daemonConfigPath,
   defaultStateDirectory,
   executableCandidates,
-  legacySettingsFilePath,
   repoRootFromPluginPath,
-  settingsFilePath,
+  settingsSnapshotPath,
   subagentsDirectory,
   transcriptPath,
   workspacesDirectory,
@@ -41,16 +40,9 @@ test("derives the checkout and its adapter from the installed plugin path", () =
   assert.equal(adapterEntryPath(root), "/opt/paseo-plugins/apps/claude-tty-acp/dist/cli.js");
 });
 
-test("finds the host's settings document beside the daemon configuration", () => {
-  const env = { PASEO_HOME: "/srv/paseo" };
-  assert.equal(daemonConfigPath(env), "/srv/paseo/config.json");
-  assert.equal(settingsFilePath(env), "/srv/paseo/plugin-settings/claude-tty/settings.json");
-  assert.equal(settingsFilePath({ HOME: "/home/paseo" }), "/home/paseo/.paseo/plugin-settings/claude-tty/settings.json");
-});
-
-test("finds the settings file an older install kept in the cache directory", () => {
-  assert.equal(legacySettingsFilePath({ XDG_CACHE_HOME: "/srv/cache" }), "/srv/cache/paseo-plugins/claude-tty/settings.json");
-  assert.equal(legacySettingsFilePath({ HOME: "/home/paseo" }), "/home/paseo/.cache/paseo-plugins/claude-tty/settings.json");
+test("finds the daemon configuration in the daemon's home", () => {
+  assert.equal(daemonConfigPath({ PASEO_HOME: "/srv/paseo" }), "/srv/paseo/config.json");
+  assert.equal(daemonConfigPath({ HOME: "/home/paseo" }), "/home/paseo/.paseo/config.json");
 });
 
 test("spawns the adapter with the two paths it cannot work out for itself", () => {
@@ -58,10 +50,17 @@ test("spawns the adapter with the two paths it cannot work out for itself", () =
   assert.deepEqual(adapterCommand(executable, { PASEO_HOME: "/srv/paseo", HOME: "/home/paseo" }), [
     "/opt/paseo-plugins/apps/claude-tty-acp/bin/claude-tty-acp",
     "--settings-file",
-    "/srv/paseo/plugin-settings/claude-tty/settings.json",
+    settingsSnapshotPath("/home/paseo/.local/state/claude-tty-acp", { PASEO_HOME: "/srv/paseo" }),
     "--answers-dir",
     "/home/paseo/.local/state/claude-tty-acp/card-answers",
   ]);
+});
+
+test("gives every Paseo home a settings snapshot of its own in the shared state directory", () => {
+  const snapshot = (env: Record<string, string>) => settingsSnapshotPath("/srv/state", { HOME: "/home/paseo", ...env });
+  assert.match(snapshot({ PASEO_HOME: "/srv/paseo" }), /^\/srv\/state\/settings\/[0-9a-f]{16}\.json$/);
+  assert.notEqual(snapshot({ PASEO_HOME: "/srv/paseo" }), snapshot({ PASEO_HOME: "/srv/paseo-dev" }));
+  assert.equal(snapshot({}), snapshot({ PASEO_HOME: "~/.paseo" }));
 });
 
 test("reads a wrapper's build off the dist beside it, and anything else off itself", () => {

@@ -32,12 +32,12 @@ The daemon's own configuration is the one record, so `server/checkout.ts` reads 
 
 **It is no longer the only source, and failing to find it is no longer fatal.**
 `adapterExecutable` in the host settings names an adapter outright, and `server/adapter.ts` is the one place that decides between the two: the setting when it holds a path, the checkout otherwise, and neither is the end of the world on its own.
-It reads the setting off the document at `settingsFilePath` rather than asking the store, for the same reason the adapter is handed that path — `registerSettings` returns `void` and nothing hands a value back — and a document that is missing, unreadable or malformed reads as nothing configured, because the store writes the file only once somebody saves and refusing to run over a JSON parse would be every session on the host.
+It reads the setting through `readConfiguredExecutable` in `server/settings.ts`, which treats an invalid document as nothing configured.
 Nothing in there throws: a path that is missing, unexecutable or unbuilt comes back as a sentence on `problem`, which the panel shows and `connect()` throws only when there is no path at all.
 The checkout is still resolved and still reported, because an update still builds in it and a host running the default still wants to see it.
 
 That is also why the resolution is no longer cached the way the checkout was.
-The path the daemon loaded this plugin from cannot change under it; a setting can, so `resolveAdapter` reads the document every time and `getCatalogCacheKey` costs that read plus its one `stat`.
+The path the daemon loaded this plugin from cannot change under it; a setting can, so `resolveAdapter` calls `read()` every time and `getCatalogCacheKey` costs that read plus its one `stat`.
 
 `connect()` is async, so the command is resolved per connection rather than at registration: `server/provider.ts` builds the `runAcpProvider` shim inside `connect` and delegates to it.
 That shim spawns one adapter process per ACP session, plus a throwaway one per connection to probe capabilities and another per catalogue fetch, and it drops the adapter's stderr — which is why the diagnostics section still runs the adapter's own `--diagnose`.
@@ -47,7 +47,7 @@ Without it the daemon keys the cache on `["target", <cwd>]` and fetches once per
 The key is the adapter's build — the build witness's path, mtime and size, one `stat` — rather than a bare constant, because the catalogue is compiled into the adapter and a rebuilt adapter is where a different one comes from; a constant would serve the old catalogue for the rest of the daemon's life.
 `adapterBuildWitness` is what "the build" means for a path: the executable in a checkout is a committed shell wrapper whose mtime never moves, so the `dist/cli.js` it runs is the file to watch, while a configured executable is its own witness because there is nothing else here to know about it.
 Nothing else invalidates it. The daemon refetches when something asks it to refresh (`force`), and marks catalogues stale when the settings snapshot is refreshed; there is no expiry.
-It is a separate IPC call on essentially every provider snapshot read, so it must stay at the settings document and one `stat`.
+It is a separate IPC call on essentially every provider snapshot read, so it must stay at one settings `read()` and one `stat`.
 An adapter that is not built yet answers with a shared key of its own rather than with none, so that failure is reported once instead of once per workspace, and the build that fixes it changes the key.
 
 ## The adapter stays a subprocess, and `connector:` cannot replace it
@@ -117,40 +117,35 @@ Paseo cancels a turn before it replaces one, and `server/steering.ts` makes that
 Its test drives the real bridge, and the canary beside it asserts the bridge's own behaviour, so both fail the day this is fixed upstream and the wrapper can go.
 The adapter had the same hole of its own: `settleOpenToolCalls` and a failed subagent card sent `tool_call_update` with no `rawOutput`, which is the same null error by the same route, and both now send one.
 
-## The host owns the settings, and the adapter is told where they are
+## The host owns the settings, and the adapter gets a resolved copy
 
-`registerSettings` hands the daemon a schema and nothing else: it returns `void`, `PluginServerContext` has no way to read a value back, and the `settings.changed` the store emits travels to the *clients* — `subscribeSettings` in the daemon's `session.ts` turns it into a `plugin_settings_changed` broadcast — never back into the plugin runtime.
-So there is no watcher to hang a mirror file off, and this plugin neither reads nor writes the document.
+The server reads the settings only through the `read()` and `subscribe()` handle `registerSettings` returns.
+`subscribe()` fires on saves, resets and migrations, but not on hand edits of the file.
 
-The store runs inside the plugin's own subprocess and keeps one file per definition at `$PASEO_HOME/plugin-settings/<plugin id>/<settings id>.json`, holding `{ "version", "values" }` where `version` is the definition's rather than the file format's.
-Verified on a 0.8.0 daemon with a throwaway plugin: a missing file reads as the schema's defaults at revision `missing`, a write lands that envelope, and `paseo plugin remove` deletes the directory.
-`server/paths.ts` rebuilds that path from `PASEO_HOME`, the way `daemonConfigPath` already did.
+The adapter is a separate process and can't hold the handle, so `server/settings-snapshot.ts` writes it a resolved copy: `{ idleTimeoutMs, autoAccept, bypassAutoAccept }`, with defaults applied and `inherit` as null.
+`connect()` passes its path as `--settings-file`, and the adapter re-reads it at every suspension and permission request, so changes reach open sessions.
+The file is rewritten before every connection and on every `subscribe()` event, but only the connection creates the directory, so a settings save doesn't undo **Remove state**.
+There is one file per Paseo home, because daemons with different homes can run as the same user.
+An invalid document keeps the last good snapshot; with no file at all, the adapter uses its own defaults with auto-accept off.
 
-The adapter is a detached process the ACP shim spawns, so it is handed the path as `--settings-file` in the command `connect()` builds, and re-reads it at every suspension.
-The alternatives were both worse: `runAcpProvider` takes no `env`, and a value passed at spawn would only reach the next adapter rather than the sessions already open, which is the behaviour the idle timeout is documented to have.
+Passing values at spawn wouldn't reach open sessions, and `runAcpProvider` takes no `env` anyway.
+A `connector` could push changes instead, but it is undocumented and costs the spawn environment, as the `connector` section explains.
 
 The setting is global, not per session, and it is now a choice rather than the only option.
 A per-session `ProviderSetting` is only ever *listed* from the ACP session's own `configOptions` — `toProviderConfigState` in the SDK's ACP connection builds `settings` from every option whose category is neither `model` nor `thought_level` — and the adapter does advertise config options since it started publishing its model and effort selectors, so the `session/set_config_option` surface that was missing is there.
 What is left is the trade: an uncategorised option beside those two would put the timeout in the session's own configuration and take it out of the store Paseo owns, so it would stop surviving a reload, stop being one answer per host, and stop being deleted with the plugin. That is why it stays where it is.
 
-## An upgrade leaves two things behind, and only one of them is the plugin's to fix
+## An upgrade leaves the old provider entry behind
 
-Before this plugin registered a provider of its own, it wrote the adapter into the daemon configuration as `agents.providers.traecli`, and kept the idle timeout in `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/claude-tty/settings.json` as `{ version: 1, settings: { idleTimeoutMs } }`.
-Nothing about the plugin provider touches either, so `server/upgrade.ts` deals with both.
+Before this plugin registered a provider of its own, it wrote the adapter into the daemon configuration as `agents.providers.traecli`, and kept the idle timeout in `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/claude-tty/settings.json`.
+The old timeout is not carried over, because the SDK gives plugin code no way to write the settings document; the README tells people to set it again.
 
-The old entry is reported, never removed.
+`server/upgrade.ts` reports the old entry and never removes it.
 An agent started on it cannot resume once it is gone, whether those agents are finished with is not the plugin's to judge, and removing it would bring back `paseo.config.patch` for that one purpose.
 `traecli` is also the real Trae CLI's ID, so only an entry whose command's basename is `claude-tty-acp` counts.
 The status RPC carries it with a count of the agents still on it, from `paseo.agents.list()`, which leaves archived agents out; the count is null rather than partial when the listing runs out of budget, since a short count reads as safe to remove.
 The agents are listed only while the entry exists, so the five-second poll costs one configuration read on every other host.
 The app offers **Remove provider** under Settings → Providers only for a provider whose `source` is `custom` (read out of the web UI bundle), which is the old entry and never this plugin's, and that is where the panel and the README send people.
-
-The idle timeout is copied, once, when the plugin process starts, because nothing in the store API can do it.
-`registerSettings` returns `void`, and a definition's `migrate` runs only on a stored document with an older `version`, never on a missing one.
-But the store keeps nothing in memory: it reads its file on every read and every write, and a revision is the hash of the bytes on disk (0.8.0's `plugins/settings/index.js`), so a document written beside it is what the settings screen and the adapter see next.
-No `settings.changed` goes out for it, which only a screen opened within milliseconds of the plugin starting could notice.
-It is written to a temporary file and `link`ed into place rather than renamed, because `link` refuses an existing target and a value saved in Paseo in the meantime must win.
-The old file is deleted once the host has a document, whoever wrote it, so a reinstall — which deletes the document and starts from defaults — cannot bring a stale value back; it is kept only when writing failed, for the next start to try again.
 
 ## The cards Paseo has for a question, and the answers ACP will not carry
 

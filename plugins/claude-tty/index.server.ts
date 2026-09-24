@@ -1,8 +1,9 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import * as contracts from "./shared/contracts.ts";
 import { settingsDocument } from "./shared/settings.ts";
+import { defaultStateDirectory, settingsSnapshotPath } from "./server/paths.ts";
 import { claudeTtyProvider } from "./server/provider.ts";
-import { carryOverIdleTimeout } from "./server/upgrade.ts";
+import { mirrorSettings } from "./server/settings-snapshot.ts";
 import {
   doctorHandler,
   lastDoctorHandler,
@@ -16,19 +17,15 @@ import {
 } from "./server/handlers.ts";
 
 export default function contribute(server: PluginServerContext) {
+  const settings = server.registerSettings(settingsDocument);
+  const snapshot = mirrorSettings(settings, settingsSnapshotPath(defaultStateDirectory()));
+
   // Registration has to be synchronous: the daemon reads the provider list out of the reply to its
   // initialize message, and connects the provider milliseconds later.
-  server.registerProvider(claudeTtyProvider());
+  server.registerProvider(claudeTtyProvider(settings, snapshot));
 
-  // The store this registers is the settings screen's whole backing; the plugin only reads the path
-  // it writes to, and hands that to the adapter.
-  server.registerSettings(settingsDocument);
-
-  // An install from before the host owned the settings kept the idle timeout in a file of its own.
-  void carryOverIdleTimeout();
-
-  server.handle(contracts.getStatus, (_input, { paseo }) => statusHandler(paseo));
-  server.handle(contracts.runDoctor, () => doctorHandler());
+  server.handle(contracts.getStatus, (_input, { paseo }) => statusHandler(paseo, settings));
+  server.handle(contracts.runDoctor, () => doctorHandler(settings));
   server.handle(contracts.getDoctor, () => lastDoctorHandler());
   server.handle(contracts.getSessions, (_input, { paseo }) => sessionsHandler(paseo));
   server.handle(contracts.releaseLock, (input, { paseo }) => releaseLockHandler(paseo, input));
@@ -37,5 +34,5 @@ export default function contribute(server: PluginServerContext) {
   server.handle(contracts.releaseStaleLocks, (_input, { paseo }) => releaseStaleLocksHandler(paseo));
   server.handle(contracts.removeState, () => removeStateHandler());
 
-  return () => {};
+  return () => snapshot.stop();
 }

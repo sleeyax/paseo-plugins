@@ -1,7 +1,7 @@
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { ADAPTER_STATE_DIRECTORY, PLUGIN_ID } from "../shared/identity.ts";
-import { SETTINGS_ID } from "../shared/settings.ts";
 
 export type Env = Record<string, string | undefined>;
 
@@ -15,7 +15,7 @@ export { PLUGIN_ID };
 export const ADAPTER_BINARY_NAME = "claude-tty-acp";
 export const ADAPTER_ENTRY_NAME = "cli.js";
 
-/** How the adapter is told which settings document to read; its own `parseCliArgs` names the flag. */
+/** How the adapter is told where its settings snapshot is; its own `parseCliArgs` names the flag. */
 export const ADAPTER_SETTINGS_FLAG = "--settings-file";
 
 /** How it is told where the answers a question card collected are left; the same `parseCliArgs` names it. */
@@ -46,24 +46,6 @@ export function defaultStateDirectory(env: Env = process.env): string {
   return path.join(stateHome, ADAPTER_STATE_DIRECTORY);
 }
 
-/**
- * Where the daemon's own plugin settings store keeps this plugin's document. The layout is the
- * daemon's, read here rather than asked for: the initialize message carries `settingsDirectory` but
- * the SDK hands the server runtime no way to read a value back out of the store it registered.
- */
-export function settingsFilePath(env: Env = process.env): string {
-  return path.join(paseoHome(env), "plugin-settings", PLUGIN_ID, `${SETTINGS_ID}.json`);
-}
-
-/**
- * Where this plugin kept the idle timeout before the host owned its settings. Nothing writes it any
- * more: it is read once, to carry a value someone chose over into the host's document.
- */
-export function legacySettingsFilePath(env: Env = process.env): string {
-  const base = env.XDG_CACHE_HOME?.trim() || path.join(env.HOME || os.homedir(), ".cache");
-  return path.join(base, "paseo-plugins", PLUGIN_ID, "settings.json");
-}
-
 export function sessionsDirectory(stateDirectory: string): string {
   return path.join(stateDirectory, "sessions");
 }
@@ -88,6 +70,12 @@ export function workspacesDirectory(stateDirectory: string): string {
  */
 export function cardAnswersDirectory(stateDirectory: string): string {
   return path.join(stateDirectory, "card-answers");
+}
+
+/** One file per Paseo home, because daemons with different homes can share a user's state directory. */
+export function settingsSnapshotPath(stateDirectory: string, env: Env = process.env): string {
+  const home = createHash("sha256").update(paseoHome(env)).digest("hex").slice(0, 16);
+  return path.join(stateDirectory, "settings", `${home}.json`);
 }
 
 /** Mirrors the adapter's own `claudeConfigDir`, which decides where Claude keeps its transcripts. */
@@ -146,9 +134,8 @@ export function adapterBuildWitness(executable: string): string {
 }
 
 /**
- * What the provider spawns. The adapter is a detached process with no way to reach the host's
- * settings store, so it is handed the document's path and re-reads it at every suspension, which is
- * what lets a change reach sessions that are already connected.
+ * What the provider spawns.
+ * The adapter can't reach the host's settings store, so it gets the snapshot's path and re-reads it, which lets a change reach open sessions.
  *
  * It takes the executable rather than a checkout: which adapter runs is `server/adapter.ts`'s to
  * decide, and from this point down the answer is a path like any other.
@@ -157,7 +144,7 @@ export function adapterCommand(executable: string, env: Env = process.env): [str
   return [
     executable,
     ADAPTER_SETTINGS_FLAG,
-    settingsFilePath(env),
+    settingsSnapshotPath(defaultStateDirectory(env), env),
     ADAPTER_ANSWERS_FLAG,
     cardAnswersDirectory(defaultStateDirectory(env)),
   ];

@@ -11,7 +11,7 @@ const SETTINGS_FILE_FLAG = "--settings-file";
 const HELP = `Usage: ${APP_NAME} [${SETTINGS_FILE_FLAG} <path>] [${ANSWERS_DIRECTORY_FLAG} <path>] [--help | --version | --diagnose [--json]]
 
 Runs the interactive Claude Code ACP adapter over stdin/stdout.
-Use ${SETTINGS_FILE_FLAG} to name a JSON document holding an idleTimeoutMs; Paseo's Claude TTY plugin passes the one its settings screen writes.
+Use ${SETTINGS_FILE_FLAG} to name a JSON file holding idleTimeoutMs, autoAccept and bypassAutoAccept; Paseo's Claude TTY plugin passes one it keeps in step with its settings screen.
 Use ${ANSWERS_DIRECTORY_FLAG} to name the directory that plugin leaves question card answers in; without it a card can only be answered one option at a time.
 Use --diagnose to check this host without starting ACP, and --json to get one machine-readable line instead of the report.
 `;
