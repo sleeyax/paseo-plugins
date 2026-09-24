@@ -29,7 +29,7 @@ export class PresenceService {
   private readonly startedAt = Date.now();
   private readonly daemon: DaemonConnection;
   private readonly discord: DiscordConnection;
-  /** Null until a valid document has been read, which shows nothing rather than guessing at a default. */
+  /** Null until a valid document is read, so nothing is shown before then. */
   private settings: PresenceSettings | null = null;
   private unsubscribe: (() => void) | null = null;
   private snapshot: PresenceSnapshot = { workspaces: [], agents: [], projects: [] };
@@ -63,10 +63,7 @@ export class PresenceService {
     };
   }
 
-  /**
-   * An invalid document keeps the settings already in force: a hidden project must not be named
-   * because someone saved something the schema refused.
-   */
+  /** An invalid document keeps the current settings, so a bad save never exposes a hidden project. */
   private async follow(state: PluginSettingsState<typeof settingsDocument.schema>): Promise<void> {
     if (state.status !== "ready") {
       console.warn(`discord-rich-presence kept its current settings, because the saved ones are invalid: ${state.error}`);

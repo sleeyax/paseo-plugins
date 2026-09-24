@@ -243,7 +243,7 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
     );
   }
 
-  // The server follows the store, so the preview catches up on its next poll without this.
+  // Refreshes the preview now rather than on the next poll.
   const save = async (next: PresenceSettings) => {
     if (await stored.save(next, stored.revision)) {
       void queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });

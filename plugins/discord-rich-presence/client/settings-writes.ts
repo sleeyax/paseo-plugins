@@ -5,11 +5,7 @@ import { settingsDocument, withProjectDetailLevel } from "../shared/settings.ts"
 
 const store = settingsRpc(settingsDocument.id);
 
-/**
- * For a Command Center item, which has `rpc` but no React tree to hold `useSettings`. A save is
- * against the revision it read, so another client saving in between is a conflict rather than a
- * lost write, and one retry on a fresh read is enough for anything but a flood of saves.
- */
+/** For Command Center items, which have no React tree for `useSettings`. Retries once on a revision conflict. */
 export async function updateSettings(
   rpc: PluginCommandCapabilities["rpc"],
   change: (settings: PresenceSettings) => PresenceSettings,

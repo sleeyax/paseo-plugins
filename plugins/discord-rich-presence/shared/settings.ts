@@ -15,10 +15,7 @@ const APPLICATION_ID = /^\d{17,20}$/;
 
 const DetailLevelSchema = z.enum(["detailed", "projects", "hidden"]);
 
-/**
- * The host owns the store: it validates, writes atomically and tells every client and the server
- * when it changes. Every field has a default, so a host that never saved reads as `DEFAULT_SETTINGS`.
- */
+/** Every field has a default, so unsaved settings read as `DEFAULT_SETTINGS`. */
 export const settingsDocument = defineSettings({
   id: "settings",
   scope: "host",

@@ -6,7 +6,7 @@ import { updateSettings } from "./settings-writes.ts";
 
 type Write = { revision: string; values: unknown };
 
-/** The host's settings RPCs, answering writes from a script and recording what they were sent. */
+/** Fake host settings RPCs that return scripted responses and record writes. */
 function fakeStore(writeResults: Array<"saved" | "conflict" | "invalid">) {
   let revision = 0;
   const writes: Write[] = [];

@@ -30,7 +30,7 @@ export type Project = {
   displayName: string;
 };
 
-/** Projects told to ignore the default and use their own level instead, keyed by root path. */
+/** Per-project level overrides, keyed by root path. */
 export type ProjectDetailLevels = Record<string, { displayName: string; level: DetailLevel }>;
 
 /** A project the settings surface can assign a level to. */

@@ -4,8 +4,8 @@ Run `paseo plugin reload discord-rich-presence` after every change, then `paseo 
 The reload is the only compile check of the two bundles the daemon builds.
 Do this yourself; never leave it to the user.
 
-The plugin process holds a daemon connection of its own, and the contribution's cleanup is what closes it; on a 0.9.1 daemon a reload stops the plugin in about two seconds.
-If a reload ever hangs on `Stopping plugin` until the daemon's 60s timeout, kill the lingering `plugin-process.js` whose socket is connected to the daemon port, and the queued load goes through.
+The plugin process holds its own daemon connection, which the contribution's cleanup closes.
+If a reload hangs on `Stopping plugin` until the 60s timeout, kill the lingering `plugin-process.js` connected to the daemon port.
 
 ## Constraints that are not obvious
 
@@ -22,14 +22,12 @@ A workspace's `name` is often a title an agent generated, which is what the deta
 `agents.list({ scope: "active" })` still returns closed sessions.
 The focused workspace is unreadable: the app heartbeats it, but the daemon keeps it private to the session that sent it.
 
-## The host owns the settings
+## Settings
 
-`shared/settings.ts` registers one document with `registerSettings`, and every field has a default, so a host that never saved reads as `DEFAULT_SETTINGS`.
-The schema is strict: a document it refuses reads as `invalid` in full rather than having the bad entry dropped, and the service keeps the settings already in force until a valid one is saved, because a hidden project must not be named over a refused write.
-
-The server cannot write the document: the handle has only `read()` and `subscribe()`.
-The settings screen saves through `useSettings`, and a Command Center item, which has `rpc` but no React tree, goes through `settingsRpc(id)` in `client/settings-writes.ts`.
-Both save against the revision they read, so a save that races another is a conflict rather than a lost write.
+`shared/settings.ts` defines the settings document; every field has a default.
+The schema is strict, so a bad document reads as `invalid` as a whole, and the service keeps its current settings so a hidden project is never exposed.
+The server can only read the settings.
+The settings screen saves through `useSettings`; Command Center items have no React tree and save through `client/settings-writes.ts`.
 
 ## The panel is styled off paseo's own scale
 
@@ -53,4 +51,4 @@ Each entry default-exports one contribution function returning cleanup, and RPC 
 
 `paseo plugin install` is a silent no-op against this daemon for any directory, so the plugin is registered by hand in `~/.paseo/config.json` and picked up on the next daemon start.
 To exercise a change without restarting the daemon, compile `index.server.ts` with the daemon's own `compilePlugin` and evaluate the bundle the way `plugin-process.js` does.
-Point `PASEO_HOME` at a throwaway daemon when you do: the settings are the real ones otherwise.
+Point `PASEO_HOME` at a throwaway daemon, or you will change the real settings.
