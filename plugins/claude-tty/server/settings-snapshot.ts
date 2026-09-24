@@ -45,7 +45,7 @@ export function mirrorSettings(settings: Settings, filePath: string): SettingsMi
     queue = queue.then(() => writeSnapshot(settings, filePath));
     return queue;
   };
-  const unsubscribe = settings.subscribe(() => void refresh());
+  const unsubscribe = settings.subscribe(() => refresh());
   return { refresh, stop: unsubscribe };
 }
 

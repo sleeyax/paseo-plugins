@@ -17,11 +17,6 @@ async function readSnapshot(filePath: string): Promise<unknown> {
   return JSON.parse(await readFile(filePath, "utf8"));
 }
 
-/** A subscriber's write is queued behind the save that fired it, so one more refresh waits it out. */
-async function settled(mirror: { refresh(): Promise<void> }): Promise<void> {
-  await mirror.refresh();
-}
-
 test("resolves the bypass setting to a boolean, or to null when it follows the general one", () => {
   const values = (bypassAutoAccept: "inherit" | "on" | "off") => settingsDocument.schema.parse({ autoAccept: true, bypassAutoAccept });
   assert.deepEqual(snapshotOf(values("inherit")), { idleTimeoutMs: 60 * 60 * 1_000, autoAccept: true, bypassAutoAccept: null });
@@ -47,7 +42,6 @@ test("rewrites the snapshot when the host announces a save, which is what reache
   await mirror.refresh();
 
   await settings.save({ idleTimeoutMs: 0, bypassAutoAccept: "on" });
-  await settled(mirror);
   assert.deepEqual(await readSnapshot(filePath), { idleTimeoutMs: 0, autoAccept: false, bypassAutoAccept: true });
 });
 
@@ -57,11 +51,9 @@ test("keeps the last good snapshot while the saved document is invalid", async (
   const mirror = mirrorSettings(settings, filePath);
   t.after(() => mirror.stop());
   await settings.save({ autoAccept: true });
-  await settled(mirror);
 
   const warn = t.mock.method(console, "warn", () => {});
   await settings.corrupt();
-  await settled(mirror);
   assert.deepEqual(await readSnapshot(filePath), { idleTimeoutMs: 60 * 60 * 1_000, autoAccept: true, bypassAutoAccept: null });
   assert.ok(warn.mock.callCount() > 0);
 });
