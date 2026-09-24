@@ -32,12 +32,12 @@ The daemon's own configuration is the one record, so `server/checkout.ts` reads 
 
 **It is no longer the only source, and failing to find it is no longer fatal.**
 `adapterExecutable` in the host settings names an adapter outright, and `server/adapter.ts` is the one place that decides between the two: the setting when it holds a path, the checkout otherwise, and neither is the end of the world on its own.
-It reads the setting off the document at `settingsFilePath` rather than asking the store, for the same reason the adapter is handed that path — `registerSettings` returns `void` and nothing hands a value back — and a document that is missing, unreadable or malformed reads as nothing configured, because the store writes the file only once somebody saves and refusing to run over a JSON parse would be every session on the host.
+It reads the setting through `readConfiguredExecutable` in `server/settings.ts`, and an invalid document reads as nothing configured, because refusing to run over it would take down every session on the host.
 Nothing in there throws: a path that is missing, unexecutable or unbuilt comes back as a sentence on `problem`, which the panel shows and `connect()` throws only when there is no path at all.
 The checkout is still resolved and still reported, because an update still builds in it and a host running the default still wants to see it.
 
 That is also why the resolution is no longer cached the way the checkout was.
-The path the daemon loaded this plugin from cannot change under it; a setting can, so `resolveAdapter` reads the document every time and `getCatalogCacheKey` costs that read plus its one `stat`.
+The path the daemon loaded this plugin from cannot change under it; a setting can, so `resolveAdapter` calls `read()` every time and `getCatalogCacheKey` costs that read plus its one `stat`.
 
 `connect()` is async, so the command is resolved per connection rather than at registration: `server/provider.ts` builds the `runAcpProvider` shim inside `connect` and delegates to it.
 That shim spawns one adapter process per ACP session, plus a throwaway one per connection to probe capabilities and another per catalogue fetch, and it drops the adapter's stderr — which is why the diagnostics section still runs the adapter's own `--diagnose`.
