@@ -129,11 +129,13 @@ function ProjectLevelRow({
   palette,
   project,
   defaultLevel,
+  disabled,
   onChange,
 }: {
   palette: Palette;
   project: KnownProject;
   defaultLevel: DetailLevel;
+  disabled: boolean;
   onChange: (level: DetailLevel | null) => void;
 }) {
   const effective = project.level ?? defaultLevel;
@@ -156,6 +158,7 @@ function ProjectLevelRow({
               ? `Detail level for ${project.displayName}: follows the default, ${label}`
               : `Detail level for ${project.displayName}: ${label}`
           }
+          disabled={disabled}
           onValueChange={(choice) => onChange(choice === FOLLOWS_DEFAULT ? null : choice)}
         />
       }
@@ -245,9 +248,9 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
 
   // Refreshes the preview now rather than on the next poll.
   const save = async (next: PresenceSettings) => {
-    if (await stored.save(next, stored.revision)) {
-      void queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
-    }
+    const saved = await stored.save(next, stored.revision);
+    if (saved) void queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
+    return saved;
   };
   const savedId = settings.applicationId ?? "";
   const applicationId = draftId ?? savedId;
@@ -258,10 +261,9 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
     ? (BADGE_COLORS[status.activity.smallImageKey] ?? null)
     : null;
 
-  const saveApplicationId = () => {
+  const saveApplicationId = async () => {
     if (idInvalid || !idChanged) return;
-    void save({ ...settings, applicationId: parsedId });
-    setDraftId(null);
+    if (await save({ ...settings, applicationId: parsedId })) setDraftId(null);
   };
 
   return (
@@ -277,6 +279,10 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
         gap: spacing[6],
       }}
     >
+      {stored.saveError ? (
+        <Text style={{ color: palette.statusDanger, fontSize: fontSize.base }}>{stored.saveError}</Text>
+      ) : null}
+
       <Card palette={palette}>
         <Row
           palette={palette}
@@ -329,6 +335,7 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
                 value={settings.defaultDetailLevel}
                 options={DEFAULT_LEVEL_OPTIONS}
                 accessibilityLabel={`Detail level for all projects: ${DETAIL_LEVEL_LABELS[settings.defaultDetailLevel]}`}
+                disabled={stored.saving}
                 onValueChange={(defaultDetailLevel) => void save({ ...settings, defaultDetailLevel })}
               />
             }
@@ -342,6 +349,7 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
                 palette={palette}
                 project={project}
                 defaultLevel={settings.defaultDetailLevel}
+                disabled={stored.saving}
                 onChange={(level) => void save(withProjectDetailLevel(settings, project, level))}
               />
             ))
@@ -373,23 +381,23 @@ export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
               palette={palette}
               value={applicationId}
               onChangeText={setDraftId}
-              onSubmit={saveApplicationId}
+              onSubmit={() => void saveApplicationId()}
             />
             <Button
               palette={palette}
               label="Save"
               variant="default"
-              disabled={!idChanged || idInvalid}
-              onPress={saveApplicationId}
+              disabled={!idChanged || idInvalid || stored.saving}
+              onPress={() => void saveApplicationId()}
             />
             {savedId !== MANAGED_APPLICATION_ID ? (
               <Button
                 palette={palette}
                 label="Use the shared one"
                 variant="ghost"
-                onPress={() => {
-                  void save({ ...settings, applicationId: MANAGED_APPLICATION_ID });
-                  setDraftId(null);
+                disabled={stored.saving}
+                onPress={async () => {
+                  if (await save({ ...settings, applicationId: MANAGED_APPLICATION_ID })) setDraftId(null);
                 }}
               />
             ) : null}
