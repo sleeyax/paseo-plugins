@@ -13,4 +13,4 @@
 export const APP_NAME = "claude-tty-acp";
 export const APP_TITLE = "Claude Code (interactive)";
 /** The adapter reports this over ACP and prints it for `--version`, and release-please keeps it in step with `package.json`. */
-export const APP_VERSION = "0.0.1"; // x-release-please-version
+export const APP_VERSION = "0.1.0"; // x-release-please-version
