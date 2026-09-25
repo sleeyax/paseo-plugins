@@ -42,6 +42,10 @@ const TEST_TIMINGS = {
   staleResumeKeyDelayMs: 5,
 } satisfies ClaudeTtyAgentDependencies;
 
+// The adapter waits a 25ms poll after every key it sends a startup menu, so a menu a test expects answered needs a budget a loaded runner cannot spend on those polls alone.
+// Only a run that is already failing ever reaches it.
+const ANSWERED_MENU_TIMEOUT_MS = 1_000;
+
 class FakePty {
   readonly pid: number;
   /** Every key the runtime sent, in order, the clear before each prompt included. */
@@ -331,7 +335,7 @@ test("asks through ACP before accepting Claude workspace trust", async () => {
     submitDelayMs: 0, contextRefreshTimeoutMs: 0,
     clearInputKeyMs: 0,
     workspaceTrustKeyDelayMs: 0,
-    workspaceTrustSelectionTimeoutMs: 50,
+    workspaceTrustSelectionTimeoutMs: ANSWERED_MENU_TIMEOUT_MS,
   });
 
   try {
@@ -470,7 +474,7 @@ test("asks through ACP before letting a CLAUDE.md import files from outside the 
     contextRefreshTimeoutMs: 0,
     clearInputKeyMs: 0,
     externalImportsKeyDelayMs: 0,
-    externalImportsSelectionTimeoutMs: 50,
+    externalImportsSelectionTimeoutMs: ANSWERED_MENU_TIMEOUT_MS,
   });
 
   try {
@@ -531,7 +535,7 @@ test("starts without the external imports, and says so, when the card is decline
     contextRefreshTimeoutMs: 0,
     clearInputKeyMs: 0,
     externalImportsKeyDelayMs: 0,
-    externalImportsSelectionTimeoutMs: 50,
+    externalImportsSelectionTimeoutMs: ANSWERED_MENU_TIMEOUT_MS,
   });
 
   try {
@@ -594,7 +598,7 @@ test("presses nothing when Claude's external-imports question goes before the ca
     contextRefreshTimeoutMs: 0,
     clearInputKeyMs: 0,
     externalImportsKeyDelayMs: 0,
-    externalImportsSelectionTimeoutMs: 50,
+    externalImportsSelectionTimeoutMs: ANSWERED_MENU_TIMEOUT_MS,
   });
 
   try {
@@ -3706,7 +3710,7 @@ test("asks through ACP before accepting Claude's bypass permissions disclaimer",
     contextRefreshTimeoutMs: 0,
     clearInputKeyMs: 0,
     bypassPermissionsKeyDelayMs: 0,
-    bypassPermissionsSelectionTimeoutMs: 50,
+    bypassPermissionsSelectionTimeoutMs: ANSWERED_MENU_TIMEOUT_MS,
   });
 
   try {
@@ -3796,7 +3800,7 @@ test("fails the start rather than run in another mode when the bypass disclaimer
     contextRefreshTimeoutMs: 0,
     clearInputKeyMs: 0,
     bypassPermissionsKeyDelayMs: 0,
-    bypassPermissionsSelectionTimeoutMs: 50,
+    bypassPermissionsSelectionTimeoutMs: ANSWERED_MENU_TIMEOUT_MS,
   });
 
   try {
