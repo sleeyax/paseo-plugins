@@ -155,6 +155,8 @@ export type RuntimeDependencies = {
   cancelTimeoutMs?: number;
   contextRefreshTimeoutMs?: number;
   submitDelayMs?: number;
+  pasteEchoMs?: number;
+  submitConfirmMs?: number;
   latePasteMs?: number;
   dialogDismissMs?: number;
   clearInputKeyMs?: number;
@@ -163,6 +165,7 @@ export type RuntimeDependencies = {
   dialogAnswerTimeoutMs?: number;
   dialogSettleMs?: number;
   transcriptPollIntervalMs?: number;
+  transcriptFlushIntervalMs?: number;
   workspaceTrustKeyDelayMs?: number;
   workspaceTrustSelectionTimeoutMs?: number;
   bypassPermissionsKeyDelayMs?: number;
@@ -205,10 +208,13 @@ export class ClaudeRuntime {
   private readonly cancelTimeoutMs: number;
   private readonly contextRefreshTimeoutMs: number;
   private readonly submitDelayMs: number;
+  private readonly pasteEchoMs: number;
+  private readonly submitConfirmMs: number;
   private readonly latePasteMs: number;
   private readonly dialogDismissMs: number;
   private readonly clearInputKeyMs: number;
   private readonly transcriptPollIntervalMs: number | undefined;
+  private readonly transcriptFlushIntervalMs: number | undefined;
   private readonly workspaceTrustKeyDelayMs: number;
   private readonly workspaceTrustSelectionTimeoutMs: number;
   private readonly bypassPermissionsKeyDelayMs: number;
@@ -305,10 +311,13 @@ export class ClaudeRuntime {
     this.cancelTimeoutMs = dependencies.cancelTimeoutMs ?? CANCEL_TIMEOUT_MS;
     this.contextRefreshTimeoutMs = dependencies.contextRefreshTimeoutMs ?? CONTEXT_REFRESH_TIMEOUT_MS;
     this.submitDelayMs = dependencies.submitDelayMs ?? SUBMIT_DELAY_MS;
+    this.pasteEchoMs = dependencies.pasteEchoMs ?? PASTE_ECHO_MS;
+    this.submitConfirmMs = dependencies.submitConfirmMs ?? SUBMIT_CONFIRM_MS;
     this.latePasteMs = dependencies.latePasteMs ?? LATE_PASTE_MS;
     this.dialogDismissMs = dependencies.dialogDismissMs ?? DIALOG_DISMISS_MS;
     this.clearInputKeyMs = dependencies.clearInputKeyMs ?? CLEAR_INPUT_KEY_MS;
     this.transcriptPollIntervalMs = dependencies.transcriptPollIntervalMs;
+    this.transcriptFlushIntervalMs = dependencies.transcriptFlushIntervalMs;
     this.workspaceTrustKeyDelayMs = dependencies.workspaceTrustKeyDelayMs ?? WORKSPACE_TRUST_KEY_DELAY_MS;
     this.workspaceTrustSelectionTimeoutMs = dependencies.workspaceTrustSelectionTimeoutMs ?? WORKSPACE_TRUST_SELECTION_TIMEOUT_MS;
     this.bypassPermissionsKeyDelayMs = dependencies.bypassPermissionsKeyDelayMs ?? BYPASS_PERMISSIONS_KEY_DELAY_MS;
@@ -935,6 +944,7 @@ export class ClaudeRuntime {
       this.translator,
       this.transcriptPollIntervalMs,
       new SubagentWatcher(reader.filePath, this.translator, this.cwd),
+      this.transcriptFlushIntervalMs,
     );
   }
 
@@ -1053,7 +1063,7 @@ export class ClaudeRuntime {
     };
     if ((await this.takeTheKeyboardBack(activityBefore)) === "delivered") return;
     await paste();
-    let pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), PASTE_ECHO_MS);
+    let pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), this.pasteEchoMs);
     for (let attempt = 0; attempt < SUBMIT_ATTEMPTS; attempt += 1) {
       await delay(this.submitDelayMs);
       if (this.cancelRequested) return;
@@ -1066,13 +1076,13 @@ export class ClaudeRuntime {
           // The paste went into the question rather than into the box, so it goes again now the box has
           // the keys back; Claude has nothing of this prompt yet, and the key below would send an empty box.
           await paste();
-          pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), PASTE_ECHO_MS);
+          pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), this.pasteEchoMs);
           continue;
         }
       }
       this.pty?.write(CARRIAGE_RETURN);
       if (pasted) {
-        if (await this.screenSettles((screen) => !inputBoxHolds(screen, echo), SUBMIT_CONFIRM_MS)) return;
+        if (await this.screenSettles((screen) => !inputBoxHolds(screen, echo), this.submitConfirmMs)) return;
         continue;
       }
       // The key above went into an input box with nothing of ours in it, so it sent nothing. Claude
@@ -1090,7 +1100,7 @@ export class ClaudeRuntime {
         if (keyboard === "delivered") return;
         if (keyboard === "dismissed") {
           await paste();
-          pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), PASTE_ECHO_MS);
+          pasted = await this.screenSettles((screen) => inputBoxHolds(screen, echo), this.pasteEchoMs);
           continue;
         }
         if (this.submissionMovedOn(activityBefore)) return;
