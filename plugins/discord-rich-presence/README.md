@@ -1,5 +1,7 @@
 # Discord Rich Presence
 
+[![Paseo Cafe](https://img.shields.io/badge/Paseo_Cafe-discord--rich--presence-blue)](https://paseo.cafe/plugins/discord-rich-presence)
+
 Show your current Paseo activity on Discord. The Paseo daemon and Discord app must run on the same machine.
 
 ## Screenshots

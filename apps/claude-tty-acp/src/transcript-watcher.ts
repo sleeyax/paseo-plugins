@@ -10,6 +10,7 @@ export class TranscriptWatcher {
   private readonly reader: TranscriptReader;
   private readonly translator: TranscriptTranslator;
   private readonly pollIntervalMs: number;
+  private readonly flushIntervalMs: number;
   private readonly subagents: SubagentReads | null;
   private timer: NodeJS.Timeout | null = null;
   private queue: Promise<void> = Promise.resolve();
@@ -19,11 +20,13 @@ export class TranscriptWatcher {
     translator: TranscriptTranslator,
     pollIntervalMs = POLL_INTERVAL_MS,
     subagents: SubagentReads | null = null,
+    flushIntervalMs = FLUSH_INTERVAL_MS,
   ) {
     this.reader = reader;
     this.translator = translator;
     this.pollIntervalMs = pollIntervalMs;
     this.subagents = subagents;
+    this.flushIntervalMs = flushIntervalMs;
   }
 
   async start(): Promise<void> {
@@ -58,7 +61,7 @@ export class TranscriptWatcher {
       stableReads = sawFile && complete && size === previousSize ? stableReads + 1 : 0;
       if (stableReads >= 2) break;
       previousSize = size;
-      await delay(FLUSH_INTERVAL_MS);
+      await delay(this.flushIntervalMs);
     }
     if (force) await this.syncWithState(true);
   }
