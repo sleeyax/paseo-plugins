@@ -378,7 +378,7 @@ test("never confirms workspace trust unless Claude visibly selects Yes", async (
     readinessTimeoutMs: 0,
     submitDelayMs: 0,
     workspaceTrustKeyDelayMs: 0,
-    workspaceTrustSelectionTimeoutMs: 5,
+    workspaceTrustSelectionTimeoutMs: 200,
   });
 
   try {
@@ -387,7 +387,9 @@ test("never confirms workspace trust unless Claude visibly selects Yes", async (
       agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] }),
       /did not select the workspace trust option/,
     );
-    assert.deepEqual(pty.writes, ["\u001b[B"]);
+    // How many times it presses down before giving up depends on the runner; that it only ever presses down does not.
+    assert.ok(pty.writes.length > 0);
+    assert.ok(pty.writes.every((write) => write === "\u001b[B"), `pressed something other than down: ${JSON.stringify(pty.writes)}`);
     assert.equal(pty.killed, true);
   } finally {
     await agent.close();
