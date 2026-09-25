@@ -4,7 +4,7 @@ Adds all [Catppuccin](https://catppuccin.com/palette/) flavours — Latte, Frapp
 
 ## Screenshots
 
-![All four Catppuccin flavours](./docs/screenshots/flavours.png)
+_None yet._
 
 ## Installation
 
