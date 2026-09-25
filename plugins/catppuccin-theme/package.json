@@ -4,7 +4,8 @@
   "private": true,
   "version": "0.0.1",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"client/**/*.test.ts\""
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.9.1",
