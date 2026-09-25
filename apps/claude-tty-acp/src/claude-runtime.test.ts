@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import type { AgentSideConnection, RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from "@agentclientprotocol/sdk";
 import type { IPty, IPtyForkOptions } from "node-pty";
-import { ClaudeTtyAgent } from "./agent.ts";
+import { ClaudeTtyAgent, type ClaudeTtyAgentDependencies } from "./agent.ts";
 import { StateStore } from "./state-store.ts";
 import { subagentsDirectory } from "./subagent-transcript.ts";
 import { TERMINAL_COLS, TERMINAL_ROWS } from "./terminal-screen.ts";
@@ -20,6 +20,27 @@ const CLEAR_INPUT_LINE = "\u0015";
 const CLEAR_INPUT_CONFIRMATIONS = 3;
 /** And after this many keys that changed nothing, which is what a box it cannot empty costs. */
 const CLEAR_INPUT_UNCHANGED = 4;
+
+/**
+ * The runtime waits are sized for a real Claude on a loaded host, and a fake PTY that answers at once only has to be outlasted by these.
+ * Spread first, so a test about one of these waits still names its own.
+ */
+const TEST_TIMINGS = {
+  readyQuietMs: 20,
+  pasteEchoMs: 30,
+  submitConfirmMs: 30,
+  latePasteMs: 100,
+  transcriptFlushIntervalMs: 2,
+  clearInputKeyMs: 1,
+  dialogPollMs: 10,
+  dialogSettleMs: 50,
+  dialogAnswerKeyMs: 5,
+  dialogDismissMs: 50,
+  workspaceTrustKeyDelayMs: 5,
+  bypassPermissionsKeyDelayMs: 5,
+  externalImportsKeyDelayMs: 5,
+  staleResumeKeyDelayMs: 5,
+} satisfies ClaudeTtyAgentDependencies;
 
 class FakePty {
   readonly pid: number;
@@ -125,7 +146,7 @@ test("keeps three parallel PTYs, hooks, cancellation, and attachments isolated",
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     const first = await agent.newSession({ cwd: "/work/one", mcpServers: [] });
@@ -188,7 +209,7 @@ test("lets the hooks that wait on a person wait a day, over a transport with no 
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: args[args.indexOf("--session-id") + 1] }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/repo", mcpServers: [] });
@@ -227,7 +248,7 @@ test("cancels an active turn with Escape", async () => {
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return spawned;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, cancelTimeoutMs: 5, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, cancelTimeoutMs: 5, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/cancel", mcpServers: [] });
@@ -246,6 +267,7 @@ test("fails closed when Claude never completes the startup hook", async () => {
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-test-"));
   const pty = new FakePty(3000);
   const agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty: () => pty,
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
@@ -300,6 +322,7 @@ test("asks through ACP before accepting Claude workspace trust", async () => {
     return pty;
   };
   agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
@@ -340,6 +363,7 @@ test("never confirms workspace trust unless Claude visibly selects Yes", async (
     extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   const agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty: () => {
       setImmediate(() => pty.emitData(workspaceTrustScreen(cwd)));
       return pty;
@@ -377,6 +401,7 @@ test("fails closed when Claude workspace trust is denied", async () => {
     extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   const agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty: () => {
       setImmediate(() => pty.emitData(workspaceTrustScreen(cwd)));
       return pty;
@@ -435,6 +460,7 @@ test("asks through ACP before letting a CLAUDE.md import files from outside the 
     return pty;
   };
   agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
@@ -495,6 +521,7 @@ test("starts without the external imports, and says so, when the card is decline
     return pty;
   };
   agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
@@ -557,6 +584,7 @@ test("presses nothing when Claude's external-imports question goes before the ca
     return pty;
   };
   agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
@@ -602,7 +630,7 @@ test("applies native model and mode controls and restarts an idle session", asyn
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     const created = await agent.newSession({ cwd: "/work/controls", mcpServers: [] });
@@ -641,7 +669,7 @@ test("launches Claude at the effort a config option chose and restarts an idle s
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     const created = await agent.newSession({ cwd: "/work/effort", mcpServers: [] });
@@ -684,6 +712,7 @@ test("suspends an idle native process and resumes it on the next prompt", async 
     return pty;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
@@ -739,6 +768,7 @@ async function createIdleHarness(name: string, idleTimeoutMs: number) {
     return pty;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot: path.join(root, "runtime"),
     claudeConfigDir: configDirectory,
@@ -861,6 +891,7 @@ test("delivers the assistant text before an interactive hook prompts", async () 
     extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -969,7 +1000,7 @@ test("clears what an interrupt left in Claude's input box before pasting the nex
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0, clearInputKeyMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0, clearInputKeyMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/clear", mcpServers: [] });
@@ -1003,7 +1034,7 @@ test("clears the input box even when nothing is showing in it", async () => {
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/clear-empty", mcpServers: [] });
@@ -1057,7 +1088,7 @@ test("clears a residue Claude had wrapped, not just the last line of it", async 
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/clear-wrapped", mcpServers: [] });
@@ -1106,7 +1137,7 @@ test("stops clearing a box holding a suggestion Claude is offering rather than t
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/clear-suggestion", mcpServers: [] });
@@ -1154,7 +1185,7 @@ test("clears the box a key at a time, because Claude reads a burst of them as te
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/clear-keys", mcpServers: [] });
@@ -1220,7 +1251,7 @@ test("closes a question Claude has open, then sends the prompt into the box behi
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), claudeConfigDir: configDirectory, startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), claudeConfigDir: configDirectory, startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/open-dialog", mcpServers: [] });
@@ -1253,7 +1284,7 @@ test("fails the prompt, rather than answering it, when a question will not close
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), claudeConfigDir: configDirectory, startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0, dialogDismissMs: 20 });
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), claudeConfigDir: configDirectory, startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0, dialogDismissMs: 20 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/stuck-dialog", mcpServers: [] });
@@ -1305,7 +1336,7 @@ test("re-pastes a prompt the question behind it swallowed, instead of sending an
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), claudeConfigDir: configDirectory, startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), claudeConfigDir: configDirectory, startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/late-dialog", mcpServers: [] });
@@ -1377,6 +1408,7 @@ test("re-pastes a prompt whose echo never came because a question opened behind 
     return pty;
   };
   agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
@@ -1449,6 +1481,7 @@ test("raises a card for a question Claude opens on its own, and closes it with E
     return pty;
   };
   agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
@@ -1518,6 +1551,7 @@ test("says so three ways when Claude swaps the model under a running session", a
     return pty;
   };
   agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot: path.join(root, "runtime"),
     claudeConfigDir: configDirectory,
@@ -1598,7 +1632,7 @@ test("sends the prompt as usual when Claude says nothing else has the keyboard",
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), claudeConfigDir: configDirectory, startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), claudeConfigDir: configDirectory, startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/no-dialog", mcpServers: [] });
@@ -1629,7 +1663,7 @@ test("resubmits a prompt Claude leaves sitting in its input box", async () => {
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/one", mcpServers: [] });
@@ -1671,7 +1705,7 @@ test("sends a prompt Claude echoed only after the first submit key, rather than 
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, latePasteMs: 500, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, latePasteMs: 500, contextRefreshTimeoutMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/late", mcpServers: [] });
@@ -1698,7 +1732,7 @@ test("fails a prompt Claude never took, and leaves the session able to take the 
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, latePasteMs: 50, contextRefreshTimeoutMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, latePasteMs: 50, contextRefreshTimeoutMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/lost", mcpServers: [] });
@@ -1729,7 +1763,7 @@ test("reports the context reading Claude's status line writes after the turn", a
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 500 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 500 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/context", mcpServers: [] });
@@ -1775,7 +1809,7 @@ test("takes a context reading Claude writes while the transcript is still draini
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 500 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 500 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/drain", mcpServers: [] });
@@ -1808,7 +1842,7 @@ test("does not repeat the last reading when a turn ends in failure", async () =>
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 200 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 200 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/refusal", mcpServers: [] });
@@ -1845,7 +1879,7 @@ test("says nothing about the context when Claude's status line does not refresh"
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 100 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 100 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/quiet", mcpServers: [] });
@@ -1874,7 +1908,7 @@ test("drops the context wait when the turn is cancelled", async () => {
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, cancelTimeoutMs: 5, contextRefreshTimeoutMs: 5_000 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, cancelTimeoutMs: 5, contextRefreshTimeoutMs: 5_000 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/cancel", mcpServers: [] });
@@ -1907,7 +1941,7 @@ test("stops waiting for a context reading when the turn is cancelled mid-wait", 
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, cancelTimeoutMs: 5, contextRefreshTimeoutMs: 10_000 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, cancelTimeoutMs: 5, contextRefreshTimeoutMs: 10_000 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/stop", mcpServers: [] });
@@ -1956,7 +1990,7 @@ test("says nothing about the context when the session closes while the wait is r
       });
     },
   } as unknown as AgentSideConnection;
-  agent = new ClaudeTtyAgent(connection, { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 500 });
+  agent = new ClaudeTtyAgent(connection, { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 500 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/close", mcpServers: [] });
@@ -1987,7 +2021,7 @@ test("stays ready once a status line has taken Claude's shortcut hint away", asy
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 1_000, submitDelayMs: 0, contextRefreshTimeoutMs: 0, clearInputKeyMs: 0 });
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 1_000, submitDelayMs: 0, contextRefreshTimeoutMs: 0, clearInputKeyMs: 0 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/ready", mcpServers: [] });
@@ -2025,7 +2059,7 @@ test("keeps a stop that lands while the turn's last message is still in flight",
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: claudeSessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(connection, { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, cancelTimeoutMs: 5, contextRefreshTimeoutMs: 10_000 });
+  agent = new ClaudeTtyAgent(connection, { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, cancelTimeoutMs: 5, contextRefreshTimeoutMs: 10_000 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/race", mcpServers: [] });
@@ -2055,7 +2089,7 @@ test("stops paying the wait once a session has gone several turns without a read
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 400 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 400 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/latch", mcpServers: [] });
@@ -2100,7 +2134,7 @@ test("does not let stopped waits count towards giving up on a session's readings
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: claudeSessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(connection, { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, cancelTimeoutMs: 5, contextRefreshTimeoutMs: 2_000 });
+  agent = new ClaudeTtyAgent(connection, { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, cancelTimeoutMs: 5, contextRefreshTimeoutMs: 2_000 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/stopcount", mcpServers: [] });
@@ -2141,7 +2175,7 @@ test("picks a session back up when its readings resume after it stopped waiting"
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection(updates), { spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 1_000 });
+  agent = new ClaudeTtyAgent(createConnection(updates), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 600 });
 
   try {
     const session = await agent.newSession({ cwd: "/work/rearm", mcpServers: [] });
@@ -2173,10 +2207,10 @@ test("picks a session back up when its readings resume after it stopped waiting"
   }
 });
 
-// The adapter looks for a reading only once the transcript drain finishes, which is a fixed 15 x 20ms in a test with no transcript file.
+// The adapter looks for a reading only once the transcript drain finishes, which is 15 flushes of `transcriptFlushIntervalMs` in a test with no transcript file.
 // A reading written this long after the Stop hook therefore lands after that look, which is the only thing separating a turn that waits from a turn that merely looks.
 // Two of these tests pass whatever the code does if this drops below the drain, so it is named once rather than spelled at each call site.
-const AFTER_THE_LOOK_MS = 800;
+const AFTER_THE_LOOK_MS = 300;
 
 function contextPayload(tokens: number, percent: number): string {
   return JSON.stringify({
@@ -2216,6 +2250,7 @@ test("keeps the whole conversation when Claude asks how to resume a suspended se
     return pty;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
@@ -2273,6 +2308,7 @@ test("leaves a session running while a card is still waiting on the person who h
     extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
@@ -2339,6 +2375,7 @@ test("presses again when Claude drops the key that moves its resume question", a
     return pty;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
@@ -2393,6 +2430,7 @@ test("carries on when Claude's resume question is answered before the adapter ta
     return pty;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
@@ -2458,6 +2496,7 @@ test("keeps the turn open while a background agent runs, so the session reads as
     return spawned;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -2530,6 +2569,7 @@ test("keeps the turn open while a background command runs, so the session reads 
     return spawned;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -2607,6 +2647,7 @@ test("gives up on a background command that never reports, and does not wait on 
   };
   // A slow poll makes a second hold measurable.
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -2674,6 +2715,7 @@ test("goes on waiting for a background command after giving up on the agents bes
     return spawned;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -2762,6 +2804,7 @@ test("goes on waiting for an agent inside its bound after giving up on the comma
     return spawned;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -2847,6 +2890,7 @@ test("takes a message during a turn held for a background agent without interrup
     return spawned;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -2917,6 +2961,7 @@ test("goes on holding the turn for a command the agent backgrounded, after the a
     return spawned;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -3024,6 +3069,7 @@ test("puts an agent back to work when Claude sends it another message", async ()
     return spawned;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -3135,6 +3181,7 @@ test("a turn waiting on a background agent still cancels at once", async () => {
     return spawned;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -3197,6 +3244,7 @@ test("stops waiting when the agent that reported never wakes Claude to answer fo
     return spawned;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -3263,6 +3311,7 @@ test("goes on waiting while Claude is answering for the agent that reported", as
     return spawned;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -3344,6 +3393,7 @@ test("goes on waiting while Claude is running tools for the agent that reported,
     return spawned;
   };
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -3437,6 +3487,7 @@ test("stops counting the agents a turn gave up on, so a later turn does not wait
   // A poll this slow is what makes the difference visible: a turn that still counted the abandoned
   // agent would hold for a whole interval before giving up on it a second time.
   agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -3509,6 +3560,7 @@ test("closes a background agent's card when the session it ran in is suspended",
     return pty;
   };
   agent = new ClaudeTtyAgent(createConnection(updates), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -3587,6 +3639,7 @@ for (const [modeId, footer] of [
       return pty;
     };
     agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
       spawnPty,
       runtimeRoot,
       stateDirectory: path.join(runtimeRoot, "state"),
@@ -3643,6 +3696,7 @@ test("asks through ACP before accepting Claude's bypass permissions disclaimer",
     return pty;
   };
   agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory: path.join(runtimeRoot, "state"),
@@ -3689,6 +3743,7 @@ test("leaves a session in another mode alone when its screen only quotes the dis
     extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty: (_file: string, args: string[]) => {
       const sessionId = args[args.indexOf("--session-id") + 1]!;
       setImmediate(() => pty.emitData(bypassPermissionsScreen("exit")));
@@ -3728,6 +3783,7 @@ test("fails the start rather than run in another mode when the bypass disclaimer
     extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   const agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty: () => {
       setImmediate(() => pty.emitData(bypassPermissionsScreen("exit")));
       return pty;
@@ -3773,6 +3829,7 @@ test("lets a cancelled session go when nobody answers the bypass disclaimer", { 
     extNotification: async () => undefined,
   } as unknown as AgentSideConnection;
   const agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
     spawnPty: () => {
       setImmediate(() => pty.emitData(bypassPermissionsScreen("exit")));
       return pty;
@@ -3848,6 +3905,7 @@ test("goes on waiting on a silent agent while Claude itself is still working", a
     return pty;
   };
   agent = new ClaudeTtyAgent(createConnection(updates), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     claudeConfigDir: configDirectory,
@@ -3931,6 +3989,7 @@ test("stops the adapter once the directory of every session it holds is gone", a
   let removed = 0;
   const spawnPty = (): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => new FakePty(1);
   const agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory,
@@ -3972,6 +4031,7 @@ test("lets go of the directories of a closed adapter's sessions", async () => {
   let removed = 0;
   const spawnPty = (): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => new FakePty(1);
   const agent = new ClaudeTtyAgent(createConnection([]), {
+    ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot,
     stateDirectory: path.join(root, "state"),
