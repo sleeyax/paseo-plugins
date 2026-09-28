@@ -27,9 +27,9 @@ export default function contribute(client: PluginClientContext) {
 
   client.addCommandCenterItem({
     id: `${PLUGIN_ID}-start`,
-    title: `${PLUGIN_LABEL}: start from a pull request URL`,
+    title: `${PLUGIN_LABEL}: start from a PR or MR URL`,
     icon: PLUGIN_ICON,
-    keywords: ["review", "guide", "pull request", "pr", "github", "url"],
+    keywords: ["review", "guide", "pull request", "pr", "github", "merge request", "mr", "gitlab", "url"],
     context: "global",
     onSelect({ openSurface }) {
       openSurface(START_SURFACE_ID);

@@ -2,7 +2,8 @@ import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
 import { GuideSchema, type GuideState } from "../shared/guide.ts";
-import type { ChangeRequest, ChangeRequestRef, Forge } from "./forge/port.ts";
+import { numberLabel } from "../shared/reference.ts";
+import { ForgeError, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
 import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, type GuideAgentPort } from "./guide-agent/port.ts";
 import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
 import { parseGuide } from "./guide-output.ts";
@@ -62,7 +63,14 @@ export class ReviewService {
    * it already has if that is still open, a new PR workspace otherwise.
    */
   async start({ url }: { url: string }): Promise<StartResult> {
-    const match = await this.#match(url);
+    let match: { forge: Forge; ref: ChangeRequestRef } | null;
+    try {
+      match = await this.#match(url);
+    } catch (error) {
+      // A URL a forge claims but cannot read from here, like one on a host its CLI is not logged in to.
+      if (error instanceof ForgeError) return { status: "rejected", message: error.message };
+      throw error;
+    }
     if (match === null) {
       const hints = this.#forges.map((forge) => forge.urlHint).join(", or ");
       return { status: "rejected", message: `That is not ${hints}.` };
@@ -305,7 +313,7 @@ export function headerOf(changeRequest: ChangeRequest): ReviewHeader {
 }
 
 function workspaceTitle(changeRequest: ChangeRequest): string {
-  const title = `Review #${changeRequest.ref.number}: ${changeRequest.title}`;
+  const title = `Review ${numberLabel(changeRequest.ref.forge, changeRequest.ref.number)}: ${changeRequest.title}`;
   return title.length <= MAX_WORKSPACE_TITLE ? title : `${title.slice(0, MAX_WORKSPACE_TITLE - 1)}…`;
 }
 
