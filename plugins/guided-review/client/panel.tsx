@@ -2,18 +2,31 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { ExternalLink } from "@getpaseo/plugin/client/ui";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import React from "react";
 import { ScrollView, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import type { ReviewHeader } from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
+import { GuideView } from "./guide-view.tsx";
 import { fontSize, leading, MAX_CONTENT_WIDTH, radius, spacing } from "./theme.ts";
 
+const POLL_MS = 2_000;
+
 /** The "Guided Review" tab: the review this workspace was created for, found by the workspace's ID. */
-export function GuidePanel({ workspaceId, theme, layout }: PluginWorkspacePanelProps) {
+export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWorkspacePanelProps) {
   const getPanel = useRpc(contracts.getPanel);
-  const panel = useQuery({ queryKey: [PLUGIN_ID, "panel", workspaceId], queryFn: () => getPanel({ workspaceId }) });
+  const panel = useQuery({
+    queryKey: [PLUGIN_ID, "panel", workspaceId],
+    queryFn: () => getPanel({ workspaceId }),
+    // The guide is written by a background job, which the panel follows until it ends.
+    refetchInterval: (query) => (query.state.data?.status === "ready" && query.state.data.guide.status === "generating" ? POLL_MS : false),
+  });
+  const generate = useRpc(contracts.generateGuide);
+  const retry = useMutation({
+    mutationFn: (reviewId: string) => generate({ reviewId }),
+    onSettled: () => void panel.refetch(),
+  });
   const colors = theme.colors;
 
   let body: React.ReactNode;
@@ -29,7 +42,22 @@ export function GuidePanel({ workspaceId, theme, layout }: PluginWorkspacePanelP
       </Note>
     );
   } else {
-    body = <Header header={panel.data.header} theme={theme} />;
+    const { reviewId } = panel.data;
+    body = (
+      <View style={{ gap: spacing[3] }}>
+        <Header header={panel.data.header} theme={theme} />
+        <GuideView
+          state={panel.data.guide}
+          theme={theme}
+          {...(navigation ? { openAgent: (agentId: string) => navigation.openAgent({ agentId }) } : {})}
+          retry={{
+            run: () => retry.mutate(reviewId),
+            pending: retry.isPending,
+            error: retry.error ? (retry.error instanceof Error ? retry.error.message : String(retry.error)) : null,
+          }}
+        />
+      </View>
+    );
   }
 
   return (
