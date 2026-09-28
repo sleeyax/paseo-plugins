@@ -2,6 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import React from "react";
 import { Pressable, Text, View } from "react-native";
 import type { Guide, GuideDecision, GuideNode, GuideState } from "../shared/guide.ts";
+import { AskAction, type AskControl } from "./ask-action.tsx";
 import { fontSize, leading, radius, spacing } from "./theme.ts";
 
 type Colors = PluginTheme["colors"];
@@ -12,10 +13,12 @@ export type GuideViewProps = {
   /** Opens the guide agent's chat; absent on hosts without client navigation. */
   openAgent?: (agentId: string) => void;
   retry: { run: () => void; pending: boolean; error: string | null };
+  /** "Ask about this" on each node, and on each Supporting and Unsorted entry. */
+  ask: AskControl;
 };
 
 /** The guide under the header: its generation while it runs, its failure with a retry, or the guide itself. */
-export function GuideView({ state, theme, openAgent, retry }: GuideViewProps) {
+export function GuideView({ state, theme, openAgent, retry, ask }: GuideViewProps) {
   const colors = theme.colors;
   const agentLink =
     state.agentId !== null && openAgent ? (
@@ -56,7 +59,7 @@ export function GuideView({ state, theme, openAgent, retry }: GuideViewProps) {
           {agentLink ? <View style={{ alignItems: "flex-start" }}>{agentLink}</View> : null}
           <Heading colors={colors}>Concepts</Heading>
           {state.guide.nodes.map((node) => (
-            <NodeCard key={node.id} node={node} colors={colors} />
+            <NodeCard key={node.id} node={node} colors={colors} ask={ask} />
           ))}
         </>
       );
@@ -96,7 +99,7 @@ function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
   );
 }
 
-function NodeCard({ node, colors }: { node: GuideNode; colors: Colors }) {
+function NodeCard({ node, colors, ask }: { node: GuideNode; colors: Colors; ask: AskControl }) {
   return (
     <Card colors={colors}>
       <Text style={{ color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base), fontWeight: "600" }}>
@@ -107,6 +110,7 @@ function NodeCard({ node, colors }: { node: GuideNode; colors: Colors }) {
       </Body>
       <Body colors={colors}>{node.explanation}</Body>
       {node.decisions.length > 0 ? <Decisions decisions={node.decisions} colors={colors} /> : null}
+      <AskAction subject={{ kind: "node", nodeId: node.id }} ask={ask} colors={colors} />
     </Card>
   );
 }
