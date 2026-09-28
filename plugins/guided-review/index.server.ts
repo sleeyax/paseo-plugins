@@ -109,6 +109,22 @@ export default function contribute(server: PluginServerContext) {
     connected(context);
     return service.deleteDraft(input);
   });
+  server.handle(contracts.getFinish, (input, context) => {
+    connected(context);
+    return service.finish(input);
+  });
+  server.handle(contracts.saveReviewBody, (input, context) => {
+    connected(context);
+    return service.saveReviewBody(input);
+  });
+  server.handle(contracts.submitReview, (input, context) => {
+    connected(context);
+    return service.submit(input);
+  });
+  server.handle(contracts.discardReview, (input, context) => {
+    connected(context);
+    return service.discard(input);
+  });
 
   // The guide agent is read-only. Its provider's plan or read-only mode is the first guard and this
   // the second, since not every provider has such a mode; the generation job answers what it misses.

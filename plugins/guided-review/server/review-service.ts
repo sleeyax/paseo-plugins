@@ -5,6 +5,10 @@ import { coveredPaths, GuideSchema, type CoveredCode, type GuideState, type Laye
 import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
 import { numberLabel } from "../shared/reference.ts";
 import type { Draft, DraftList, DraftLocation } from "../shared/drafts.ts";
+import type { FinishView } from "../shared/contracts.ts";
+import type { SubmitResult, Verdict, VerdictOption } from "../shared/submit.ts";
+import { verdictOptions } from "./submit-rules.ts";
+import type { DraftTarget } from "./forge/port.ts";
 import { anchorAt } from "./anchors.ts";
 import { askPrompt, codeReferencesOf, type AskSubjectContext } from "./ask-prompt.ts";
 import { carryMarks } from "./carry-over.ts";
@@ -399,6 +403,77 @@ export class ReviewService {
     const forge = this.#forges.find((candidate) => candidate.kind === record.ref.forge);
     if (forge === undefined) throw new Error(`No forge here reads ${record.ref.url}.`);
     return { record, forge };
+  }
+
+  /**
+   * The Finish review step: the review body as it is kept until submit, and the verdicts on offer, from
+   * the head as the forge has it now.
+   */
+  async finish({ reviewId }: { reviewId: string }): Promise<FinishView> {
+    const { record, forge } = await this.#reviewForge(reviewId);
+    const [head, body] = await Promise.all([this.checkHead({ reviewId }), this.#readReviewBody(record, forge)]);
+    return { body, verdicts: verdictsFor(record, head), head };
+  }
+
+  async saveReviewBody({ reviewId, body }: { reviewId: string; body: string }): Promise<null> {
+    const { record, forge } = await this.#reviewForge(reviewId);
+    await this.#writeReviewBody(record, forge, body.trim());
+    return null;
+  }
+
+  /**
+   * Publishes the drafts and the body with the verdict. The head is asked of the forge again here,
+   * whatever the panel last heard, so a verdict never goes out on code the guide did not explain.
+   * The forge's steps are reported one by one, since a later one can fail after an earlier landed.
+   */
+  async submit({ reviewId, headSha, verdict, body }: { reviewId: string; headSha: string; verdict: Verdict; body: string }): Promise<SubmitResult> {
+    const { record, forge } = await this.#reviewForge(reviewId);
+    const text = body.trim();
+    // Kept before anything is sent, so a refused or failed submit loses none of it.
+    if (forge.reviewBody === null) await this.#store.saveReviewBody(record.id, text);
+    const head = await this.checkHead({ reviewId });
+    const verdicts = verdictsFor(record, head);
+    if (headSha !== record.header.headSha) {
+      const message = `This review is of the guide at ${headSha.slice(0, 7)}, which was regenerated for ${record.header.headSha.slice(0, 7)}. Finish it from the guide at the new head.`;
+      return { status: "refused", message, verdicts };
+    }
+    const option = verdicts.find((candidate) => candidate.verdict === verdict);
+    if (!option?.allowed) return { status: "refused", message: option?.reason ?? "That verdict is not on offer.", verdicts };
+
+    const outcome = await forge.submitReview(await this.#reviewTarget(record), { verdict, body: text });
+    if (outcome.published && forge.reviewBody === null) await this.#store.saveReviewBody(record.id, "");
+    for (const step of outcome.steps) {
+      if (step.status === "failed") this.#log(`Submitting ${record.ref.url}: "${step.label}" failed: ${step.message}`);
+    }
+    const done = outcome.steps.filter((step) => step.status === "done").length;
+    const status = done === outcome.steps.length ? "submitted" : done === 0 ? "failed" : "partial";
+    return { status, published: outcome.published, steps: outcome.steps };
+  }
+
+  /** Throws the pending review away with its drafts and body; the panel asks the reviewer first. */
+  async discard({ reviewId }: { reviewId: string }): Promise<null> {
+    const { record, forge } = await this.#reviewForge(reviewId);
+    await forge.discardReview(record.ref);
+    if (forge.reviewBody === null) await this.#store.saveReviewBody(record.id, "");
+    return null;
+  }
+
+  /** The review body so far: the forge's, where it keeps one before submit, else the one kept here. */
+  async #readReviewBody(record: ReviewRecord, forge: Forge): Promise<string> {
+    return forge.reviewBody ? forge.reviewBody.read(record.ref) : this.#store.getReviewBody(record.id);
+  }
+
+  async #writeReviewBody(record: ReviewRecord, forge: Forge, body: string): Promise<void> {
+    if (forge.reviewBody) await forge.reviewBody.write(await this.#reviewTarget(record), body);
+    else await this.#store.saveReviewBody(record.id, body);
+  }
+
+  /** The change request at the review's head, which a pending review a write has to start is started on. */
+  async #reviewTarget(record: ReviewRecord): Promise<DraftTarget> {
+    const changeRequest = await this.#store.snapshot(record.id, record.header.headSha);
+    if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
+    const { ref, baseSha, startSha, headSha } = changeRequest;
+    return { ref, baseSha, startSha, headSha };
   }
 
   /** For the `workspace.archived` hook: a review's workspace ending ends its guide agents. */
@@ -847,6 +922,17 @@ function prWorkspaceLeftAlone(changeRequest: ChangeRequest, outcome: FastForward
     case "fast-forwarded":
       throw new Error(`A ${outcome.status} workspace is not left alone.`);
   }
+}
+
+/** The verdicts on offer on `record`'s change request, with its state as the head check found it where it could. */
+function verdictsFor(record: ReviewRecord, head: HeadCheck): VerdictOption[] {
+  return verdictOptions({
+    forge: record.ref.forge,
+    // Both forges take a username in any case.
+    own: record.viewer.login.toLowerCase() === record.header.author.toLowerCase(),
+    state: head.state ?? record.header.state,
+    head,
+  });
 }
 
 function progress(phase: StartPhase): StartProgress {

@@ -61,6 +61,7 @@ export type ProgressRecord = {
 const RECORD_FILE = "review.json";
 const GUIDES = "guides";
 const PROGRESS = "progress";
+const REVIEW_BODY_FILE = "review-body.json";
 
 /**
  * A review's ID is its path under `reviews/`: forge, host, project and number, lower-cased because
@@ -138,6 +139,18 @@ export class ReviewStore {
 
   async saveProgress(id: string, record: ProgressRecord): Promise<void> {
     await writeJson(path.join(this.directoryOf(id), PROGRESS, `${record.headSha}.json`), record);
+  }
+
+  /**
+   * The review body the reviewer has written so far, for a forge that keeps none before submit
+   * (GitLab); empty when there is none. It belongs to the review, not to a head.
+   */
+  async getReviewBody(id: string): Promise<string> {
+    return (await readJson<{ body: string }>(path.join(this.directoryOf(id), REVIEW_BODY_FILE)))?.body ?? "";
+  }
+
+  async saveReviewBody(id: string, body: string): Promise<void> {
+    await writeJson(path.join(this.directoryOf(id), REVIEW_BODY_FILE), { body });
   }
 
   /** Every guide the review has had, one per head SHA. */
