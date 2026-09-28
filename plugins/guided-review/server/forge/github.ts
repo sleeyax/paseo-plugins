@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { CommandRunner } from "../command-runner.ts";
 import { createCli } from "./cli.ts";
 import type { Draft, DraftLocation } from "../../shared/drafts.ts";
+import type { Verdict } from "../../shared/submit.ts";
+import { SubmitSteps } from "./submit-steps.ts";
 import {
   ForgeError,
   type AnchorLine,
@@ -246,6 +248,59 @@ const DraftsResponse = z.object({
   }),
 });
 
+/** The viewer's pending review with its body, which is the review body until it is submitted. */
+export const REVIEW_BODY_QUERY = `query GuidedReviewReviewBody($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviews(states: PENDING, first: 1) { nodes { id viewerDidAuthor body } }
+    }
+  }
+}`;
+
+export const UPDATE_REVIEW_MUTATION = `mutation GuidedReviewUpdateBody($id: ID!, $body: String!) {
+  updatePullRequestReview(input: { pullRequestReviewId: $id, body: $body }) {
+    pullRequestReview { id }
+  }
+}`;
+
+/** Publishes the pending review, every comment on it included, with its body and verdict. */
+export const SUBMIT_REVIEW_MUTATION = `mutation GuidedReviewSubmit($id: ID!, $event: PullRequestReviewEvent!, $body: String!) {
+  submitPullRequestReview(input: { pullRequestReviewId: $id, event: $event, body: $body }) {
+    pullRequestReview { id state }
+  }
+}`;
+
+/** Deletes the pending review, and with it every comment on it. */
+export const DELETE_REVIEW_MUTATION = `mutation GuidedReviewDiscard($id: ID!) {
+  deletePullRequestReview(input: { pullRequestReviewId: $id }) {
+    pullRequestReview { id }
+  }
+}`;
+
+const ReviewBodyResponse = z.object({
+  data: z.object({
+    repository: z
+      .object({
+        pullRequest: z
+          .object({ reviews: z.object({ nodes: z.array(z.object({ id: z.string(), viewerDidAuthor: z.boolean(), body: z.string() })) }) })
+          .nullable(),
+      })
+      .nullable(),
+  }),
+});
+
+const EVENTS: Record<Verdict, "APPROVE" | "REQUEST_CHANGES" | "COMMENT"> = {
+  approve: "APPROVE",
+  "request-changes": "REQUEST_CHANGES",
+  comment: "COMMENT",
+};
+
+const SUBMIT_LABELS: Record<Verdict, string> = {
+  approve: "Publish the review and approve",
+  "request-changes": "Publish the review and request changes",
+  comment: "Publish the review as a comment",
+};
+
 /** Any mutation whose answer is only read for its errors, which `gh` turns into a failed exit. */
 const MutationResponse = z.object({ data: z.unknown() });
 
@@ -269,7 +324,8 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
 
   /**
    * The viewer's pending review, started on `target`'s head when there is none. Two drafts saved at
-   * once would otherwise both find none and start two, and GitHub turns the second down.
+   * once would otherwise both find none and start two, and GitHub turns the second down. A body
+   * write, a submit and a discard queue here too, so none acts on a review another is starting.
    */
   const creating = new Map<string, Promise<unknown>>();
   const oneAtATime = <T>(ref: ChangeRequestRef, run: () => Promise<T>): Promise<T> => {
@@ -294,6 +350,14 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
       commitOID: target.headSha,
     });
     return started.data.addPullRequestReview.pullRequestReview.id;
+  };
+
+  /** The viewer's pending review and its body, or null when there is none. */
+  const findPendingReview = async (ref: ChangeRequestRef): Promise<{ id: string; body: string } | null> => {
+    const response = await graphql(ref, ReviewBodyResponse, REVIEW_BODY_QUERY, pullRequestVariables(ref));
+    const pr = response.data.repository?.pullRequest;
+    if (!pr) throw new ForgeError(`${ref.project} has no pull request #${ref.number}.`);
+    return pr.reviews.nodes.find((review) => review.viewerDidAuthor) ?? null;
   };
 
   return {
@@ -438,6 +502,38 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
 
     async deleteDraft(ref, draftId) {
       await graphql(ref, MutationResponse, DELETE_COMMENT_MUTATION, { id: draftId });
+    },
+
+    reviewBody: {
+      async read(ref) {
+        return (await findPendingReview(ref))?.body ?? "";
+      },
+      async write(target, body) {
+        await oneAtATime(target.ref, async () => {
+          // An empty body is no reason to start a review; with none pending there is nothing to clear.
+          const id = body === "" ? (await findPendingReview(target.ref))?.id : await pendingReview(target);
+          if (id !== undefined) await graphql(target.ref, MutationResponse, UPDATE_REVIEW_MUTATION, { id, body });
+        });
+      },
+    },
+
+    async submitReview(target, { verdict, body }) {
+      return oneAtATime(target.ref, async () => {
+        // One mutation publishes the comments, the body and the verdict together, so it lands whole or not at all.
+        const steps = new SubmitSteps();
+        const submitted = await steps.run("submit", SUBMIT_LABELS[verdict], async () => {
+          const id = await pendingReview(target);
+          await graphql(target.ref, MutationResponse, SUBMIT_REVIEW_MUTATION, { id, event: EVENTS[verdict], body });
+        });
+        return { published: submitted.ok, steps: steps.steps };
+      });
+    },
+
+    async discardReview(ref) {
+      await oneAtATime(ref, async () => {
+        const review = await findPendingReview(ref);
+        if (review !== null) await graphql(ref, MutationResponse, DELETE_REVIEW_MUTATION, { id: review.id });
+      });
     },
   };
 }
