@@ -7,6 +7,8 @@ export const DEFAULT_GH_PATH = "gh";
 /** Claude with whichever model its provider calls the default, so a new model needs no settings change. */
 export const DEFAULT_GUIDE_AGENT = "claude";
 
+export const DEFAULT_GLAB_PATH = "glab";
+
 /**
  * Host settings, owned by the host's store. Every field has a default, so `schema.parse({})` is the
  * defaults document and a field added later reads as its default from a document saved before it.
@@ -22,6 +24,8 @@ export const settingsDocument = defineSettings({
      * call says so in a sentence naming this setting.
      */
     ghPath: z.string().default(DEFAULT_GH_PATH),
+    /** The `glab` executable, read the same way as `ghPath`. */
+    glabPath: z.string().default(DEFAULT_GLAB_PATH),
     /**
      * The guide agent's provider, alone for its default model (`claude`) or with a model
      * (`codex/gpt-5.5`), as Paseo names them. Checked only when a guide agent is created.
@@ -32,9 +36,17 @@ export const settingsDocument = defineSettings({
 
 /** What the setting amounts to once read: blank means the default name. */
 export function configuredGhPath(raw: unknown): string {
-  if (typeof raw !== "string") return DEFAULT_GH_PATH;
+  return configuredPath(raw, DEFAULT_GH_PATH);
+}
+
+export function configuredGlabPath(raw: unknown): string {
+  return configuredPath(raw, DEFAULT_GLAB_PATH);
+}
+
+function configuredPath(raw: unknown, fallback: string): string {
+  if (typeof raw !== "string") return fallback;
   const trimmed = raw.trim();
-  return trimmed === "" ? DEFAULT_GH_PATH : trimmed;
+  return trimmed === "" ? fallback : trimmed;
 }
 
 /** The guide agent setting once read: blank means the default. */

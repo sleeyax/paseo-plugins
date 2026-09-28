@@ -10,7 +10,11 @@ export interface Forge {
   readonly kind: ForgeKind;
   /** How the service describes a URL this forge takes, in a sentence that rejects one it does not. */
   readonly urlHint: string;
-  /** The change request a pasted URL names, or null when the URL is not one of this forge's. */
+  /**
+   * The change request a pasted URL names, or null when the URL is not one of this forge's. Throws a
+   * `ForgeError` for a URL that is this forge's but cannot be read from here, like one on a GitLab
+   * host `glab` is not logged in to.
+   */
   matchUrl(url: string): Promise<ChangeRequestRef | null>;
   fetchChangeRequest(ref: ChangeRequestRef): Promise<ChangeRequest>;
   /** Who the CLI is logged in as on the change request's host. */
@@ -28,6 +32,7 @@ export type ChangeRequestRef = {
   host: string;
   /** The repository path on that host: `owner/repo`, or `group/sub/project` on GitLab. */
   project: string;
+  /** The PR's number, or the MR's IID: the number in its URL, not GitLab's global ID. */
   number: number;
   /** The canonical web URL, whatever suffix the pasted one had. */
   url: string;
@@ -82,7 +87,13 @@ export type ChangeRequest = {
   isDraft: boolean;
   baseBranch: string;
   headBranch: string;
+  /** Where the diff is taken from: the merge base on GitLab, the base branch's tip on GitHub. */
   baseSha: string;
+  /**
+   * The base branch's tip when the diff was taken, which a GitLab draft's position names beside the
+   * base and head SHAs. The same as `baseSha` on GitHub.
+   */
+  startSha: string;
   headSha: string;
   additions: number;
   deletions: number;

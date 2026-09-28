@@ -1,8 +1,10 @@
 import type { PluginSettings } from "@getpaseo/plugin/server";
 import {
   configuredGhPath,
+  configuredGlabPath,
   configuredGuideAgent,
   DEFAULT_GH_PATH,
+  DEFAULT_GLAB_PATH,
   DEFAULT_GUIDE_AGENT,
   type settingsDocument,
 } from "../shared/settings.ts";
@@ -14,6 +16,11 @@ export type Settings = PluginSettings<typeof settingsDocument.schema>;
 export async function readGhPath(settings: Pick<Settings, "read">): Promise<string> {
   const state = await settings.read();
   return state.status === "ready" ? configuredGhPath(state.values.ghPath) : DEFAULT_GH_PATH;
+}
+
+export async function readGlabPath(settings: Pick<Settings, "read">): Promise<string> {
+  const state = await settings.read();
+  return state.status === "ready" ? configuredGlabPath(state.values.glabPath) : DEFAULT_GLAB_PATH;
 }
 
 /** Read at every guide agent creation, like the gh path. */
