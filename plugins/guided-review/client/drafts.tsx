@@ -1,4 +1,3 @@
-import type { PluginTheme } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { createContext, useContext, useMemo, useState } from "react";
@@ -7,10 +6,9 @@ import * as contracts from "../shared/contracts.ts";
 import { describeLocation, pathOf, type DraftList, type DraftLocation, type LinkedDraft } from "../shared/drafts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import type { CommentSubject } from "../shared/contracts.ts";
-import { BoxButton, CommentBox, type CommentBoxAction } from "./comment-box.tsx";
-import { fontSize, leading, radius, spacing } from "./theme.ts";
-
-type Colors = PluginTheme["colors"];
+import { CommentBox, type CommentBoxAction } from "./comment-box.tsx";
+import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
+import { Button } from "./button.tsx";
 
 /**
  * Where in the panel a comment box is open. The same line can be drawn twice (two nodes may cover
@@ -250,8 +248,8 @@ export function DraftCard({
         {confirming ? (
           <>
             <Text style={{ ...small, color: colors.foreground }}>Delete this draft?</Text>
-            <BoxButton colors={colors} label={deleting ? "Deleting…" : "Delete"} disabled={deleting} onPress={() => void remove()} />
-            <BoxButton colors={colors} label="Keep" disabled={deleting} onPress={() => setConfirming(false)} />
+            <Button small colors={colors} label={deleting ? "Deleting…" : "Delete"} disabled={deleting} onPress={() => void remove()} />
+            <Button small colors={colors} label="Keep" disabled={deleting} onPress={() => setConfirming(false)} />
           </>
         ) : (
           <>

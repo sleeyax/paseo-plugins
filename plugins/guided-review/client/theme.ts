@@ -1,3 +1,8 @@
+import type { PluginTheme } from "@getpaseo/plugin";
+
+/** The host's colour tokens, which every part of the panel draws with. */
+export type Colors = PluginTheme["colors"];
+
 /**
  * Paseo's own design scale, mirrored so what this plugin draws itself measures the same as the host
  * components beside it. The host hands plugins colours but no metrics.

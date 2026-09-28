@@ -1,4 +1,3 @@
-import type { PluginTheme } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import React, { useEffect, useState } from "react";
@@ -7,12 +6,10 @@ import * as contracts from "../shared/contracts.ts";
 import type { ReviewHeader } from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { VERDICT_LABELS, type SubmitResult, type SubmitStep, type Verdict } from "../shared/submit.ts";
-import { BoxButton } from "./comment-box.tsx";
 import { DraftCard, TextLink, type DraftsControl } from "./drafts.tsx";
 import { useSetHeadCheck, type RegenerateControl } from "./head-check.tsx";
-import { fontSize, leading, radius, spacing } from "./theme.ts";
-
-type Colors = PluginTheme["colors"];
+import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
+import { Button } from "./button.tsx";
 
 export type FinishReviewProps = {
   reviewId: string;
@@ -103,7 +100,7 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate }: F
           <Text style={{ ...text, color: colors.foregroundMuted, flexShrink: 1 }}>
             {count === 0 ? "Done reading?" : `${count === 1 ? "1 draft" : `${count} drafts`} waiting to be submitted.`}
           </Text>
-          <BoxButton colors={colors} primary label="Finish review" onPress={() => setOpen(true)} />
+          <Button small colors={colors} primary label="Finish review" onPress={() => setOpen(true)} />
         </View>
       </Card>
     );
@@ -155,7 +152,7 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate }: F
           ) : null}
           {body !== saved ? (
             <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[2] }}>
-              <BoxButton colors={colors} label={save.isPending ? "Saving…" : "Save body"} disabled={busy} onPress={() => save.mutate()} />
+              <Button small colors={colors} label={save.isPending ? "Saving…" : "Save body"} disabled={busy} onPress={() => save.mutate()} />
               <Text style={{ ...small, color: colors.foregroundMuted }}>Unsaved; a submit sends it as it is here.</Text>
             </View>
           ) : null}
@@ -173,7 +170,7 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate }: F
 
           <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing[2] }}>
             {verdicts.map((option) => (
-              <BoxButton
+              <Button small
                 key={option.verdict}
                 colors={colors}
                 primary={option.allowed}
@@ -190,7 +187,7 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate }: F
           ))}
           {offerRegenerate ? (
             <View style={{ gap: spacing[1], alignItems: "flex-start" }}>
-              <BoxButton
+              <Button small
                 colors={colors}
                 label={regenerate.busy ? "Regenerating…" : "Regenerate the guide"}
                 disabled={regenerate.busy}
@@ -211,8 +208,8 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate }: F
                 <Text style={{ ...small, color: colors.foreground }}>
                   Discard your pending review{count > 0 ? ` and its ${count === 1 ? "draft" : `${count} drafts`}` : ""}? This cannot be undone.
                 </Text>
-                <BoxButton colors={colors} label={discard.isPending ? "Discarding…" : "Discard"} disabled={busy} onPress={() => discard.mutate()} />
-                <BoxButton colors={colors} label="Keep" disabled={discard.isPending} onPress={() => setConfirmingDiscard(false)} />
+                <Button small colors={colors} label={discard.isPending ? "Discarding…" : "Discard"} disabled={busy} onPress={() => discard.mutate()} />
+                <Button small colors={colors} label="Keep" disabled={discard.isPending} onPress={() => setConfirmingDiscard(false)} />
               </>
             ) : (
               <TextLink colors={colors} label="Discard review" onPress={() => setConfirmingDiscard(true)} />
