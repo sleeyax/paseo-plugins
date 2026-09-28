@@ -171,6 +171,31 @@ const REVIEWER_STATES: Record<Verdict, "requested_changes" | "reviewed"> = {
   comment: "reviewed",
 };
 
+/**
+ * The reviewer states that confirm an Approve or a Comment went through: an approval moves the state
+ * the publish set on to `approved` on a GitLab that tracks it, and leaves it `reviewed` otherwise.
+ */
+const CONFIRMING_STATES: Record<Exclude<Verdict, "request-changes">, readonly [string, ...string[]]> = {
+  approve: ["approved", "reviewed"],
+  comment: ["reviewed"],
+};
+
+/** A reviewer state as a sentence names it: "GitLab lists you as …". */
+function describeState(state: string | null): string {
+  switch (state) {
+    case null:
+      return "with no reviewer state";
+    case "requested_changes":
+      return "requesting changes";
+    case "unreviewed":
+      return "not reviewed yet";
+    case "review_started":
+      return "reviewing";
+    default:
+      return state.replaceAll("_", " ");
+  }
+}
+
 export type GitLabForgeOptions = {
   run: CommandRunner;
   /** The `glab` executable from the settings. */
@@ -266,21 +291,47 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
   };
 
   /**
-   * Makes the viewer's reviewer state Requested changes where the bulk publish did not: an older
-   * GitLab ignores `reviewer_state`, and a newer one does not say whether setting it worked. The
-   * reviewer list says whether it took, and the GraphQL mutation sets it when it did not or when the
-   * list cannot be read. The mutation fails as HTTP 200 with `errors`, which are read here.
+   * The viewer's reviewer state from the MR's reviewer list: undefined when the viewer is not one of
+   * its reviewers, whom GitLab keeps no state for, and null when GitLab gives a reviewer none.
+   */
+  const viewerState = async (ref: ChangeRequestRef): Promise<string | null | undefined> => {
+    const viewer = (await api(ref, UserResponse, "user")).username.toLowerCase();
+    const reviewers = await api(ref, ReviewersResponse, `${await mergeRequest(ref)}/reviewers`);
+    const own = reviewers.find((reviewer) => reviewer.user.username.toLowerCase() === viewer);
+    return own === undefined ? undefined : (own.state ?? null);
+  };
+
+  /**
+   * Confirms in the reviewer list that an Approve or a Comment left the viewer's state where it
+   * should be: an older GitLab ignores `reviewer_state`, and a newer one does not say whether setting
+   * it worked. Nothing is set here; a state that did not take is reported for the reviewer to set.
+   * Returns the note the step reports: a viewer who is not a reviewer has no state, which is not a failure.
+   */
+  const confirmState = async (ref: ChangeRequestRef, verdict: Exclude<Verdict, "request-changes">): Promise<string | null> => {
+    let state: string | null | undefined;
+    try {
+      state = await viewerState(ref);
+    } catch (error) {
+      throw new ForgeError(`Could not read the merge request's reviewers to confirm your state: ${(error as Error).message}`);
+    }
+    if (state === undefined) return "You are not one of the merge request's reviewers, so GitLab keeps no reviewer state for you.";
+    const expected = CONFIRMING_STATES[verdict];
+    if (state !== null && expected.includes(state)) return null;
+    throw new ForgeError(
+      `GitLab lists you as ${describeState(state)}, not ${describeState(expected[0])}. Set your reviewer state on the merge request's page.`,
+    );
+  };
+
+  /**
+   * Makes the viewer's reviewer state Requested changes where the bulk publish did not. The reviewer
+   * list says whether it took, and the GraphQL mutation sets it when it did not or when the list
+   * cannot be read. The mutation fails as HTTP 200 with `errors`, which are read here.
    */
   const requestChanges = async (ref: ChangeRequestRef) => {
-    const took = await (async () => {
-      try {
-        const viewer = (await api(ref, UserResponse, "user")).username.toLowerCase();
-        const reviewers = await api(ref, ReviewersResponse, `${await mergeRequest(ref)}/reviewers`);
-        return reviewers.some((reviewer) => reviewer.user.username.toLowerCase() === viewer && reviewer.state === "requested_changes");
-      } catch {
-        return false;
-      }
-    })();
+    const took = await viewerState(ref).then(
+      (state) => state === "requested_changes",
+      () => false,
+    );
     if (took) return;
 
     await loggedIn(ref.host);
@@ -471,9 +522,10 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
      * Publishes every draft note at once with `bulk_publish`, the body as its `note` and the verdict
      * as its `reviewer_state` (`requested_changes`, else `reviewed`). A GitLab older than 19.2 drops
      * both, so there the body is posted as an MR note of its own. An approval is the approve endpoint
-     * after, on the guide's head, which GitLab refuses once the MR has moved on; a request for changes
-     * is confirmed in the reviewer list and set through GraphQL when it did not take. Nothing after a
-     * failed publish is tried, so no verdict goes out without the comments it was given with.
+     * after, on the guide's head, which GitLab refuses once the MR has moved on. Every verdict ends with
+     * the reviewer list read for the viewer's state: an Approve or a Comment reports what it found as a
+     * step of its own, and a request for changes that did not take is set through GraphQL. Nothing
+     * after a failed publish is tried, so no verdict goes out without the comments it was given with.
      */
     async submitReview(target, { verdict, body }): Promise<SubmitOutcome> {
       const { ref } = target;
@@ -513,6 +565,10 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       if (verdict === "request-changes") {
         if (publish.ok) await steps.run("request-changes", "Request changes", () => requestChanges(ref));
         else steps.skip("request-changes", "Request changes", notTried);
+      } else {
+        const label = "Confirm your reviewer state";
+        if (publish.ok) await steps.run("reviewer-state", label, () => confirmState(ref, verdict), (note) => note);
+        else steps.skip("reviewer-state", label, notTried);
       }
 
       return { published: publish.ok && bodyOut, steps: steps.steps };

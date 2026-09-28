@@ -27,7 +27,7 @@ export const SubmitStepSchema = z.object({
   label: z.string(),
   /** `skipped` is a step not tried, because one it depends on failed or it was not needed. */
   status: z.enum(["done", "failed", "skipped"]),
-  /** Why it failed or was skipped, as a sentence; null when done. */
+  /** Why it failed or was skipped, as a sentence; for a done step, what it found when that is worth saying, else null. */
   message: z.string().nullable(),
 });
 
