@@ -38,6 +38,10 @@ function ForgeClis({ theme, settings }: { theme: PluginSurfaceProps["theme"]; se
   const saved = settings.values.ghPath;
   // Held here and saved on purpose rather than on every keystroke, each of which would be a document.
   const [typed, setTyped] = useState(saved);
+  const savedGlab = settings.values.glabPath;
+  const [typedGlab, setTypedGlab] = useState(savedGlab);
+  // One save error for the document, shown under the path whose save failed.
+  const [lastSaved, setLastSaved] = useState<"gh" | "glab">("gh");
 
   return (
     <SettingsSection title="Forge CLIs">
@@ -45,7 +49,7 @@ function ForgeClis({ theme, settings }: { theme: PluginSurfaceProps["theme"]; se
         <SettingsInput
           label="gh path"
           hint="A command on the daemon's PATH, or an absolute path"
-          error={settings.saveError}
+          error={lastSaved === "gh" ? settings.saveError : null}
           initialValue={saved}
           placeholder="gh"
           disabled={settings.saving}
@@ -55,12 +59,34 @@ function ForgeClis({ theme, settings }: { theme: PluginSurfaceProps["theme"]; se
           label="Use this gh"
           actionLabel={settings.saving ? "Saving…" : "Save"}
           disabled={settings.saving || typed === saved}
-          onPress={() => void settings.save({ ...settings.values, ghPath: typed }, settings.revision)}
+          onPress={() => {
+            setLastSaved("gh");
+            void settings.save({ ...settings.values, ghPath: typed }, settings.revision);
+          }}
+        />
+        <SettingsInput
+          label="glab path"
+          hint="A command on the daemon's PATH, or an absolute path"
+          error={lastSaved === "glab" ? settings.saveError : null}
+          initialValue={savedGlab}
+          placeholder="glab"
+          disabled={settings.saving}
+          onChangeText={setTypedGlab}
+        />
+        <SettingsAction
+          label="Use this glab"
+          actionLabel={settings.saving ? "Saving…" : "Save"}
+          disabled={settings.saving || typedGlab === savedGlab}
+          onPress={() => {
+            setLastSaved("glab");
+            void settings.save({ ...settings.values, glabPath: typedGlab }, settings.revision);
+          }}
         />
       </SettingsCard>
       <Note color={theme.colors.foregroundMuted}>
-        The daemon runs gh with its own PATH, which is often shorter than your shell's. If a start says gh could not
-        run, put the output of `command -v gh` here. gh uses the login you already have.
+        The daemon runs gh and glab with its own PATH, which is often shorter than your shell's. If a start says one
+        could not run, put the output of `command -v gh` or `command -v glab` here. Both use the logins you already
+        have.
       </Note>
     </SettingsSection>
   );
