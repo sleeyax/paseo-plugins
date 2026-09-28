@@ -1,8 +1,9 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import type { PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
+import type { NodeDiff, PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
 import { GuideSchema, type GuideState } from "../shared/guide.ts";
 import { numberLabel } from "../shared/reference.ts";
+import { resolveCode } from "./diff.ts";
 import { ForgeError, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
 import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, type GuideAgentPort } from "./guide-agent/port.ts";
 import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
@@ -118,6 +119,23 @@ export class ReviewService {
     const previous = await this.#store.getGuide(record.id, record.header.headSha);
     if (previous?.agentId) await this.#guideAgents.archive(previous.agentId);
     return this.#generate(record, null);
+  }
+
+  /**
+   * The hunks one node of the review's current guide covers, parsed from what the forge said at the
+   * guide's head, in the order the node names its files.
+   */
+  async nodeDiff({ reviewId, nodeId }: { reviewId: string; nodeId: string }): Promise<NodeDiff> {
+    const record = await this.#store.get(reviewId);
+    if (record === null) throw new Error("This review is not known here any more. Start it again.");
+    const { headSha } = record.header;
+    const stored = await this.#store.getGuide(record.id, headSha);
+    if (stored?.status !== "ready" || stored.guide === null) throw new Error("The guide is not ready yet.");
+    const node = stored.guide.nodes.find((candidate) => candidate.id === nodeId);
+    if (node === undefined) throw new Error(`The guide has no concept "${nodeId}". Reopen the panel.`);
+    const changeRequest = await this.#store.snapshot(record.id, headSha);
+    if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
+    return { headSha, files: resolveCode(changeRequest.files, node.covers).files };
   }
 
   /** For the `workspace.archived` hook: a review's workspace ending ends its guide agents. */

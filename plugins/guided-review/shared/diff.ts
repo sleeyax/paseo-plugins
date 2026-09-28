@@ -36,7 +36,10 @@ export const DiffHunkSchema = z.object({
   newLines: z.number().int(),
   /** The text after the header's closing `@@`, usually the enclosing function; empty when there is none. */
   section: z.string(),
-  /** False when a node covers only some of the hunk's lines, and these are those. */
+  /**
+   * False when a node covers only some of the hunk's lines: these are one unbroken run of them, and
+   * the header describes the run. A node that covers two runs of one hunk has two entries with its index.
+   */
   complete: z.boolean(),
   lines: z.array(DiffLineSchema),
 });
