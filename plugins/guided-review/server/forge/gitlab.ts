@@ -241,6 +241,15 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
     async deleteDraft() {
       throw new ForgeError(DRAFTS_NOT_YET);
     },
+
+    // GitLab has no draft review body, so the service keeps it until submit. Submitting comes with its own ticket.
+    reviewBody: null,
+    async submitReview() {
+      throw new ForgeError("Submitting a review of a GitLab merge request is not supported yet.");
+    },
+    async discardReview() {
+      throw new ForgeError("Discarding a review of a GitLab merge request is not supported yet.");
+    },
   };
 }
 
