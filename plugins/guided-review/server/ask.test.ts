@@ -124,6 +124,21 @@ test("asking about a Supporting file names the file, how it changed, and its Sup
   assert.doesNotMatch(prompt, /Unsorted/);
 });
 
+test("asking about the rest of a file a node covers part of names the concept and the lines left to it", async (t) => {
+  const guide = sampleGuide();
+  guide.nodes[1]!.covers = [{ path: "src/upload.ts", hunks: [1], lines: [] }];
+  const { service, agents } = await withGuide(t, { guide, upload: UPLOAD_IN_TWO });
+
+  assert.equal((await service.ask({ reviewId: REVIEW_ID, subject: { kind: "file", path: "src/upload.ts" } })).status, "sent");
+
+  const prompt = agents.created[0]!.sent[0]!;
+  assert.match(prompt, /wants to understand the part of one changed file your guide kept outside its concepts: src\/upload\.ts\./);
+  assert.match(
+    prompt,
+    /it is listed as Unsorted\. Part of its change belongs to the concept "Uploader uses the policy"\. What is listed there is the rest: src\/upload\.ts, lines 20-23\./,
+  );
+});
+
 test("asking about an Unsorted file names the file, how it changed, and that the guide left it unsorted", async (t) => {
   const { service, agents } = await withGuide(t);
 

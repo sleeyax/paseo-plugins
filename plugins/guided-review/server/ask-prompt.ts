@@ -12,11 +12,15 @@ export type CodeReference = { path: string; ranges: readonly LineRange[] };
  * What "Ask about this" asks about, resolved from the stored guide and what the forge said at its
  * head: a node, or a changed file the guide keeps outside its nodes. `category` is the Supporting
  * group's category for the file (test, docs, lockfile, generated, wiring), and null for a file in
- * the Unsorted group, which the guide did not place anywhere.
+ * the Unsorted group, which the guide did not place anywhere. `rest` is set for a file some nodes
+ * cover part of: those nodes, and the head-side lines of what the entry holds, which no node covers.
  */
 export type AskSubjectContext =
   | { kind: "node"; node: GuideNode; code: readonly CodeReference[] }
-  | { kind: "file"; file: ChangedFile; category: string | null };
+  | { kind: "file"; file: ChangedFile; category: string | null; rest: FileRest | null };
+
+/** The part of a file no node covers, for a file some nodes cover part of. */
+export type FileRest = { ranges: readonly LineRange[]; nodes: readonly GuideNode[] };
 
 /**
  * The code references of a node's resolved `covers`: each file, with the head-side lines of the
@@ -59,8 +63,8 @@ export function askPrompt(ref: ChangeRequestRef, headSha: string, subject: AskSu
           "Explain this concept in more depth than the guide does: how it works in the surrounding code, why it was done this way (using the description, the commits and the linked issues), and how the rest of the change relies on it.",
         ]
       : [
-          `The reviewer of ${change} wants to understand one changed file your guide kept outside its concepts: ${subject.file.path}.`,
-          fileContext(subject.file, subject.category),
+          `The reviewer of ${change} wants to understand ${subject.rest === null ? "one changed file" : "the part of one changed file"} your guide kept outside its concepts: ${subject.file.path}.`,
+          fileContext(subject.file, subject.category, subject.rest),
           subject.category === null
             ? "Explain what this file's change does and which part of the change it belongs to."
             : "Explain what this file's change does and how it supports the rest of the change.",
@@ -84,13 +88,19 @@ export function nodeContext(node: GuideNode, code: readonly CodeReference[]): st
   return lines.join("\n");
 }
 
-function fileContext(file: ChangedFile, category: string | null): string {
+function fileContext(file: ChangedFile, category: string | null, rest: FileRest | null): string {
   const renamed = file.previousPath ? ` from ${file.previousPath}` : "";
   const placement =
     category === null
       ? "The guide did not place it in any concept or in its Supporting group; it is listed as Unsorted."
       : `The guide lists it under Supporting, as ${category}.`;
-  return `The file was ${file.status}${renamed}, +${file.additions} −${file.deletions}. ${placement}`;
+  const sentences = [`The file was ${file.status}${renamed}, +${file.additions} −${file.deletions}.`, placement];
+  if (rest !== null) {
+    const titles = rest.nodes.map((node) => `"${node.title}"`).join(", ");
+    const outside = rest.ranges.length === 0 ? "" : ` What is listed there is the rest: ${file.path}${rangesOf(rest.ranges)}.`;
+    sentences.push(`Part of its change belongs to the ${rest.nodes.length === 1 ? "concept" : "concepts"} ${titles}.${outside}`);
+  }
+  return sentences.join(" ");
 }
 
 function rangesOf(ranges: readonly LineRange[]): string {

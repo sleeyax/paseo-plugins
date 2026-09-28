@@ -108,7 +108,7 @@ test("a node's hunks from a recorded GitHub PR carry their old and new line numb
     "menu-keys": [{ path: "apps/claude-tty-acp/src/claude-runtime.test.ts", hunks: [1, 3], lines: [] }],
     "sdk-bump": [
       { path: "plugins/claude-tty/package.json", hunks: [], lines: [] },
-      { path: "pnpm-lock.yaml", hunks: [2], lines: [] },
+      { path: "apps/claude-tty-acp/src/claude-runtime.test.ts", hunks: [2], lines: [] },
     ],
   });
   const { service, reviewId } = await reviewing(t, changeRequest, guide);
@@ -142,7 +142,7 @@ test("a node's hunks from a recorded GitHub PR carry their old and new line numb
     sdkBump.files.map((file) => [file.path, file.hunks.map((hunk) => hunk.index)]),
     [
       ["plugins/claude-tty/package.json", [1]],
-      ["pnpm-lock.yaml", [2]],
+      ["apps/claude-tty-acp/src/claude-runtime.test.ts", [2]],
     ],
   );
   assert.deepEqual(numbering(sdkBump.files[0]!.hunks[0]!.lines), [
@@ -272,7 +272,7 @@ test("asking for a node's hunks before the guide is ready, or for a node it lack
   assert.equal((await service.nodeDiff({ reviewId, subject: { kind: "node", nodeId: "uploader" } })).files[0]!.path, "src/upload.ts");
 });
 
-test("a Supporting or Unsorted file's hunks are its whole diff, and a path the change lacks says why", async (t) => {
+test("a Supporting or Unsorted file no node covers shows its whole diff, and a path the change lacks says why", async (t) => {
   const url = "https://github.com/acme/uploader/pull/7";
   const base = sampleChangeRequest(url);
   const retryTest = {
@@ -303,4 +303,49 @@ test("a Supporting or Unsorted file's hunks are its whole diff, and a path the c
   await assert.rejects(service.nodeDiff({ reviewId, subject: { kind: "file", path: "src/other.ts" } }), {
     message: "src/other.ts is not one of the change's files.",
   });
+});
+
+test("an entry of a file some node covers part of holds the rest of it, which takes marks and comments like any entry", async (t) => {
+  const url = "https://github.com/acme/uploader/pull/7";
+  const base = sampleChangeRequest(url);
+  const upload = { ...base.files[0]!, patch: "@@ -1,1 +1,1 @@\n-a\n+b\n@@ -20,3 +20,4 @@ retry\n x\n-y\n+y1\n+y2\n z" };
+  const wire = { path: "src/wire.ts", previousPath: null, status: "modified" as const, additions: 3, deletions: 0, patch: "@@ -1,2 +1,5 @@\n a\n+one\n+two\n b\n+three" };
+  const guide = {
+    ...guideOver({
+      uploader: [{ path: "src/upload.ts", hunks: [1], lines: [] }],
+      retry: [
+        { path: "src/retry.ts", hunks: [], lines: [] },
+        // The first added line only: the rest of the hunk has changes left.
+        { path: "src/wire.ts", hunks: [], lines: [{ start: 2, end: 2 }] },
+      ],
+    }),
+    supporting: [{ path: "src/upload.ts", category: "wiring" as const }],
+  };
+  const { service, forge, reviewId } = await reviewing(t, { ...base, files: [upload, base.files[1]!, wire] }, guide);
+
+  const panel = await service.panel({ workspaceId: "wks_0000000000000001" });
+  assert.ok(panel.status === "ready" && panel.guide.status === "ready");
+  assert.deepEqual(panel.guide.guide.supporting, [{ path: "src/upload.ts", category: "wiring" }]);
+  assert.deepEqual(panel.guide.guide.unsorted, ["src/wire.ts"]);
+
+  const supporting = await service.nodeDiff({ reviewId, subject: { kind: "file", path: "src/upload.ts" } });
+  assert.equal(supporting.files[0]!.hunkCount, 2);
+  assert.deepEqual(supporting.files[0]!.hunks.map(headerOf), [{ index: 2, oldStart: 20, oldLines: 3, newStart: 20, newLines: 4, complete: true }]);
+
+  const unsorted = await service.nodeDiff({ reviewId, subject: { kind: "file", path: "src/wire.ts" } });
+  assert.deepEqual(unsorted.files[0]!.hunks.map(headerOf), [{ index: 1, oldStart: 2, oldLines: 1, newStart: 3, newLines: 3, complete: false }]);
+  assert.deepEqual(numbering(unsorted.files[0]!.hunks[0]!.lines), ["added - 3 2_3", "context 2 4 2_4", "added - 5 3_5"]);
+
+  const progress = await service.setUnderstood({ reviewId, headSha: base.headSha, subject: { kind: "file", path: "src/wire.ts" }, understood: true });
+  assert.deepEqual(progress.understood.files, ["src/wire.ts"]);
+  assert.deepEqual(progress.unsorted, { understood: 1, total: 1 });
+
+  const draft = await service.createDraft({
+    reviewId,
+    headSha: base.headSha,
+    location: { kind: "line", path: "src/upload.ts", line: { side: "new", line: 21 } },
+    body: "Why two lines?",
+  });
+  assert.deepEqual(draft.location, { kind: "line", path: "src/upload.ts", line: { side: "new", line: 21 } });
+  assert.equal(forge.created.length, 1);
 });

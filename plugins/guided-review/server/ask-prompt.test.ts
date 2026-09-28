@@ -30,6 +30,7 @@ test("a Supporting file's prompt names its category", () => {
     kind: "file",
     file: { ...changeRequest.files[0]!, path: "src/upload.test.ts" },
     category: "test",
+    rest: null,
   });
 
   assert.match(prompt, /kept outside its concepts: src\/upload\.test\.ts\./);

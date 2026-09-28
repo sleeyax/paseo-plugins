@@ -35,7 +35,7 @@ export type NodeCodeProps = {
   reviewId: string;
   /** The guide's agent: a regenerated guide is a new agent, whose nodes may cover other code under the same IDs. */
   agentId: string;
-  /** A node, for the hunks it covers, or a Supporting or Unsorted file, for its whole diff. */
+  /** A node, for the hunks it covers, or a Supporting or Unsorted file, for what no node covers of it. */
   subject: GuideSubject;
   theme: PluginTheme;
 };

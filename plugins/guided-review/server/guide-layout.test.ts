@@ -151,7 +151,7 @@ test("lockfiles and generated files are never shown to the agent and go straight
   assert.deepEqual(guide.guide.unsorted, []);
 });
 
-test("a file some node covers any part of is placed, several nodes may share one, and the rest go to Unsorted without a retry", async (t) => {
+test("a file its nodes cover between them is placed, several nodes may share one, and the rest go to Unsorted without a retry", async (t) => {
   const { service, agents } = await withHost(t, [
     file("src/upload.ts"),
     file("src/retry.ts"),
@@ -193,18 +193,68 @@ test("a file some node covers any part of is placed, several nodes may share one
   assert.deepEqual(agents.created[0]!.sent, []);
 });
 
-test("a lockfile a node covers stays in Supporting, where the paths put it", async (t) => {
+test("a file some node covers part of keeps the rest in its Supporting entry, or else in Unsorted", async (t) => {
+  const twoHunks = "@@ -1,1 +1,1 @@\n-a\n+b\n@@ -10,1 +10,1 @@\n-c\n+d";
+  const { service, agents } = await withHost(t, [
+    file("src/upload.ts", twoHunks),
+    file("src/retry.ts", twoHunks),
+    file("src/wire.ts", twoHunks),
+    file("src/clock.ts", "@@ -1,3 +1,3 @@\n x\n-a\n+b\n y"),
+  ]);
+
+  const guide = await generated(
+    service,
+    agents,
+    guideOf(
+      [
+        node("uploader", [{ path: "src/upload.ts", hunks: [1], lines: [] }]),
+        // A range over one hunk's lines leaves the other hunk's change.
+        node("policy", [{ path: "src/retry.ts", hunks: [], lines: [{ start: 1, end: 1 }] }]),
+        node("wiring", [{ path: "src/wire.ts", hunks: [1, 2], lines: [] }]),
+        // What a range leaves of a hunk is only context, so nothing of the file is left.
+        node("clock", [{ path: "src/clock.ts", hunks: [], lines: [{ start: 2, end: 2 }] }]),
+      ],
+      [
+        // The rest of a partly covered file stays where the agent put it.
+        { path: "src/upload.ts", category: "wiring" },
+        // Nothing is left of a file its nodes cover whole.
+        { path: "src/wire.ts", category: "wiring" },
+      ],
+    ),
+  );
+
+  assert.equal(guide?.status, "ready");
+  if (guide?.status !== "ready") return;
+  assert.deepEqual(guide.guide.supporting, [{ path: "src/upload.ts", category: "wiring" }]);
+  assert.deepEqual(guide.guide.unsorted, ["src/retry.ts"]);
+});
+
+test("a lockfile a node covers stays in Supporting, where the paths put it, and leaves the node", async (t) => {
   const { service, agents } = await withHost(t, [file("src/upload.ts"), file("src/retry.ts"), file("pnpm-lock.yaml")]);
 
   const guide = await generated(service, agents, {
     ...sampleGuide(),
-    nodes: [sampleGuide().nodes[0]!, { ...sampleGuide().nodes[1]!, covers: [...sampleGuide().nodes[1]!.covers, { path: "pnpm-lock.yaml", hunks: [], lines: [] }] }],
+    nodes: [sampleGuide().nodes[0]!, { ...sampleGuide().nodes[1]!, covers: [...sampleGuide().nodes[1]!.covers, { path: "./pnpm-lock.yaml", hunks: [7], lines: [] }] }],
   });
 
   assert.equal(guide?.status, "ready");
   if (guide?.status !== "ready") return;
   assert.deepEqual(guide.guide.supporting, [{ path: "pnpm-lock.yaml", category: "lockfile" }]);
   assert.deepEqual(guide.guide.unsorted, []);
+  // The agent never saw it, so its hunk 7 is not checked, and no node shows it a second time.
+  assert.deepEqual(guide.guide.nodes[1]!.covers, [{ path: "src/upload.ts", hunks: [1], lines: [] }]);
+});
+
+test("a node that covers only lockfiles or generated files fails the guide", async (t) => {
+  const { service, agents } = await withHost(t, [file("src/upload.ts"), file("src/retry.ts"), file("pnpm-lock.yaml")]);
+
+  const guide = await generated(service, agents, guideOf([node("policy", ["src/retry.ts", "src/upload.ts"]), node("deps", ["pnpm-lock.yaml"])]));
+
+  assert.deepEqual(guide, {
+    status: "failed",
+    agentId: "agent-1",
+    message: "The guide agent's answer did not match what was asked for: nodes.1.covers: it names only lockfiles or generated files, which are placed already.",
+  });
 });
 
 test("a node covering a path the change does not have fails the guide", async (t) => {
