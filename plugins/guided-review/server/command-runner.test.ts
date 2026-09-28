@@ -44,6 +44,18 @@ test("lays the given environment over the daemon's", async () => {
   assert.equal(result.stdout, "1 path");
 });
 
+test("leaves out the variables it is told to unset", async (t) => {
+  process.env.GUIDED_REVIEW_TEST_AGENT = "agent_1";
+  t.after(() => delete process.env.GUIDED_REVIEW_TEST_AGENT);
+  const result = await runCommand({
+    file: node,
+    args: ["-e", "process.stdout.write(String(process.env.GUIDED_REVIEW_TEST_AGENT) + ' ' + (process.env.PATH ? 'path' : 'none'))"],
+    unsetEnv: ["GUIDED_REVIEW_TEST_AGENT"],
+    timeoutMs: 10_000,
+  });
+  assert.equal(result.stdout, "undefined path");
+});
+
 test("a missing binary is a spawn error rather than a rejection", async () => {
   const result = await runCommand({ file: "/nonexistent/gh", args: ["--version"], timeoutMs: 10_000 });
   assert.equal(result.exitCode, null);

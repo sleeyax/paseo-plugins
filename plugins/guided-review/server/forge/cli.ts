@@ -10,6 +10,8 @@ export type CliOptions = {
   name: string;
   /** Laid over the daemon's environment for every call. */
   env: Record<string, string>;
+  /** Taken out of the daemon's environment for every call. */
+  unsetEnv?: readonly string[];
 };
 
 export type CallOptions = {
@@ -34,6 +36,7 @@ export function createCli(options: CliOptions): Cli {
       file: binary,
       args,
       env: options.env,
+      ...(options.unsetEnv === undefined ? {} : { unsetEnv: options.unsetEnv }),
       timeoutMs: call.timeoutMs ?? DEFAULT_CLI_TIMEOUT_MS,
       ...(call.input === undefined ? {} : { input: call.input }),
     });
