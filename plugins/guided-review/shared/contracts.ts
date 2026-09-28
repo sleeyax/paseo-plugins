@@ -183,6 +183,46 @@ export const setUnderstood = defineRpc({
   output: GuideProgressSchema,
 });
 
+/**
+ * Whether the PR/MR's head has moved on since the panel's guide was written, as the forge has it
+ * now: what the "PR updated since this guide" banner shows, and what a verdict needs to know.
+ */
+export const HeadCheckSchema = z.object({
+  /** The head the panel's guide, and its header, were read at. */
+  guideHeadSha: z.string(),
+  /** Where the forge has the head now; null when it could not be asked, with `message` saying why. */
+  forgeHeadSha: z.string().nullable(),
+  /** New commits were pushed, or the branch was rewritten, since the guide was written. False when unknown. */
+  moved: z.boolean(),
+  /** The state the forge has the PR/MR in now; null when it could not be asked. */
+  state: z.enum(["open", "closed", "merged"]).nullable(),
+  /** Why the forge could not be asked, as a sentence. */
+  message: z.string().nullable(),
+});
+
+/**
+ * Asks the forge where the review's head is now. Nothing changes on its own when it has moved: the
+ * panel shows a banner and `regenerateGuide` is the only way to a guide at the new head.
+ */
+export const checkHead = defineRpc({
+  name: "guided-review.review.head",
+  input: z.object({ reviewId: z.string() }),
+  output: HeadCheckSchema,
+});
+
+/**
+ * "Regenerate": reads the PR/MR at its current head, brings the guide's workspace to that head, and
+ * generates a guide for it, carrying the reviewer's marks over to nodes whose code did not change.
+ * Returns at once; the panel follows it through `getStartProgress`, whose `workspaceId` is the
+ * workspace the new guide lives in, which is a new PR workspace when the old one could not be moved.
+ */
+export const regenerateGuide = defineRpc({
+  name: "guided-review.guide.regenerate",
+  input: z.object({ reviewId: z.string() }),
+  output: StartResultSchema,
+});
+
+export type HeadCheck = z.output<typeof HeadCheckSchema>;
 export type ReviewHeader = z.output<typeof ReviewHeaderSchema>;
 export type NodeDiff = z.output<typeof NodeDiffSchema>;
 export type StartResult = z.output<typeof StartResultSchema>;

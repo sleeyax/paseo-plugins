@@ -72,8 +72,10 @@ export function fakeWorkspaces(): FakeWorkspaces {
       }
       const id = `wks_${String(workspaces.created.length + 1).padStart(16, "0")}`;
       workspaces.created.push({ id, repositoryRoot, ref, title });
-      active.add(id);
-      return { id, directory: `${repositoryRoot}-worktrees/pr-${ref.number}` };
+      const directory = `${repositoryRoot}-worktrees/pr-${ref.number}`;
+      // Paseo checks a PR out on a local branch of its own, which fast-forwards like any other.
+      workspaces.openCheckout(id, { directory, branch: `pr-${ref.number}`, repository: { host: ref.host, project: ref.project }, outcome: { status: "current" } });
+      return { id, directory };
     },
   };
   return workspaces;

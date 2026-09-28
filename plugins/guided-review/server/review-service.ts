@@ -1,12 +1,13 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import type { AskResult, BranchStart, GuideSubject, NodeDiff, PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
+import type { AskResult, BranchStart, GuideSubject, HeadCheck, NodeDiff, PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
 import { coveredPaths, GuideSchema, type CoveredCode, type GuideState, type LayeredGuide } from "../shared/guide.ts";
 import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { askPrompt, codeReferencesOf, type AskSubjectContext } from "./ask-prompt.ts";
+import { carryMarks } from "./carry-over.ts";
 import { resolveCode } from "./diff.ts";
-import { ForgeError, type BranchChangeRequest, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
+import { ForgeError, type BranchChangeRequest, type ChangedFile, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
 import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, GuideAgentError, type GuideAgentPort } from "./guide-agent/port.ts";
 import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
 import { setAside } from "./file-classes.ts";
@@ -40,6 +41,11 @@ type BranchState =
   | { status: "started"; reviewId: string };
 /** A workspace on a branch, with the repository its `origin` names. */
 type LocalCheckout = WorkspaceCheckout & { branch: string; repository: NonNullable<WorkspaceCheckout["repository"]> };
+/**
+ * What a review's job is for: a `start` reads the change request and keeps the guide the review has
+ * when only the head moved; a `regenerate` moves the review to the head the forge has now.
+ */
+type PrepareMode = "start" | "regenerate";
 /** A guide being generated; `agentId` is set once its agent exists. */
 type Generation = { agentId: string | null; done: Promise<void> };
 
@@ -158,6 +164,37 @@ export class ReviewService {
     const previous = await this.#store.getGuide(record.id, record.header.headSha);
     if (previous?.agentId) await this.#guideAgents.archive(previous.agentId);
     return this.#generate(record, null);
+  }
+
+  /**
+   * Where the forge has the review's head now, against the head of the guide the panel shows. The
+   * "PR updated since this guide" banner is `moved`, and so is what keeps a verdict from applying to
+   * code the guide did not explain. A forge that cannot be asked is reported, not thrown, and reads
+   * as not moved, so a flaky network does not put a banner up.
+   */
+  async checkHead({ reviewId }: { reviewId: string }): Promise<HeadCheck> {
+    const record = await this.#store.get(reviewId);
+    if (record === null) throw new Error("This review is not known here any more. Start it again.");
+    const guideHeadSha = record.header.headSha;
+    try {
+      const head = await this.#forgeOf(record.ref).fetchHead(record.ref);
+      return { guideHeadSha, forgeHeadSha: head.headSha, moved: head.headSha !== guideHeadSha, state: head.state, message: null };
+    } catch (error) {
+      if (!(error instanceof ForgeError)) throw error;
+      const message = `Could not check ${record.ref.url} for new commits: ${error.message}`;
+      return { guideHeadSha, forgeHeadSha: null, moved: false, state: null, message };
+    }
+  }
+
+  /**
+   * "Regenerate": reads the change request at its current head, brings the guide's workspace there
+   * and generates the guide for that head, as a background job the panel follows through `progress`.
+   * The only way to a guide at a new head: a start with the head moved keeps the guide it has.
+   */
+  async regenerate({ reviewId }: { reviewId: string }): Promise<StartResult> {
+    const record = await this.#store.get(reviewId);
+    if (record === null) return { status: "rejected", message: "This review is not known here any more. Start it again." };
+    return { status: "started", reviewId: this.#begin(this.#forgeOf(record.ref), record.ref, null, "regenerate") };
   }
 
   /**
@@ -330,6 +367,13 @@ export class ReviewService {
     }
   }
 
+  /** The forge a recorded review was read from. */
+  #forgeOf(ref: ChangeRequestRef): Forge {
+    const forge = this.#forges.find((candidate) => candidate.kind === ref.forge);
+    if (forge === undefined) throw new Error(`No ${ref.forge} forge is set up to read ${ref.url}.`);
+    return forge;
+  }
+
   async #match(url: string): Promise<{ forge: Forge; ref: ChangeRequestRef } | null> {
     for (const forge of this.#forges) {
       const ref = await forge.matchUrl(url);
@@ -342,15 +386,16 @@ export class ReviewService {
    * Starts reading the change request and giving it a workspace as a background job, and returns the
    * review's ID; a job already running for it is the one followed. `own` is the reviewer's workspace
    * on the change request's branch, to fast-forward and attach to rather than make a PR workspace.
+   * A `start` keeps a guide the review already has when the head has moved; a `regenerate` does not.
    */
-  #begin(forge: Forge, ref: ChangeRequestRef, own: ReviewWorkspace | null): string {
+  #begin(forge: Forge, ref: ChangeRequestRef, own: ReviewWorkspace | null, mode: PrepareMode = "start"): string {
     const id = reviewIdOf(ref);
     const running = this.#jobs.get(id);
     if (running && !isFinished(running.progress.phase)) return id;
 
     const job: Job = { progress: progress("reading"), note: null, done: Promise.resolve() };
     this.#jobs.set(id, job);
-    job.done = this.#prepare(id, forge, ref, job, own).catch((error: unknown) => {
+    job.done = this.#prepare(id, forge, ref, job, own, mode).catch((error: unknown) => {
       const message = errorMessage(error);
       this.#log(`Starting a review of ${ref.url} failed: ${message}`);
       job.progress = { ...job.progress, phase: "failed", message };
@@ -427,18 +472,41 @@ export class ReviewService {
     }
   }
 
-  async #prepare(id: string, forge: Forge, ref: ChangeRequestRef, job: Job, own: ReviewWorkspace | null): Promise<void> {
+  async #prepare(id: string, forge: Forge, ref: ChangeRequestRef, job: Job, own: ReviewWorkspace | null, mode: PrepareMode): Promise<void> {
     const [changeRequest, viewer] = await failingAs(`Could not read ${ref.url}`, () =>
       Promise.all([forge.fetchChangeRequest(ref), forge.currentUser(ref)]),
     );
     const header = headerOf(changeRequest);
     job.progress = { ...job.progress, header };
 
-    const workspace = await this.#workspaceFor(id, forge, changeRequest, job, own);
-    // The `workspace.archived` hook is not replayed after a restart, so an old workspace's agents are ended here too.
     const previous = await this.#store.get(id);
-    if (previous !== null && previous.workspace.id !== workspace.id) await this.#endGuides(previous.id, previous.workspace.id);
+    const headMoved = previous !== null && previous.header.headSha !== changeRequest.headSha;
+    if (mode === "start" && headMoved && (await this.#keepsGuide(previous, own))) {
+      // Nothing regenerates on its own: the guide stays at its head, and its workspace where it is,
+      // until the reviewer asks for the new head from the panel's banner. What does not belong to
+      // one head, like the title and whether it is still open, follows the forge.
+      const record: ReviewRecord = {
+        ...previous,
+        header: { ...previous.header, title: header.title, state: header.state, isDraft: header.isDraft },
+        viewer,
+        updatedAt: this.#now().toISOString(),
+      };
+      await this.#store.update(record);
+      job.progress = { ...job.progress, header: record.header, phase: "ready", workspaceId: record.workspace.id };
+      await this.#guideState(record);
+      return;
+    }
 
+    const workspace = await this.#workspaceFor(id, forge, changeRequest, job, own, headMoved);
+    if (previous !== null && previous.workspace.id !== workspace.id) {
+      // The `workspace.archived` hook is not replayed after a restart, so an old workspace's agents are ended here too.
+      await this.#endGuides(previous.id, previous.workspace.id);
+    } else if (previous !== null && headMoved) {
+      // The panel shows the guide at the new head from now on, so the one it replaces ends with it.
+      await this.#endGuideAt(previous.id, previous.header.headSha, workspace.id);
+    }
+
+    const previousHeadSha = headMoved ? previous.header.headSha : previous?.previousHeadSha;
     const record: ReviewRecord = {
       id,
       ref,
@@ -447,10 +515,24 @@ export class ReviewService {
       viewer,
       updatedAt: this.#now().toISOString(),
       ...(job.note === null ? {} : { note: job.note }),
+      ...(previousHeadSha === undefined ? {} : { previousHeadSha }),
     };
     await this.#store.save(record, changeRequest);
     job.progress = { ...job.progress, phase: "ready", workspaceId: workspace.id };
     await this.#guideState(record);
+  }
+
+  /**
+   * Whether a start with the head moved leaves the review as it is: its workspace is still open and
+   * is the one asked for, and it has a guide there that is written or being written. A failed guide
+   * holds nothing to keep, so a start moves on to the new head instead of offering a retry at the old.
+   */
+  async #keepsGuide(previous: ReviewRecord, own: ReviewWorkspace | null): Promise<boolean> {
+    if (own !== null && own.id !== previous.workspace.id) return false;
+    if (!(await this.#workspaces.isActive(previous.workspace.id))) return false;
+    if (this.#generations.has(generationKey(previous))) return true;
+    const stored = await this.#store.getGuide(previous.id, previous.header.headSha);
+    return stored !== null && stored.workspaceId === previous.workspace.id && stored.status !== "failed";
   }
 
   /**
@@ -517,7 +599,10 @@ export class ReviewService {
       const parsed = parseGuide(await this.#guideAgents.reply(generation.agentId), changeRequest.files);
       if (!parsed.ok) return save({ status: "failed", guide: null, message: parsed.message });
       const changed = changeRequest.files.map((file) => file.path);
-      await save({ status: "ready", guide: layOutGuide(parsed.guide, changed, files.setAside), message: null });
+      const guide = layOutGuide(parsed.guide, changed, files.setAside);
+      // Before the guide reads as ready, so its first progress read already has what carried over.
+      await this.#carryMarksOver(record, generation.agentId, guide, changeRequest.files);
+      await save({ status: "ready", guide, message: null });
     };
 
     this.#generations.set(key, generation);
@@ -531,6 +616,39 @@ export class ReviewService {
     return { status: "generating", agentId };
   }
 
+  /**
+   * Keeps, as the marks of the guide `agentId` just wrote at the review's head, the marks of the
+   * guide at the head before it that hold for code that did not change: see `carryMarks`. Marks at
+   * the old head made in another guide than the one kept there count for nothing, as they do there.
+   */
+  async #carryMarksOver(record: ReviewRecord, agentId: string, guide: LayeredGuide, files: ChangedFile[]): Promise<void> {
+    const from = record.previousHeadSha;
+    if (from === undefined) return;
+    const [before, marks, snapshot, current] = await Promise.all([
+      this.#store.getGuide(record.id, from),
+      this.#store.getProgress(record.id, from),
+      this.#store.snapshot(record.id, from),
+      this.#store.getProgress(record.id, record.header.headSha),
+    ]);
+    // A generation picked up again after a restart may have carried them over already.
+    if (current?.agentId === agentId) return;
+    if (before === null || !isReady(before) || snapshot === null) return;
+    const carried = carryMarks({ guide: before.guide, files: snapshot.files, marks: marksOf(before, marks) }, { guide, files });
+    if (carried.nodes.length === 0 && carried.files.length === 0) return;
+    await this.#store.saveProgress(record.id, {
+      headSha: record.header.headSha,
+      agentId,
+      ...carried,
+      updatedAt: this.#now().toISOString(),
+    });
+  }
+
+  /** Archives the agent of the review's guide at `headSha`, if that guide lived in `workspaceId`. */
+  async #endGuideAt(reviewId: string, headSha: string, workspaceId: string): Promise<void> {
+    const guide = await this.#store.getGuide(reviewId, headSha);
+    if (guide !== null && guide.workspaceId === workspaceId && guide.agentId !== null) await this.#guideAgents.archive(guide.agentId);
+  }
+
   /** Archives the guide agents that lived in `workspaceId`; the workspace ending ends its guides. */
   async #endGuides(reviewId: string, workspaceId: string): Promise<void> {
     for (const guide of await this.#store.guides(reviewId)) {
@@ -542,9 +660,18 @@ export class ReviewService {
    * The workspace the review is read in. The reviewer's own workspace on the change request's branch
    * (`own`, or the one the review was attached to before) when its branch is at the head or can be
    * fast-forwarded to it; otherwise the PR workspace the review already has, or a new one, with the
-   * reason the branch was left alone kept in `job.note`.
+   * reason the branch was left alone kept in `job.note`. When the head has moved, a PR workspace is
+   * brought to it the same way, so the guide agent reads the code the guide is for; one that cannot
+   * be is left as it is for a new one.
    */
-  async #workspaceFor(id: string, forge: Forge, changeRequest: ChangeRequest, job: Job, own: ReviewWorkspace | null): Promise<ReviewWorkspace> {
+  async #workspaceFor(
+    id: string,
+    forge: Forge,
+    changeRequest: ChangeRequest,
+    job: Job,
+    own: ReviewWorkspace | null,
+    headMoved: boolean,
+  ): Promise<ReviewWorkspace> {
     const previous = await this.#reusableWorkspace(id);
     const local = own ?? (previous?.branch === undefined ? null : previous);
     if (local?.branch !== undefined) {
@@ -558,7 +685,26 @@ export class ReviewService {
       if (outcome?.status === "failed") this.#log(`Fast-forwarding ${local.directory} failed: ${outcome.message}`);
     }
     const reusable = previous?.branch === undefined ? previous : null;
-    return reusable ?? (await this.#createWorkspace(forge, changeRequest, job));
+    if (reusable !== null && (!headMoved || (await this.#bringToHead(reusable, changeRequest, job)))) return reusable;
+    return this.#createWorkspace(forge, changeRequest, job);
+  }
+
+  /**
+   * Fast-forwards a PR workspace's branch to the change request's new head, through the same clean
+   * fast-forward as the reviewer's own branch. False, with the reason in `job.note`, when it cannot be:
+   * a force-push leaves it diverged, and anything written in it leaves it dirty.
+   */
+  async #bringToHead(workspace: ReviewWorkspace, changeRequest: ChangeRequest, job: Job): Promise<boolean> {
+    job.progress = { ...job.progress, phase: "updating-branch" };
+    const checkout = await this.#workspaces.inspect(workspace.id);
+    const outcome =
+      checkout?.branch == null
+        ? null
+        : await this.#workspaces.fastForward({ workspace, branch: checkout.branch, ref: changeRequest.ref, headSha: changeRequest.headSha });
+    if (outcome?.status === "current" || outcome?.status === "fast-forwarded") return true;
+    job.note = prWorkspaceLeftAlone(changeRequest, outcome);
+    if (outcome?.status === "failed") this.#log(`Fast-forwarding ${workspace.directory} failed: ${outcome.message}`);
+    return false;
   }
 
   /** The workspace this review already has, while it is open: a second one would be a second worktree. */
@@ -627,6 +773,29 @@ function leftAlone(branch: string, changeRequest: ChangeRequest, outcome: FastFo
     case "current":
     case "fast-forwarded":
       throw new Error(`A ${outcome.status} branch is not left alone.`);
+  }
+}
+
+/**
+ * Why the review's PR workspace was not brought to the new head, in the one line the panel shows.
+ * `outcome` is null when the workspace is on no branch at all.
+ */
+function prWorkspaceLeftAlone(changeRequest: ChangeRequest, outcome: FastForwardResult | null): string {
+  const label = numberLabel(changeRequest.ref.forge, changeRequest.ref.number);
+  const instead = "so it was left untouched and the guide is in a new PR workspace.";
+  switch (outcome?.status) {
+    case undefined:
+    case "moved":
+      return `The previous PR workspace is no longer on the branch it was made with, ${instead}`;
+    case "dirty":
+      return `The previous PR workspace has uncommitted changes, ${instead}`;
+    case "diverged":
+      return `The previous PR workspace has commits that are not in ${label} any more, ${instead}`;
+    case "failed":
+      return `The previous PR workspace could not be fast-forwarded to ${label} (${outcome.message}), ${instead}`;
+    case "current":
+    case "fast-forwarded":
+      throw new Error(`A ${outcome.status} workspace is not left alone.`);
   }
 }
 

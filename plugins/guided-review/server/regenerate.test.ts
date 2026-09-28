@@ -1,0 +1,308 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test, { type TestContext } from "node:test";
+import type { GuideSubject, StartProgress } from "../shared/contracts.ts";
+import type { Guide } from "../shared/guide.ts";
+import { fakeForge, sampleChangeRequest, type FakeForge } from "./fake-forge.ts";
+import { fakeGuideAgents, sampleGuide, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
+import { fakeWorkspaces, type FakeWorkspaces } from "./fake-workspaces.ts";
+import { ForgeError, type ChangedFile, type ChangeRequest } from "./forge/port.ts";
+import { GUIDE_HEAD_LABEL } from "./guide-agent/port.ts";
+import { ReviewService } from "./review-service.ts";
+
+/**
+ * "PR updated since this guide": noticing a push, regenerating the guide for the new head from the
+ * panel, and the reviewer's marks carried over to what did not change. Driven through the RPCs.
+ */
+
+const URL = "https://github.com/acme/uploader/pull/7";
+const REVIEW_ID = "github/github.com/acme/uploader/7";
+const OLD = "b".repeat(40);
+const NEW = "d".repeat(40);
+const PR_WORKSPACE = "wks_0000000000000001";
+
+const RETRY_TEST: ChangedFile = { path: "src/retry.test.ts", previousPath: null, status: "added", additions: 1, deletions: 0, patch: "@@ -0,0 +1,1 @@\n+t" };
+const RETRY_DOC: ChangedFile = { path: "docs/retry.md", previousPath: null, status: "added", additions: 1, deletions: 0, patch: "@@ -0,0 +1,1 @@\n+d" };
+
+/** The PR at its first head: `sampleChangeRequest`'s two files, a test in Supporting and a doc in Unsorted. */
+function atOldHead(): ChangeRequest {
+  const changeRequest = sampleChangeRequest(URL);
+  return { ...changeRequest, files: [...changeRequest.files, RETRY_TEST, RETRY_DOC] };
+}
+
+/**
+ * The PR after a push: a hunk added above the uploader's, which renumbers it without changing it, a
+ * new retry policy, the test as it was and the doc rewritten.
+ */
+function atNewHead(): ChangeRequest {
+  return sampleChangeRequest(URL, {
+    headSha: NEW,
+    files: [
+      { path: "src/upload.ts", previousPath: null, status: "modified", additions: 3, deletions: 1, patch: "@@ -0,0 +1,2 @@\n+log\n+log\n@@ -1,1 +3,1 @@\n-a\n+b" },
+      { path: "src/retry.ts", previousPath: null, status: "added", additions: 1, deletions: 0, patch: "@@ -0,0 +1,1 @@\n+c2" },
+      RETRY_TEST,
+      { ...RETRY_DOC, patch: "@@ -0,0 +1,1 @@\n+d2" },
+    ],
+  });
+}
+
+const OLD_GUIDE: Guide = { ...sampleGuide(), supporting: [{ path: RETRY_TEST.path, category: "test" }] };
+
+/** The guide at the new head, with IDs of its own: the uploader's old hunk is now hunk 2, and a node of its own covers the new one. */
+function newGuide(): Guide {
+  const [policy, uploader] = sampleGuide().nodes as [Guide["nodes"][number], Guide["nodes"][number]];
+  return {
+    ...OLD_GUIDE,
+    overview: { ...OLD_GUIDE.overview, attention: [{ nodeId: "policy", reason: "Every retry decision is made here." }] },
+    nodes: [
+      { ...policy, id: "policy" },
+      { ...uploader, id: "upload-loop", covers: [{ path: "src/upload.ts", hunks: [2], lines: [] }], dependencies: [{ nodeId: "policy", reason: "It asks the policy." }] },
+      { ...uploader, id: "logging", title: "Logging", covers: [{ path: "src/upload.ts", hunks: [1], lines: [] }], dependencies: [] },
+    ],
+  };
+}
+
+type Host = {
+  data: string;
+  forge: FakeForge;
+  workspaces: FakeWorkspaces;
+  agents: FakeGuideAgents;
+  service: ReviewService;
+  restart(): ReviewService;
+};
+
+async function withGuide(t: TestContext): Promise<Host> {
+  const data = await mkdtemp(path.join(os.tmpdir(), "guided-review-regenerate-"));
+  t.after(() => rm(data, { recursive: true, force: true }));
+  const forge = fakeForge();
+  forge.changeRequests.set(URL, atOldHead());
+  const workspaces = fakeWorkspaces();
+  workspaces.repositories.set("github.com/acme/uploader", "/home/r/src/uploader");
+  const agents = fakeGuideAgents();
+  agents.answer = (agent) => sampleGuideReply(agent.labels[GUIDE_HEAD_LABEL] === NEW ? newGuide() : OLD_GUIDE);
+  const create = () => new ReviewService({ forges: [forge], workspaces, guideAgents: agents, dataDirectory: data });
+  const service = create();
+  await service.start({ url: URL });
+  await service.settled();
+  return { data, forge, workspaces, agents, service, restart: create };
+}
+
+/** Regenerates the guide the way the panel does, and follows the job to its end. */
+async function regenerate(service: ReviewService): Promise<StartProgress> {
+  const started = await service.regenerate({ reviewId: REVIEW_ID });
+  assert.equal(started.status, "started");
+  await service.settled();
+  return service.progress({ reviewId: REVIEW_ID });
+}
+
+function mark(service: ReviewService, subject: GuideSubject, headSha = OLD) {
+  return service.setUnderstood({ reviewId: REVIEW_ID, headSha, subject, understood: true });
+}
+
+test("a guide at the forge's head has not moved", async (t) => {
+  const { service } = await withGuide(t);
+
+  assert.deepEqual(await service.checkHead({ reviewId: REVIEW_ID }), {
+    guideHeadSha: OLD,
+    forgeHeadSha: OLD,
+    moved: false,
+    state: "open",
+    message: null,
+  });
+});
+
+test("a push shows as moved, and nothing is regenerated or moved until Regenerate", async (t) => {
+  const { service, forge, workspaces, agents } = await withGuide(t);
+  forge.changeRequests.set(URL, { ...atNewHead(), state: "closed" });
+
+  assert.deepEqual(await service.checkHead({ reviewId: REVIEW_ID }), {
+    guideHeadSha: OLD,
+    forgeHeadSha: NEW,
+    moved: true,
+    state: "closed",
+    message: null,
+  });
+  // Checked on open and again while open: the panel still shows the guide it had.
+  await service.checkHead({ reviewId: REVIEW_ID });
+  await service.settled();
+  const panel = await service.panel({ workspaceId: PR_WORKSPACE });
+  assert.equal(panel.status === "ready" && panel.header.headSha, OLD);
+  assert.equal(panel.status === "ready" && panel.guide.status, "ready");
+  assert.equal(agents.created.length, 1);
+  assert.deepEqual(workspaces.fastForwards, []);
+  assert.equal(forge.headReads, 2, "only the head is read, not the whole PR");
+});
+
+test("a forge that cannot be asked is reported and reads as not moved", async (t) => {
+  const { service, forge } = await withGuide(t);
+  forge.failFetchHead = new ForgeError("gh failed: HTTP 502");
+
+  assert.deepEqual(await service.checkHead({ reviewId: REVIEW_ID }), {
+    guideHeadSha: OLD,
+    forgeHeadSha: null,
+    moved: false,
+    state: null,
+    message: `Could not check ${URL} for new commits: gh failed: HTTP 502`,
+  });
+  await assert.rejects(service.checkHead({ reviewId: "github/github.com/acme/uploader/8" }), {
+    message: "This review is not known here any more. Start it again.",
+  });
+});
+
+test("Regenerate brings the PR workspace to the new head and switches the panel to a guide keyed by it", async (t) => {
+  const { service, forge, workspaces, agents, data } = await withGuide(t);
+  forge.changeRequests.set(URL, atNewHead());
+
+  const progress = await regenerate(service);
+
+  assert.deepEqual(
+    { phase: progress.phase, workspaceId: progress.workspaceId, headSha: progress.header?.headSha },
+    { phase: "ready", workspaceId: PR_WORKSPACE, headSha: NEW },
+  );
+  assert.deepEqual(workspaces.fastForwards, [{ workspaceId: PR_WORKSPACE, branch: "pr-7", ref: atNewHead().ref, headSha: NEW }]);
+  assert.equal(workspaces.created.length, 1, "the same PR workspace");
+  assert.deepEqual(
+    agents.created.map((agent) => agent.labels[GUIDE_HEAD_LABEL]),
+    [OLD, NEW],
+  );
+  assert.deepEqual(agents.archived, ["agent-1"], "the guide it replaced ends with it");
+
+  const panel = await service.panel({ workspaceId: PR_WORKSPACE });
+  assert.equal(panel.status === "ready" && panel.header.headSha, NEW);
+  assert.deepEqual(
+    panel.status === "ready" && panel.guide.status === "ready" && panel.guide.guide.nodes.map((node) => node.id),
+    ["policy", "upload-loop", "logging"],
+  );
+  assert.equal((await service.checkHead({ reviewId: REVIEW_ID })).moved, false);
+
+  const guides = path.join(data, "reviews", ...REVIEW_ID.split("/"), "guides");
+  assert.equal(JSON.parse(await readFile(path.join(guides, `${NEW}.json`), "utf8")).status, "ready");
+  assert.equal(JSON.parse(await readFile(path.join(guides, `${OLD}.json`), "utf8")).agentId, "agent-1", "the old guide stays on disk");
+});
+
+test("Regenerate fast-forwards the reviewer's own branch the guide is attached to", async (t) => {
+  const data = await mkdtemp(path.join(os.tmpdir(), "guided-review-regenerate-"));
+  t.after(() => rm(data, { recursive: true, force: true }));
+  const forge = fakeForge();
+  forge.changeRequests.set(URL, atOldHead());
+  forge.branches.set("github.com/acme/uploader#retry-uploads", [{ ref: atOldHead().ref, title: "Retry failed uploads", author: "author", headSha: OLD }]);
+  const workspaces = fakeWorkspaces();
+  const checkout = { directory: "/home/r/src/uploader", branch: "retry-uploads", repository: { host: "github.com", project: "acme/uploader" } };
+  workspaces.openCheckout("wks_local", { ...checkout, outcome: { status: "current" } });
+  const agents = fakeGuideAgents();
+  agents.answer = (agent) => sampleGuideReply(agent.labels[GUIDE_HEAD_LABEL] === NEW ? newGuide() : OLD_GUIDE);
+  const service = new ReviewService({ forges: [forge], workspaces, guideAgents: agents, dataDirectory: data });
+  await service.startBranch({ workspaceId: "wks_local", url: null });
+  await service.settled();
+
+  forge.changeRequests.set(URL, atNewHead());
+  workspaces.openCheckout("wks_local", { ...checkout, outcome: { status: "fast-forwarded", from: OLD } });
+  const progress = await regenerate(service);
+
+  assert.equal(progress.workspaceId, "wks_local");
+  assert.deepEqual(workspaces.fastForwards.map((entry) => [entry.workspaceId, entry.branch, entry.headSha]), [
+    ["wks_local", "retry-uploads", OLD],
+    ["wks_local", "retry-uploads", NEW],
+  ]);
+  assert.deepEqual(workspaces.created, []);
+  const panel = await service.panel({ workspaceId: "wks_local" });
+  assert.equal(panel.status === "ready" && panel.header.headSha, NEW);
+  assert.equal(panel.status === "ready" && panel.guide.status, "ready");
+});
+
+test("a force-push the PR workspace cannot fast-forward to moves the guide to a new PR workspace, and says why", async (t) => {
+  const { service, forge, workspaces, agents } = await withGuide(t);
+  forge.changeRequests.set(URL, atNewHead());
+  workspaces.checkouts.get(PR_WORKSPACE)!.outcome = { status: "diverged" };
+
+  const progress = await regenerate(service);
+
+  assert.equal(progress.workspaceId, "wks_0000000000000002");
+  assert.equal(workspaces.created.length, 2);
+  assert.deepEqual(await service.panel({ workspaceId: PR_WORKSPACE }), { status: "none" });
+  const moved = await service.panel({ workspaceId: "wks_0000000000000002" });
+  assert.equal(
+    moved.status === "ready" && moved.note,
+    "The previous PR workspace has commits that are not in #7 any more, so it was left untouched and the guide is in a new PR workspace.",
+  );
+  assert.equal(moved.status === "ready" && moved.header.headSha, NEW);
+  assert.deepEqual(agents.archived, ["agent-1"]);
+});
+
+test("Regenerate with the head where the guide is changes nothing", async (t) => {
+  const { service, workspaces, agents } = await withGuide(t);
+
+  const progress = await regenerate(service);
+
+  assert.deepEqual({ phase: progress.phase, workspaceId: progress.workspaceId }, { phase: "ready", workspaceId: PR_WORKSPACE });
+  assert.equal(agents.created.length, 1);
+  assert.deepEqual(agents.archived, []);
+  assert.deepEqual(workspaces.fastForwards, []);
+  assert.deepEqual(await service.regenerate({ reviewId: "github/github.com/acme/uploader/8" }), {
+    status: "rejected",
+    message: "This review is not known here any more. Start it again.",
+  });
+});
+
+test("marks carry over to nodes covering the same code, however renumbered or renamed, and to unchanged entries", async (t) => {
+  const { service, forge, restart } = await withGuide(t);
+  await mark(service, { kind: "node", nodeId: "retry-policy" });
+  await mark(service, { kind: "node", nodeId: "uploader" });
+  await mark(service, { kind: "file", path: RETRY_TEST.path });
+  await mark(service, { kind: "file", path: RETRY_DOC.path });
+
+  forge.changeRequests.set(URL, atNewHead());
+  await regenerate(service);
+
+  const carried = {
+    headSha: NEW,
+    // The uploader's hunk is hunk 2 now and its node is called something else; the policy changed.
+    understood: { nodes: ["upload-loop"], files: [RETRY_TEST.path] },
+    layers: [
+      { understood: 0, total: 2 },
+      { understood: 1, total: 1 },
+    ],
+    supporting: { understood: 1, total: 1 },
+    unsorted: { understood: 0, total: 1 },
+    overall: { understood: 2, total: 5 },
+    nextLayer: 0,
+  };
+  assert.deepEqual(await service.guideProgress({ reviewId: REVIEW_ID }), carried);
+  assert.deepEqual(await restart().guideProgress({ reviewId: REVIEW_ID }), carried, "the carried marks are on disk");
+
+  // Marks at the new head are the new guide's own from here on.
+  const after = await mark(service, { kind: "node", nodeId: "logging" }, NEW);
+  assert.deepEqual(after.understood, { nodes: ["upload-loop", "logging"], files: [RETRY_TEST.path] });
+});
+
+test("only marks made in the guide kept at the old head carry over", async (t) => {
+  const { service, forge } = await withGuide(t);
+  await mark(service, { kind: "node", nodeId: "uploader" });
+  // "Try again" at the same head: a guide of its own, in which nothing was marked.
+  await service.generateGuide({ reviewId: REVIEW_ID });
+  await service.settled();
+
+  forge.changeRequests.set(URL, atNewHead());
+  await regenerate(service);
+
+  assert.deepEqual((await service.guideProgress({ reviewId: REVIEW_ID }))?.understood, { nodes: [], files: [] });
+});
+
+test("a regenerated guide that failed carries the marks over once Try again writes it", async (t) => {
+  const { service, forge, agents } = await withGuide(t);
+  await mark(service, { kind: "node", nodeId: "uploader" });
+
+  forge.changeRequests.set(URL, atNewHead());
+  agents.answer = () => "I could not read the change.";
+  await regenerate(service);
+  const panel = await service.panel({ workspaceId: PR_WORKSPACE });
+  assert.equal(panel.status === "ready" && panel.guide.status, "failed");
+
+  agents.answer = () => sampleGuideReply(newGuide());
+  await service.generateGuide({ reviewId: REVIEW_ID });
+  await service.settled();
+
+  assert.deepEqual((await service.guideProgress({ reviewId: REVIEW_ID }))?.understood, { nodes: ["upload-loop"], files: [] });
+});
