@@ -1,5 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
+import { FileDiffSchema } from "./diff.ts";
 import { GuideStateSchema } from "./guide.ts";
 
 /** What the panel shows about a change request before any guide exists. */
@@ -76,7 +77,22 @@ export const generateGuide = defineRpc({
   output: GuideStateSchema,
 });
 
+/** The code a guide node covers, ready to draw: its files in reading order, each cut down to the node's hunks. */
+export const NodeDiffSchema = z.object({
+  /** The head the guide, and so these hunks, were read at. */
+  headSha: z.string(),
+  files: z.array(FileDiffSchema),
+});
+
+/** The hunks of one node of the review's current guide; fails while the guide is not ready. */
+export const getNodeDiff = defineRpc({
+  name: "guided-review.guide.node-diff",
+  input: z.object({ reviewId: z.string(), nodeId: z.string() }),
+  output: NodeDiffSchema,
+});
+
 export type ReviewHeader = z.output<typeof ReviewHeaderSchema>;
+export type NodeDiff = z.output<typeof NodeDiffSchema>;
 export type StartResult = z.output<typeof StartResultSchema>;
 export type StartPhase = (typeof START_PHASES)[number];
 export type StartProgress = z.output<typeof StartProgressSchema>;

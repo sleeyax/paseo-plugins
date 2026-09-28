@@ -147,10 +147,21 @@ export function resolveCode(changed: readonly ChangedFile[], covers: readonly Co
       if (whole.has(hunk.index)) return [hunk];
       const chosen = lines.get(hunk.index);
       if (chosen === undefined) return [];
-      return chosen.size === hunk.lines.length ? [hunk] : [slice(hunk, [...chosen].sort((a, b) => a - b))];
+      return chosen.size === hunk.lines.length ? [hunk] : runs([...chosen].sort((a, b) => a - b)).map((run) => slice(hunk, run));
     }),
   }));
   return { files, errors };
+}
+
+/** Sorted line indices in unbroken runs, so lines a node skips show as a gap between two parts of a hunk. */
+function runs(indices: readonly number[]): number[][] {
+  const result: number[][] = [];
+  for (const index of indices) {
+    const last = result.at(-1);
+    if (last !== undefined && last.at(-1) === index - 1) last.push(index);
+    else result.push([index]);
+  }
+  return result;
 }
 
 /** Part of a hunk, with a header that describes the lines it keeps the way git would write it. */
