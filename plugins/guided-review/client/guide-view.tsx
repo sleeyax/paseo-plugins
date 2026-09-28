@@ -84,7 +84,7 @@ function Tree({ guide, colors, ask }: { guide: LayeredGuide; colors: Colors; ask
           <Heading colors={colors}>Supporting</Heading>
           <Card colors={colors} light>
             {guide.supporting.map((entry) => (
-              <FileLine key={entry.path} colors={colors} path={entry.path} note={entry.category} />
+              <FileEntry key={entry.path} colors={colors} path={entry.path} note={entry.category} ask={ask} />
             ))}
           </Card>
         </>
@@ -97,7 +97,7 @@ function Tree({ guide, colors, ask }: { guide: LayeredGuide; colors: Colors; ask
               The guide agent placed these changed files nowhere, so no concept explains them.
             </Body>
             {guide.unsorted.map((file) => (
-              <FileLine key={file} colors={colors} path={file} />
+              <FileEntry key={file} colors={colors} path={file} ask={ask} />
             ))}
           </Card>
         </>
@@ -192,6 +192,16 @@ function NodeCard({
       ) : null}
       <AskAction subject={{ kind: "node", nodeId: node.id }} ask={ask} colors={colors} />
     </Card>
+  );
+}
+
+/** A Supporting or Unsorted file, which the reviewer can ask about on its own. */
+function FileEntry({ colors, path, note, ask }: { colors: Colors; path: string; note?: string; ask: AskControl }) {
+  return (
+    <View style={{ gap: spacing[1] }}>
+      <FileLine colors={colors} path={path} note={note} />
+      <AskAction subject={{ kind: "file", path }} ask={ask} colors={colors} />
+    </View>
   );
 }
 

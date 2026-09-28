@@ -1,7 +1,7 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { AskResult, AskSubject, PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
-import { GuideSchema, type Guide, type GuideState } from "../shared/guide.ts";
+import { GuideSchema, type GuideState, type LayeredGuide } from "../shared/guide.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { askPrompt, type AskSubjectContext } from "./ask-prompt.ts";
 import { ForgeError, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
@@ -161,7 +161,7 @@ export class ReviewService {
   }
 
   /** What the prompt says about `subject`, from the stored guide and snapshot, or why it cannot be asked about. */
-  async #askContext(record: ReviewRecord, guide: Guide, subject: AskSubject): Promise<AskSubjectContext | string> {
+  async #askContext(record: ReviewRecord, guide: LayeredGuide, subject: AskSubject): Promise<AskSubjectContext | string> {
     if (subject.kind === "node") {
       const node = guide.nodes.find((candidate) => candidate.id === subject.nodeId);
       if (node === undefined) return "That concept is not in the guide any more.";
@@ -171,8 +171,13 @@ export class ReviewService {
     const changeRequest = await this.#store.snapshot(record.id, record.header.headSha);
     const file = changeRequest?.files.find((candidate) => candidate.path === subject.path);
     if (file === undefined) return `${subject.path} is not one of the change's files.`;
-    // #92's Supporting group gives the file its category; a file it does not hold is Unsorted.
-    return { kind: "file", file, category: null };
+    const supporting = guide.supporting.find((entry) => entry.path === file.path);
+    if (supporting !== undefined) return { kind: "file", file, category: supporting.category };
+    if (guide.unsorted.includes(file.path)) return { kind: "file", file, category: null };
+    const node = guide.nodes.find((candidate) => candidate.files.includes(file.path));
+    return node === undefined
+      ? `${file.path} is not in the guide any more.`
+      : `${file.path} belongs to the concept "${node.title}". Ask about that concept instead.`;
   }
 
   /** For the `workspace.archived` hook: a review's workspace ending ends its guide agents. */
