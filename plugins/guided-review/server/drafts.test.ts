@@ -117,6 +117,7 @@ test("a comment on an added, a removed or an unchanged line reaches the forge wi
     id: "draft-1",
     body: "Is logging every upload too much?",
     location: { kind: "line", path: "src/upload.ts", line: { side: "new", line: 13 } },
+    nodeId: null,
   });
 });
 
@@ -246,13 +247,13 @@ test("the panel lists the forge's drafts, including ones started on the web, and
   forge.drafts.set(URL, [fromTheWeb]);
 
   const created = await service.createDraft({ reviewId: REVIEW_ID, headSha: HEAD, location: { kind: "file", path: "src/upload.ts" }, body: "Why?" });
-  assert.deepEqual(await service.listDrafts({ reviewId: REVIEW_ID }), { drafts: [fromTheWeb, created] });
+  assert.deepEqual(await service.listDrafts({ reviewId: REVIEW_ID }), { drafts: [{ ...fromTheWeb, nodeId: null }, created] });
 
   assert.equal(await service.updateDraft({ reviewId: REVIEW_ID, draftId: "PRRC_web", body: " Edited in the panel. " }), null);
   assert.equal(await service.deleteDraft({ reviewId: REVIEW_ID, draftId: created.id }), null);
 
   assert.deepEqual(await service.listDrafts({ reviewId: REVIEW_ID }), {
-    drafts: [{ ...fromTheWeb, body: "Edited in the panel." }],
+    drafts: [{ ...fromTheWeb, body: "Edited in the panel.", nodeId: null }],
   });
   await assert.rejects(
     service.updateDraft({ reviewId: REVIEW_ID, draftId: "PRRC_web", body: "" }),

@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { createContext, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
-import { describeLocation, type Draft, type DraftList, type DraftLocation } from "../shared/drafts.ts";
+import { describeLocation, pathOf, type DraftList, type DraftLocation, type LinkedDraft } from "../shared/drafts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import type { CommentSubject } from "../shared/contracts.ts";
 import { BoxButton, CommentBox, type CommentBoxAction } from "./comment-box.tsx";
@@ -24,7 +24,7 @@ export type OpenBox = { kind: "new"; place: string; location: DraftLocation } | 
  * Only one comment box is open at a time.
  */
 export type DraftsControl = {
-  drafts: readonly Draft[];
+  drafts: readonly LinkedDraft[];
   loading: boolean;
   /** Why the drafts could not be read, as a sentence. */
   error: string | null;
@@ -69,7 +69,7 @@ export function useDrafts(reviewId: string | null, headSha: string | null): Draf
   const setOpen = (box: OpenBox | null) => setOpened(box === null ? null : { headSha, box });
 
   // Writes land in the cache as the forge answered them, rather than waiting on a fresh listing.
-  const change = (update: (drafts: Draft[]) => Draft[]) =>
+  const change = (update: (drafts: LinkedDraft[]) => LinkedDraft[]) =>
     queryClient.setQueryData<DraftList>(queryKey, (current) => ({ drafts: update(current?.drafts ?? []) }));
 
   return {
@@ -142,7 +142,7 @@ export function DraftCard({
   showPath,
 }: {
   control: DraftsControl;
-  draft: Draft;
+  draft: LinkedDraft;
   /** Where this card is drawn, so its edit box opens here and not wherever else the draft shows. */
   place: string;
   colors: Colors;
@@ -152,7 +152,8 @@ export function DraftCard({
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const where = showPath ? `${draft.location.path} · ${describeLocation(draft.location)}` : `Your draft on ${describeLocation(draft.location)}`;
+  const path = pathOf(draft.location);
+  const where = showPath && path !== null ? `${path} · ${describeLocation(draft.location)}` : `Your draft on ${describeLocation(draft.location)}`;
   const small = { fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) };
   const open = control.open;
 

@@ -1,7 +1,7 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { FileDiffSchema } from "./diff.ts";
-import { DraftListSchema, DraftLocationSchema, DraftSchema } from "./drafts.ts";
+import { DraftListSchema, DraftLocationSchema, LinkedDraftSchema } from "./drafts.ts";
 import { GuideStateSchema } from "./guide.ts";
 import { GuideProgressSchema } from "./progress.ts";
 import { SubmitResultSchema, VerdictOptionSchema, VerdictSchema } from "./submit.ts";
@@ -202,8 +202,18 @@ export const listDrafts = defineRpc({
  */
 export const createDraft = defineRpc({
   name: "guided-review.drafts.create",
-  input: z.object({ reviewId: z.string(), headSha: z.string(), location: DraftLocationSchema, body: z.string() }),
-  output: DraftSchema,
+  input: z.object({
+    reviewId: z.string(),
+    headSha: z.string(),
+    location: DraftLocationSchema,
+    body: z.string(),
+    /**
+     * The node of the guide at `headSha` the comment was written from: a node's own comment, or one
+     * on code drawn in a node. Kept here, keyed by the draft's ID, and never posted.
+     */
+    nodeId: z.string().nullable().optional(),
+  }),
+  output: LinkedDraftSchema,
 });
 
 export const updateDraft = defineRpc({
