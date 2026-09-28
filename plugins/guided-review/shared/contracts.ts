@@ -1,6 +1,7 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { FileDiffSchema } from "./diff.ts";
+import { DraftListSchema, DraftLocationSchema, DraftSchema } from "./drafts.ts";
 import { GuideStateSchema } from "./guide.ts";
 
 /** What the panel shows about a change request before any guide exists. */
@@ -119,6 +120,38 @@ export const getNodeDiff = defineRpc({
   name: "guided-review.guide.node-diff",
   input: z.object({ reviewId: z.string(), subject: GuideSubjectSchema }),
   output: NodeDiffSchema,
+});
+
+/**
+ * The reviewer's drafts on the change request, as the forge has them, including ones started in
+ * its web UI. Drafts live only on the forge, so this is read afresh every time.
+ */
+export const listDrafts = defineRpc({
+  name: "guided-review.drafts.list",
+  input: z.object({ reviewId: z.string() }),
+  output: DraftListSchema,
+});
+
+/**
+ * Saves a comment as a forge draft at once, unpublished until the review is submitted. The location
+ * names lines of the diff the panel drew, which the server looks up at the same head.
+ */
+export const createDraft = defineRpc({
+  name: "guided-review.drafts.create",
+  input: z.object({ reviewId: z.string(), location: DraftLocationSchema, body: z.string() }),
+  output: DraftSchema,
+});
+
+export const updateDraft = defineRpc({
+  name: "guided-review.drafts.update",
+  input: z.object({ reviewId: z.string(), draftId: z.string(), body: z.string() }),
+  output: z.null(),
+});
+
+export const deleteDraft = defineRpc({
+  name: "guided-review.drafts.delete",
+  input: z.object({ reviewId: z.string(), draftId: z.string() }),
+  output: z.null(),
 });
 
 export type ReviewHeader = z.output<typeof ReviewHeaderSchema>;
