@@ -205,10 +205,10 @@ export class ReviewService {
       });
 
     const run = async () => {
+      if (generation.agentId === null) await save({ status: "generating", guide: null, message: null });
+      const changeRequest = await this.#store.snapshot(record.id, headSha);
+      if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
       if (generation.agentId === null) {
-        await save({ status: "generating", guide: null, message: null });
-        const changeRequest = await this.#store.snapshot(record.id, headSha);
-        if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
         const schema = jsonSchemaOf(GuideSchema);
         const agent = await this.#guideAgents.create({
           workspace: record.workspace,
@@ -220,7 +220,7 @@ export class ReviewService {
         generation.agentId = agent.id;
         await save({ status: "generating", guide: null, message: null });
       }
-      const parsed = parseGuide(await this.#guideAgents.reply(generation.agentId));
+      const parsed = parseGuide(await this.#guideAgents.reply(generation.agentId), changeRequest.files);
       if (parsed.ok) await save({ status: "ready", guide: parsed.guide, message: null });
       else await save({ status: "failed", guide: null, message: parsed.message });
     };

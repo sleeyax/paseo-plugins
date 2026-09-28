@@ -57,6 +57,10 @@ export const GuideNodeSchema = z.object({
   title: z.string().min(1).describe("The concept's name, a few words."),
   summary: z.string().min(1).describe("What the concept does, in one line."),
   explanation: z.string().min(1).describe("How it works: a short paragraph or two a reviewer reads before its code."),
+  covers: z
+    .array(CoveredCodeSchema)
+    .min(1)
+    .describe("The code this node explains, one entry per file, in the order to read it."),
   decisions: z.array(DecisionSchema).describe("Decisions local to this concept, each with its rejected alternative."),
 });
 
