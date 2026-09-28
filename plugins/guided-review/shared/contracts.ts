@@ -1,5 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
+import { GuideStateSchema } from "./guide.ts";
 
 /** What the panel shows about a change request before any guide exists. */
 export const ReviewHeaderSchema = z.object({
@@ -43,7 +44,7 @@ export const StartProgressSchema = z.object({
 
 export const PanelViewSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("none") }),
-  z.object({ status: z.literal("ready"), reviewId: z.string(), header: ReviewHeaderSchema }),
+  z.object({ status: z.literal("ready"), reviewId: z.string(), header: ReviewHeaderSchema, guide: GuideStateSchema }),
 ]);
 
 export const startReview = defineRpc({
@@ -63,6 +64,16 @@ export const getPanel = defineRpc({
   name: "guided-review.panel.get",
   input: z.object({ workspaceId: z.string() }),
   output: PanelViewSchema,
+});
+
+/**
+ * Generates the review's guide again, with a new guide agent: the panel's retry after a failure.
+ * Returns at once; the panel follows the generation through `getPanel`.
+ */
+export const generateGuide = defineRpc({
+  name: "guided-review.guide.generate",
+  input: z.object({ reviewId: z.string() }),
+  output: GuideStateSchema,
 });
 
 export type ReviewHeader = z.output<typeof ReviewHeaderSchema>;

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fakeForge, sampleChangeRequest, type FakeForge } from "./fake-forge.ts";
+import { fakeGuideAgents, sampleGuide, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
 import { fakeWorkspaces, type FakeWorkspaces } from "./fake-workspaces.ts";
 import { ForgeError } from "./forge/port.ts";
 import { ReviewService } from "./review-service.ts";
@@ -14,6 +15,7 @@ type Host = {
   data: string;
   forge: FakeForge;
   workspaces: FakeWorkspaces;
+  guideAgents: FakeGuideAgents;
   service: ReviewService;
   /** A second service over the same data directory, as after a plugin restart. */
   restart(): ReviewService;
@@ -26,8 +28,10 @@ async function withHost(t: TestContext): Promise<Host> {
   forge.changeRequests.set(URL, sampleChangeRequest(URL));
   const workspaces = fakeWorkspaces();
   workspaces.repositories.set("github.com/acme/uploader", "/home/r/src/uploader");
-  const create = () => new ReviewService({ forges: [forge], workspaces, dataDirectory: data });
-  return { data, forge, workspaces, service: create(), restart: create };
+  const guideAgents = fakeGuideAgents();
+  guideAgents.answer = () => sampleGuideReply();
+  const create = () => new ReviewService({ forges: [forge], workspaces, guideAgents, dataDirectory: data });
+  return { data, forge, workspaces, guideAgents, service: create(), restart: create };
 }
 
 /** Starts a review and waits for its background job, the way the start surface polls it. */
@@ -71,6 +75,7 @@ test("starting from a PR URL creates a PR workspace on the local clone and shows
     status: "ready",
     reviewId: "github/github.com/acme/uploader/7",
     header: HEADER,
+    guide: { status: "ready", agentId: "agent-1", guide: sampleGuide() },
   });
 });
 
@@ -130,6 +135,7 @@ test("starting the same PR again reuses its open workspace, and a new one once t
     status: "ready",
     reviewId: "github/github.com/acme/uploader/7",
     header: HEADER,
+    guide: { status: "ready", agentId: "agent-2", guide: sampleGuide() },
   });
 });
 
@@ -153,6 +159,7 @@ test("a review survives a plugin restart, and keeps what the forge said at its h
     status: "ready",
     reviewId: "github/github.com/acme/uploader/7",
     header: HEADER,
+    guide: { status: "ready", agentId: "agent-1", guide: sampleGuide() },
   });
   assert.deepEqual(await restarted.progress({ reviewId: "github/github.com/acme/uploader/7" }), {
     phase: "ready",

@@ -19,7 +19,7 @@ test("finds the JSON in a reply whether it is bare, fenced, or wrapped in prose"
 test("a reply that fits the schema is its value, and one that does not says where", () => {
   assert.deepEqual(parseReply('{"body":"Why a retry here?"}', Body), { ok: true, value: { body: "Why a retry here?" } });
   assert.deepEqual(parseReply('{"body":""}', Body), { ok: false, errors: ["body: Too small: expected string to have >=1 characters"] });
-  assert.deepEqual(parseReply("I cannot help with that.", Body), { ok: false, errors: ["The reply holds no JSON."] });
+  assert.deepEqual(parseReply("I cannot help with that.", Body), { ok: false, errors: ["the reply holds no JSON"] });
 });
 
 test("the prompt carries the schema, with its descriptions, after what was asked", () => {
