@@ -1,0 +1,5 @@
+{
+  "id": "guided-review",
+  "description": "A trunk-first guide to a pull request, with a draft review built alongside it.",
+  "requirements": { "paseo": ">=0.9.0" }
+}
