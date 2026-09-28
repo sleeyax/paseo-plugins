@@ -21,6 +21,7 @@ import { WordingSchema } from "./wording-prompt.ts";
 
 const URL = "https://github.com/acme/uploader/pull/7";
 const REVIEW_ID = "github/github.com/acme/uploader/7";
+const HEAD = "b".repeat(40);
 
 /** Two hunks: the sample guide's "uploader" node covers the first, and no node the second. */
 const UPLOAD: ChangedFile = {
@@ -67,7 +68,7 @@ const onCode = (location: DraftLocation): CommentSubject => ({ kind: "code", loc
 
 /** Suggests wording and waits for it, as the panel does. */
 async function suggest(service: ReviewService, subject: CommentSubject, prompt: string) {
-  const started = await service.suggestWording({ reviewId: REVIEW_ID, subject, prompt });
+  const started = await service.suggestWording({ reviewId: REVIEW_ID, headSha: HEAD, subject, prompt });
   if (started.status !== "running") return started;
   await service.settled();
   return service.suggestion({ suggestionId: started.suggestionId });
@@ -85,7 +86,7 @@ test("suggested wording for a range comes back for the box, from a prompt with t
   const { service, forge, agents } = await withGuide(t);
   const location: DraftLocation = { kind: "range", path: "src/upload.ts", start: { side: "old", line: 12 }, end: { side: "new", line: 13 } };
 
-  const started = await service.suggestWording({ reviewId: REVIEW_ID, subject: onCode(location), prompt: "  why log after send??  " });
+  const started = await service.suggestWording({ reviewId: REVIEW_ID, headSha: HEAD, subject: onCode(location), prompt: "  why log after send??  " });
   assert.equal(started.status, "running");
   await service.settled();
   const suggestionId = started.status === "running" ? started.suggestionId : "";
@@ -168,16 +169,16 @@ test("a busy guide agent is not asked, and neither is one already suggesting wor
   const busy = { status: "failed", message: "The guide agent is busy with another answer. Try again once it has finished." };
 
   agents.created[0]!.status = "busy";
-  assert.deepEqual(await service.suggestWording({ reviewId: REVIEW_ID, subject, prompt: "hm" }), busy);
+  assert.deepEqual(await service.suggestWording({ reviewId: REVIEW_ID, headSha: HEAD, subject, prompt: "hm" }), busy);
   assert.deepEqual(agents.created[0]!.sent, []);
 
   agents.created[0]!.status = "idle";
   let release!: (reply: string) => void;
   const reply = new Promise<string>((resolve) => (release = resolve));
   agents.answer = () => reply;
-  const first = await service.suggestWording({ reviewId: REVIEW_ID, subject, prompt: "hm" });
+  const first = await service.suggestWording({ reviewId: REVIEW_ID, headSha: HEAD, subject, prompt: "hm" });
   assert.equal(first.status, "running");
-  assert.deepEqual(await service.suggestWording({ reviewId: REVIEW_ID, subject, prompt: "hm" }), busy);
+  assert.deepEqual(await service.suggestWording({ reviewId: REVIEW_ID, headSha: HEAD, subject, prompt: "hm" }), busy);
   assert.equal(agents.created[0]!.sent.length, 1);
   assert.deepEqual(await service.suggestion({ suggestionId: first.status === "running" ? first.suggestionId : "" }), first);
 
@@ -219,7 +220,7 @@ test("a gone agent, a guide being written, a place no comment can go and an unkn
     status: "failed",
     message: "src/other.ts is not one of the change's files.",
   });
-  assert.deepEqual(await service.suggestWording({ reviewId: "github/github.com/acme/uploader/8", subject, prompt: "x" }), {
+  assert.deepEqual(await service.suggestWording({ reviewId: "github/github.com/acme/uploader/8", headSha: HEAD, subject, prompt: "x" }), {
     status: "failed",
     message: "This review is not known here any more. Start it again.",
   });
@@ -228,7 +229,7 @@ test("a gone agent, a guide being written, a place no comment can go and an unkn
   const reply = new Promise<string>((resolve) => (release = resolve));
   agents.answer = () => reply;
   await service.generateGuide({ reviewId: REVIEW_ID });
-  assert.deepEqual(await service.suggestWording({ reviewId: REVIEW_ID, subject, prompt: "x" }), {
+  assert.deepEqual(await service.suggestWording({ reviewId: REVIEW_ID, headSha: HEAD, subject, prompt: "x" }), {
     status: "failed",
     message: "The guide agent is still writing the guide. Try again once the guide is ready.",
   });
@@ -237,7 +238,7 @@ test("a gone agent, a guide being written, a place no comment can go and an unkn
   await service.settled();
 
   await agents.archive("agent-2");
-  assert.deepEqual(await service.suggestWording({ reviewId: REVIEW_ID, subject, prompt: "x" }), {
+  assert.deepEqual(await service.suggestWording({ reviewId: REVIEW_ID, headSha: HEAD, subject, prompt: "x" }), {
     status: "failed",
     message: "The guide agent is gone: it was archived or closed, so there is no one to suggest wording.",
   });
@@ -260,7 +261,7 @@ test("a failed guide has no agent to suggest wording", async (t) => {
   await service.start({ url: URL });
   await service.settled();
 
-  assert.deepEqual(await service.suggestWording({ reviewId: REVIEW_ID, subject: onCode({ kind: "file", path: "src/retry.ts" }), prompt: "" }), {
+  assert.deepEqual(await service.suggestWording({ reviewId: REVIEW_ID, headSha: HEAD, subject: onCode({ kind: "file", path: "src/retry.ts" }), prompt: "" }), {
     status: "failed",
     message: "There is no finished guide yet, so there is no guide agent to suggest wording.",
   });

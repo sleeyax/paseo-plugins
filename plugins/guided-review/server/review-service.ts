@@ -376,11 +376,7 @@ export class ReviewService {
   async createDraft({ reviewId, headSha: drawnAt, location, body }: { reviewId: string; headSha: string; location: DraftLocation; body: string }): Promise<Draft> {
     const { record, forge } = await this.#reviewForge(reviewId);
     const text = draftText(body);
-    if (drawnAt !== record.header.headSha) {
-      throw new Error(
-        `This comment is on the guide at ${drawnAt.slice(0, 7)}, which was regenerated for ${record.header.headSha.slice(0, 7)}. Comment on the guide at the new head.`,
-      );
-    }
+    if (drawnAt !== record.header.headSha) throw new Error(regeneratedAway(drawnAt, record.header.headSha));
     const changeRequest = await this.#store.snapshot(record.id, record.header.headSha);
     if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
     const anchor = anchorAt(changeRequest.files, location);
@@ -404,12 +400,25 @@ export class ReviewService {
    * "Suggest wording": has the review's guide agent word a comment on `subject` from what the reviewer
    * typed, as a background job the panel follows through `suggestion`, since the agent may take longer
    * than an RPC may. Asks only an idle agent of a finished guide, one request at a time; otherwise says
-   * why not. The text goes back to the comment box; nothing is saved or posted.
+   * why not. The text goes back to the comment box; nothing is saved or posted. As for `createDraft`,
+   * the subject's lines are those of the guide the panel drew at `headSha`, and one from a guide
+   * Regenerate has replaced is refused rather than worded from whatever the new head numbers the same.
    */
-  async suggestWording({ reviewId, subject, prompt }: { reviewId: string; subject: CommentSubject; prompt: string }): Promise<Suggestion> {
+  async suggestWording({
+    reviewId,
+    headSha: drawnAt,
+    subject,
+    prompt,
+  }: {
+    reviewId: string;
+    headSha: string;
+    subject: CommentSubject;
+    prompt: string;
+  }): Promise<Suggestion> {
     const record = await this.#store.get(reviewId);
     if (record === null) return notSuggested("This review is not known here any more. Start it again.");
     const { headSha } = record.header;
+    if (drawnAt !== headSha) return notSuggested(regeneratedAway(drawnAt, headSha));
     if (this.#generations.has(generationKey(record))) {
       return notSuggested("The guide agent is still writing the guide. Try again once the guide is ready.");
     }
@@ -929,6 +938,11 @@ function draftText(body: string): string {
   const text = body.trim();
   if (text === "") throw new Error("Write the comment before saving it.");
   return text;
+}
+
+/** Why a comment's lines, read in the guide the panel drew at `drawnAt`, are not taken at the review's `headSha`. */
+function regeneratedAway(drawnAt: string, headSha: string): string {
+  return `This comment is on the guide at ${drawnAt.slice(0, 7)}, which was regenerated for ${headSha.slice(0, 7)}. Comment on the guide at the new head.`;
 }
 
 function notSuggested(message: string): Suggestion {

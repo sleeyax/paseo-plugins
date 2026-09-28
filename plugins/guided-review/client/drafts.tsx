@@ -93,7 +93,7 @@ export function useDrafts(reviewId: string | null, headSha: string | null): Draf
     },
     suggestWording: async (subject, typed) => {
       // The agent's turn can outlast an RPC, so the server runs it as a job this follows.
-      let suggestion = await suggestWording({ reviewId, subject, prompt: typed });
+      let suggestion = await suggestWording({ reviewId, headSha, subject, prompt: typed });
       while (suggestion.status === "running") {
         await new Promise((resolve) => setTimeout(resolve, SUGGESTION_POLL_MS));
         suggestion = await getSuggestion({ suggestionId: suggestion.suggestionId });

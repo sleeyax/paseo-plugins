@@ -277,11 +277,13 @@ export const SuggestionSchema = z.discriminatedUnion("status", [
 /**
  * Has the guide agent word a comment from where it goes and `prompt`, whatever the reviewer typed.
  * The agent can take longer than an RPC may, so this starts it and the panel follows it through
- * `getSuggestion`. Only an idle agent is asked; nothing is saved or posted.
+ * `getSuggestion`. Only an idle agent is asked; nothing is saved or posted. As for `createDraft`,
+ * `headSha` is the head of the guide the panel drew, and one the review has been regenerated away
+ * from is refused.
  */
 export const suggestWording = defineRpc({
   name: "guided-review.drafts.suggest",
-  input: z.object({ reviewId: z.string(), subject: CommentSubjectSchema, prompt: z.string() }),
+  input: z.object({ reviewId: z.string(), headSha: z.string(), subject: CommentSubjectSchema, prompt: z.string() }),
   output: SuggestionSchema,
 });
 
