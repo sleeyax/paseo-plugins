@@ -9,6 +9,19 @@ const DecisionSchema = z.object({
   rejected: z.string().min(1).describe("The alternative the author plausibly rejected, and why it lost, in one sentence."),
 });
 
+/** An edge of the node DAG: the node it sits on builds on `nodeId`, which comes earlier in `nodes`. */
+const DependencySchema = z.object({
+  nodeId: z.string().min(1).describe("The `id` of a node listed earlier in `nodes`."),
+  reason: z.string().min(1).describe("Why that node has to be understood before this one, in one sentence."),
+});
+
+export const SUPPORTING_CATEGORIES = ["test", "docs", "lockfile", "generated", "wiring"] as const;
+
+export const SupportingEntrySchema = z.object({
+  path: z.string().min(1).describe("The path of a changed file, exactly as the changed files list gives it."),
+  category: z.enum(SUPPORTING_CATEGORIES).describe("What kind of supporting change it is."),
+});
+
 export const GuideOverviewSchema = z.object({
   idea: z
     .string()
@@ -35,6 +48,12 @@ export const GuideNodeSchema = z.object({
   summary: z.string().min(1).describe("What the concept does, in one line."),
   explanation: z.string().min(1).describe("How it works: a short paragraph or two a reviewer reads before its code."),
   decisions: z.array(DecisionSchema).describe("Decisions local to this concept, each with its rejected alternative."),
+  files: z
+    .array(z.string().min(1))
+    .describe("The paths of the changed files this concept covers, exactly as the changed files list gives them."),
+  dependencies: z
+    .array(DependencySchema)
+    .describe("The earlier nodes this concept builds on, each with why; empty for a foundation."),
 });
 
 export const GuideSchema = z.object({
@@ -43,13 +62,40 @@ export const GuideSchema = z.object({
     .array(GuideNodeSchema)
     .min(1)
     .describe("The change split into concepts, each a named group of changes that does one thing, foundations first."),
+  supporting: z
+    .array(SupportingEntrySchema)
+    .describe("Changed files that support the change rather than make it: tests, docs and pure wiring."),
+});
+
+/**
+ * A node as the panel shows it: the agent's node with the layer the service computed from its
+ * dependencies, and its files cut down to the changed files it is the one place of.
+ */
+export const LayeredNodeSchema = GuideNodeSchema.extend({
+  /** 0 for the foundations (the trunk); a node in a later layer builds on nodes in earlier ones. */
+  layer: z.number().int().min(0),
+  /** It builds on other nodes and nothing builds on it, so the panel draws it lighter than the trunk. */
+  leaf: z.boolean(),
+});
+
+/**
+ * The guide as the service keeps it and the panel shows it: the agent's guide, laid out in layers,
+ * with every changed file in exactly one node, in Supporting, or in Unsorted.
+ */
+export const LayeredGuideSchema = GuideSchema.extend({
+  /** In the agent's order, which puts every node after the nodes it builds on. */
+  nodes: z.array(LayeredNodeSchema),
+  /** The lockfiles and generated files the agent never saw, then the agent's own entries. */
+  supporting: z.array(SupportingEntrySchema),
+  /** Changed files the agent placed nowhere, in the forge's order. */
+  unsorted: z.array(z.string()),
 });
 
 /** Where a review's guide has got to, as the panel shows it. */
 export const GuideStateSchema = z.discriminatedUnion("status", [
   /** The guide agent is writing it; `agentId` is null until the agent exists. */
   z.object({ status: z.literal("generating"), agentId: z.string().nullable() }),
-  z.object({ status: z.literal("ready"), agentId: z.string(), guide: GuideSchema }),
+  z.object({ status: z.literal("ready"), agentId: z.string(), guide: LayeredGuideSchema }),
   /** Generation failed; `message` is a sentence, and the panel offers to try again. */
   z.object({ status: z.literal("failed"), agentId: z.string().nullable(), message: z.string() }),
 ]);
@@ -57,4 +103,9 @@ export const GuideStateSchema = z.discriminatedUnion("status", [
 export type Guide = z.output<typeof GuideSchema>;
 export type GuideNode = z.output<typeof GuideNodeSchema>;
 export type GuideDecision = z.output<typeof DecisionSchema>;
+export type GuideDependency = z.output<typeof DependencySchema>;
 export type GuideState = z.output<typeof GuideStateSchema>;
+export type SupportingCategory = (typeof SUPPORTING_CATEGORIES)[number];
+export type SupportingEntry = z.output<typeof SupportingEntrySchema>;
+export type LayeredGuide = z.output<typeof LayeredGuideSchema>;
+export type LayeredNode = z.output<typeof LayeredNodeSchema>;
