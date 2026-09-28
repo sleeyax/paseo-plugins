@@ -1,5 +1,7 @@
 import type { PaseoApi } from "@getpaseo/client";
+import type { PluginRpcContract } from "@getpaseo/plugin";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { ZodType, input as ZodInput, output as ZodOutput } from "zod";
 import * as contracts from "./shared/contracts.ts";
 import { PLUGIN_ID } from "./shared/identity.ts";
 import { settingsDocument } from "./shared/settings.ts";
@@ -16,123 +18,62 @@ export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(settingsDocument);
 
   // `paseo` only arrives with a handler's context, and it is one connection for the whole process,
-  // so the first handler keeps it for the background jobs that outlive their RPC.
+  // so the first handler keeps it for the background jobs that outlive their RPC. Hooks carry the
+  // same `paseo` as handlers, and a hook can be the first to arrive.
   let paseo: PaseoApi | null = null;
   const connected = (context: { paseo: PaseoApi }) => {
     paseo = context.paseo;
   };
+  const connection = (): PaseoApi => {
+    if (paseo === null) throw new Error("Paseo is not connected to the plugin yet.");
+    return paseo;
+  };
   const log = (message: string) => console.warn(`${PLUGIN_ID}: ${message}`);
 
-  // Hooks carry the same `paseo` as handlers, and a hook can be the first to arrive.
-  const guideAgents = createPaseoGuideAgents({
-    paseo: () => {
-      if (paseo === null) throw new Error("Paseo is not connected to the plugin yet.");
-      return paseo;
-    },
-    agent: () => readGuideAgent(settings),
-  });
+  const guideAgents = createPaseoGuideAgents({ paseo: connection, agent: () => readGuideAgent(settings) });
 
   const service = new ReviewService({
     forges: [
       createGitHubForge({ run: runCommand, gh: () => readGhPath(settings) }),
       createGitLabForge({ run: runCommand, glab: () => readGlabPath(settings) }),
     ],
-    workspaces: createPaseoWorkspaces({
-      run: runCommand,
-      paseo: () => {
-        if (paseo === null) throw new Error("Paseo is not connected to the plugin yet.");
-        return paseo;
-      },
-    }),
+    workspaces: createPaseoWorkspaces({ run: runCommand, paseo: connection }),
     guideAgents,
     dataDirectory: dataDirectory(),
     log,
   });
 
-  server.handle(contracts.startReview, (input, context) => {
-    connected(context);
-    return service.start(input);
-  });
-  server.handle(contracts.startBranchReview, (input, context) => {
-    connected(context);
-    return service.startBranch(input);
-  });
-  server.handle(contracts.getStartProgress, (input, context) => {
-    connected(context);
-    return service.startProgress(input);
-  });
-  server.handle(contracts.getPanel, (input, context) => {
-    connected(context);
-    return service.panel(input);
-  });
-  server.handle(contracts.generateGuide, (input, context) => {
-    connected(context);
-    return service.generateGuide(input);
-  });
-  server.handle(contracts.checkHead, (input, context) => {
-    connected(context);
-    return service.checkHead(input);
-  });
-  server.handle(contracts.regenerateGuide, (input, context) => {
-    connected(context);
-    return service.regenerate(input);
-  });
-  server.handle(contracts.askAbout, (input, context) => {
-    connected(context);
-    return service.ask(input);
-  });
-  server.handle(contracts.getNodeDiff, (input, context) => {
-    connected(context);
-    return service.nodeDiff(input);
-  });
-  server.handle(contracts.getProgress, (input, context) => {
-    connected(context);
-    return service.readingProgress(input);
-  });
-  server.handle(contracts.setUnderstood, (input, context) => {
-    connected(context);
-    return service.setUnderstood(input);
-  });
-  server.handle(contracts.listDrafts, (input, context) => {
-    connected(context);
-    return service.listDrafts(input);
-  });
-  server.handle(contracts.createDraft, (input, context) => {
-    connected(context);
-    return service.createDraft(input);
-  });
-  server.handle(contracts.updateDraft, (input, context) => {
-    connected(context);
-    return service.updateDraft(input);
-  });
-  server.handle(contracts.deleteDraft, (input, context) => {
-    connected(context);
-    return service.deleteDraft(input);
-  });
-  server.handle(contracts.suggestWording, (input, context) => {
-    connected(context);
-    return service.suggestWording(input);
-  });
-  server.handle(contracts.getSuggestion, (input, context) => {
-    connected(context);
-    return service.suggestion(input);
-  });
-  server.handle(contracts.getFinish, (input, context) => {
-    connected(context);
-    return service.finish(input);
-  });
-  server.handle(contracts.saveReviewBody, (input, context) => {
-    connected(context);
-    return service.saveReviewBody(input);
-  });
-  server.handle(contracts.submitReview, (input, context) => {
-    connected(context);
-    return service.submit(input);
-  });
-  server.handle(contracts.discardReview, (input, context) => {
-    connected(context);
-    return service.discard(input);
-  });
+  /** Answers `contract` with `method`, keeping the connection the call came in on. */
+  const serve = <Input extends ZodType, Output extends ZodType>(
+    contract: PluginRpcContract<Input, Output>,
+    method: (input: ZodOutput<Input>) => Promise<ZodInput<Output>>,
+  ) =>
+    server.handle(contract, (input, context) => {
+      connected(context);
+      return method(input);
+    });
+
+  serve(contracts.startReview, (input) => service.start(input));
+  serve(contracts.startBranchReview, (input) => service.startBranch(input));
+  serve(contracts.getStartProgress, (input) => service.startProgress(input));
+  serve(contracts.getPanel, (input) => service.panel(input));
+  serve(contracts.generateGuide, (input) => service.generateGuide(input));
+  serve(contracts.checkHead, (input) => service.checkHead(input));
+  serve(contracts.regenerateGuide, (input) => service.regenerate(input));
+  serve(contracts.askAbout, (input) => service.ask(input));
+  serve(contracts.getNodeDiff, (input) => service.nodeDiff(input));
+  serve(contracts.getProgress, (input) => service.readingProgress(input));
+  serve(contracts.setUnderstood, (input) => service.setUnderstood(input));
+  serve(contracts.listDrafts, (input) => service.listDrafts(input));
+  serve(contracts.createDraft, (input) => service.createDraft(input));
+  serve(contracts.updateDraft, (input) => service.updateDraft(input));
+  serve(contracts.deleteDraft, (input) => service.deleteDraft(input));
+  serve(contracts.suggestWording, (input) => service.suggestWording(input));
+  serve(contracts.getSuggestion, (input) => service.suggestion(input));
+  serve(contracts.getFinish, (input) => service.finish(input));
+  serve(contracts.saveReviewBody, (input) => service.saveReviewBody(input));
+  serve(contracts.submitReview, (input) => service.submit(input));
+  serve(contracts.discardReview, (input) => service.discard(input));
 
   // The guide agent is read-only. Its provider's plan or read-only mode is the first guard and this
   // the second, since not every provider has such a mode; the generation job answers what it misses.
