@@ -28,6 +28,10 @@ export type FakeForge = Forge & {
   clones: { project: string; directory: string }[];
   /** When set, the next fetch fails with it. */
   failFetch: Error | null;
+  /** When set, the next head read fails with it. */
+  failFetchHead: Error | null;
+  /** How many times the head alone was read. */
+  headReads: number;
 };
 
 export function fakeForge(kind: ForgeKind = "github"): FakeForge {
@@ -40,6 +44,8 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     viewer: { login: "reviewer", name: "Rita Reviewer" },
     clones: [],
     failFetch: null,
+    failFetchHead: null,
+    headReads: 0,
     async matchUrl(url) {
       return PARSERS[kind](url);
     },
@@ -62,6 +68,17 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
       const changeRequest = forge.changeRequests.get(ref.url);
       if (!changeRequest) throw new ForgeError(`gh failed: Could not resolve to a PullRequest with the number of ${ref.number}.`);
       return structuredClone(changeRequest);
+    },
+    async fetchHead(ref) {
+      forge.headReads += 1;
+      if (forge.failFetchHead) {
+        const error = forge.failFetchHead;
+        forge.failFetchHead = null;
+        throw error;
+      }
+      const changeRequest = forge.changeRequests.get(ref.url);
+      if (!changeRequest) throw new ForgeError(`gh failed: Could not resolve to a PullRequest with the number of ${ref.number}.`);
+      return { headSha: changeRequest.headSha, state: changeRequest.state };
     },
     async currentUser() {
       return forge.viewer;

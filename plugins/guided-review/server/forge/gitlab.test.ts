@@ -303,6 +303,20 @@ test("glab runs without an agent's identity and without prompts", async () => {
   }
 });
 
+test("reads where a merge request's diff head is now and its state, by the project's numeric ID", async () => {
+  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, { stdout: fixture("merge-request.json") }]);
+
+  assert.deepEqual(await forge.fetchHead(MR_3931), { headSha: "8e1ef79fe55aae06f0c7246e550f8c30075b7564", state: "merged" });
+  assert.deepEqual(run.calls.at(-1)?.args, ["api", "--hostname", "gitlab.com", "projects/34675721/merge_requests/3931"]);
+});
+
+test("a merge request whose diff GitLab has not worked out yet has its source branch's head", async () => {
+  const mr = { ...JSON.parse(fixture("merge-request.json")), state: "opened", diff_refs: null, sha: "d".repeat(40) };
+  const { forge } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, { stdout: JSON.stringify(mr) }]);
+
+  assert.deepEqual(await forge.fetchHead(MR_3931), { headSha: "d".repeat(40), state: "open" });
+});
+
 test("identifies the current user on the merge request's host", async () => {
   const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("user.json") }]);
 

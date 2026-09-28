@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fakeCommandRunner, type ScriptedResult } from "../fake-command-runner.ts";
-import { createGitHubForge, PULL_REQUEST_QUERY } from "./github.ts";
+import { createGitHubForge, PULL_REQUEST_HEAD_QUERY, PULL_REQUEST_QUERY } from "./github.ts";
 import { ForgeError, type ChangeRequestRef } from "./port.ts";
 
 /** Recorded from `gh` 2.101 against sleeyax/paseo-plugins#105; the user is trimmed to its public fields. */
@@ -166,6 +166,29 @@ test("a gh that cannot run points at the setting", async () => {
       'Could not run gh at "/opt/gh/bin/gh" (spawn /opt/gh/bin/gh ENOENT). Set the gh path in the Guided Review settings.',
     ),
   );
+});
+
+test("reads only where a pull request's head is now and its state, for noticing a push", async () => {
+  // The recorded pull request's own head and state, as the smaller query returns them.
+  const { headRefOid, state } = JSON.parse(fixture("pull-request.json")).data.repository.pullRequest;
+  const { forge, run } = forgeReplaying([{ stdout: JSON.stringify({ data: { repository: { pullRequest: { headRefOid, state } } } }) }]);
+
+  assert.deepEqual(await forge.fetchHead(PR_105), { headSha: "a711a639b04f3bd2bfe514157e0c19880fe33028", state: "merged" });
+  assert.deepEqual(
+    run.calls.map((call) => ({ args: call.args, input: call.input && JSON.parse(call.input) })),
+    [
+      {
+        args: ["api", "graphql", "--hostname", "github.com", "--input", "-"],
+        input: { query: PULL_REQUEST_HEAD_QUERY, variables: { owner: "sleeyax", name: "paseo-plugins", number: 105 } },
+      },
+    ],
+  );
+});
+
+test("the head of a pull request GitHub does not have fails with a sentence", async () => {
+  const { forge } = forgeReplaying([{ stdout: fixture("pull-request-missing.json") }]);
+
+  await assert.rejects(forge.fetchHead(PR_105), new ForgeError("sleeyax/paseo-plugins has no pull request #105."));
 });
 
 test("identifies the current user on the pull request's host", async () => {

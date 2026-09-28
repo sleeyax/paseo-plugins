@@ -7,6 +7,7 @@ import {
   type BranchChangeRequest,
   type ChangedFile,
   type ChangeRequest,
+  type ChangeRequestHead,
   type ChangeRequestRef,
   type ChangeRequestState,
   type Forge,
@@ -46,6 +47,13 @@ const MergeRequestResponse = z.object({
   target_branch: z.string(),
   /** Null until GitLab has worked out the MR's first diff. */
   diff_refs: z.object({ base_sha: z.string(), start_sha: z.string(), head_sha: z.string() }).nullable(),
+});
+
+/** `sha` is the source branch's head, which GitLab has before it has worked out the diff at it. */
+const MergeRequestHeadResponse = z.object({
+  state: z.enum(["opened", "closed", "locked", "merged"]),
+  sha: z.string().nullable(),
+  diff_refs: z.object({ head_sha: z.string() }).nullable(),
 });
 
 const DiffEntry = z.object({
@@ -199,6 +207,14 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
         ),
         files,
       } satisfies ChangeRequest;
+    },
+
+    async fetchHead(ref): Promise<ChangeRequestHead> {
+      const mr = await api(ref, MergeRequestHeadResponse, `projects/${await projectId(ref)}/merge_requests/${ref.number}`);
+      // The diff's head, which is what `fetchChangeRequest` reads, so a push shows once a new read would see it.
+      const headSha = mr.diff_refs?.head_sha ?? mr.sha;
+      if (headSha === null) throw new ForgeError(`GitLab has not worked out the diff of ${ref.url} yet. Try again in a moment.`);
+      return { headSha, state: STATES[mr.state] };
     },
 
     async currentUser(ref): Promise<ForgeUser> {
