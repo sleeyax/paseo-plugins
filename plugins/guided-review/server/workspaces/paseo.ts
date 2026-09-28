@@ -1,7 +1,9 @@
 import type { PaseoApi } from "@getpaseo/client";
 import type { CommandRunner } from "../command-runner.ts";
+import { changeRequestHeadRef } from "../forge/port.ts";
+import { fastForward, readCheckout } from "./checkout.ts";
 import type { WorkspacePort } from "./port.ts";
-import { isSameRepository } from "./remotes.ts";
+import { isSameRepository, parseRemoteUrl } from "./remotes.ts";
 
 export type PaseoWorkspacesOptions = {
   /** The daemon connection, which only arrives with the first RPC and is the same one after it. */
@@ -17,6 +19,22 @@ export function createPaseoWorkspaces(options: PaseoWorkspacesOptions): Workspac
       // The listing leaves archived workspaces out, so one that is not found is one that ended.
       const workspace = await options.paseo().workspaces.ref(workspaceId).refresh();
       return workspace !== null && !workspace.archivingAt;
+    },
+
+    async inspect(workspaceId) {
+      const workspace = await options.paseo().workspaces.ref(workspaceId).refresh();
+      if (workspace === null || workspace.archivingAt) return null;
+      // The workspace's `gitRuntime` is a cache the daemon may not have filled, so the checkout is asked.
+      const checkout = await readCheckout(options.run, workspace.workspaceDirectory);
+      return {
+        workspace: { id: workspace.id, directory: workspace.workspaceDirectory },
+        branch: checkout.branch,
+        repository: checkout.origin === null ? null : parseRemoteUrl(checkout.origin),
+      };
+    },
+
+    async fastForward({ workspace, branch, ref, headSha }) {
+      return fastForward(options.run, { directory: workspace.directory, branch, fetchRef: changeRequestHeadRef(ref), headSha });
     },
 
     async findRepository(repository) {

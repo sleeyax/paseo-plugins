@@ -1,7 +1,16 @@
 import { z } from "zod";
 import type { CommandRunner } from "../command-runner.ts";
 import { createCli } from "./cli.ts";
-import { ForgeError, type ChangedFileStatus, type ChangeRequest, type ChangeRequestRef, type ChangeRequestState, type Forge, type ForgeUser } from "./port.ts";
+import {
+  ForgeError,
+  type BranchChangeRequest,
+  type ChangedFileStatus,
+  type ChangeRequest,
+  type ChangeRequestRef,
+  type ChangeRequestState,
+  type Forge,
+  type ForgeUser,
+} from "./port.ts";
 
 export const GITHUB_HOST = "github.com";
 
@@ -11,6 +20,8 @@ const CLONE_TIMEOUT_MS = 10 * 60_000;
 /** Enough to understand a PR; the guide does not need a hundred-and-first commit's message. */
 const MAX_COMMITS = 100;
 const MAX_LINKED_ISSUES = 25;
+/** More open PRs from one branch than anyone would choose between. */
+const MAX_BRANCH_PULL_REQUESTS = 20;
 
 /** No prompts, no update nags and no colour codes: the output is parsed, not read. */
 const GH_ENV = { GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", NO_COLOR: "1" };
@@ -87,6 +98,16 @@ const FilesResponse = z.array(
 
 const UserResponse = z.object({ login: z.string(), name: z.string().nullish() });
 
+const BranchPullRequestsResponse = z.array(
+  z.object({
+    number: z.number(),
+    url: z.string(),
+    title: z.string(),
+    author: z.object({ login: z.string() }).nullable(),
+    headRefOid: z.string(),
+  }),
+);
+
 export type GitHubForgeOptions = {
   run: CommandRunner;
   /** The `gh` executable from the settings. */
@@ -102,6 +123,30 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
 
     async matchUrl(url) {
       return parsePullRequestUrl(url);
+    },
+
+    async findByBranch(repository, branch): Promise<BranchChangeRequest[] | null> {
+      if (repository.host.toLowerCase().replace(/^www\./, "") !== GITHUB_HOST) return null;
+      // `--head` takes a branch name only, so a fork's PR from a branch of the same name is found too;
+      // the fast-forward, which fetches the PR's own ref, is what tells them apart.
+      const pullRequests = await gh.json(BranchPullRequestsResponse, [
+        "pr",
+        "list",
+        "--repo",
+        `${GITHUB_HOST}/${repository.project}`,
+        "--head",
+        branch,
+        "--state",
+        "open",
+        "--json",
+        "number,url,title,author,headRefOid",
+        "--limit",
+        String(MAX_BRANCH_PULL_REQUESTS),
+      ]);
+      return pullRequests.flatMap((pr) => {
+        const ref = parsePullRequestUrl(pr.url);
+        return ref === null ? [] : [{ ref, title: pr.title, author: pr.author?.login ?? GHOST.login, headSha: pr.headRefOid }];
+      });
     },
 
     async fetchChangeRequest(ref) {

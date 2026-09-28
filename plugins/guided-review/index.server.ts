@@ -53,6 +53,10 @@ export default function contribute(server: PluginServerContext) {
     connected(context);
     return service.start(input);
   });
+  server.handle(contracts.startBranchReview, (input, context) => {
+    connected(context);
+    return service.startBranch(input);
+  });
   server.handle(contracts.getStartProgress, (input, context) => {
     connected(context);
     return service.progress(input);

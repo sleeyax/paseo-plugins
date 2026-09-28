@@ -27,7 +27,7 @@ export const StartResultSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("started"), reviewId: z.string() }),
 ]);
 
-export const START_PHASES = ["reading", "cloning", "creating-workspace", "ready", "failed", "unknown"] as const;
+export const START_PHASES = ["reading", "updating-branch", "cloning", "creating-workspace", "ready", "failed", "unknown"] as const;
 
 /**
  * Where starting a review has got to. `unknown` is a review this daemon has no record of, which is
@@ -43,9 +43,39 @@ export const StartProgressSchema = z.object({
   message: z.string().nullable(),
 });
 
+/** An open change request a workspace's branch is the source of, as the reviewer chooses between several. */
+export const BranchCandidateSchema = z.object({
+  forge: z.enum(["github", "gitlab"]),
+  url: z.string(),
+  number: z.number().int(),
+  title: z.string(),
+  author: z.string(),
+});
+
+/**
+ * Where guiding a workspace's branch has got to, in that workspace's panel. `none` is a branch no
+ * open change request comes from; `started` follows the review, which may have gone to a PR
+ * workspace, with `note` saying why the branch was left alone.
+ */
+export const BranchStartSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("finding") }),
+  z.object({ status: z.literal("none"), message: z.string() }),
+  z.object({ status: z.literal("failed"), message: z.string() }),
+  z.object({ status: z.literal("choose"), branch: z.string(), candidates: z.array(BranchCandidateSchema) }),
+  z.object({ status: z.literal("started"), reviewId: z.string(), progress: StartProgressSchema, note: z.string().nullable() }),
+]);
+
 export const PanelViewSchema = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("none") }),
-  z.object({ status: z.literal("ready"), reviewId: z.string(), header: ReviewHeaderSchema, guide: GuideStateSchema }),
+  /** `branch` is set while this workspace's branch is being guided, or once that ended without a guide here. */
+  z.object({ status: z.literal("none"), branch: BranchStartSchema.optional() }),
+  z.object({
+    status: z.literal("ready"),
+    reviewId: z.string(),
+    header: ReviewHeaderSchema,
+    guide: GuideStateSchema,
+    /** Why the reviewer's own branch was left alone and the guide lives in this PR workspace instead. */
+    note: z.string().optional(),
+  }),
 ]);
 
 export const startReview = defineRpc({
@@ -58,6 +88,17 @@ export const getStartProgress = defineRpc({
   name: "guided-review.review.progress",
   input: z.object({ reviewId: z.string() }),
   output: StartProgressSchema,
+});
+
+/**
+ * Guides the open change request the workspace's branch is the source of: in that workspace once its
+ * branch is fast-forwarded to the head, in a PR workspace when the branch cannot be. Returns at once;
+ * the panel follows it through `getPanel`. `url` is the reviewer's choice when there were several.
+ */
+export const startBranchReview = defineRpc({
+  name: "guided-review.review.start-branch",
+  input: z.object({ workspaceId: z.string(), url: z.string().nullable() }),
+  output: BranchStartSchema,
 });
 
 /** The panel has only its workspace's ID, so this is how it finds the review it belongs to. */
@@ -134,3 +175,5 @@ export type AskResult = z.output<typeof AskResultSchema>;
 export function subjectKey(subject: GuideSubject): string {
   return subject.kind === "node" ? `node:${subject.nodeId}` : `file:${subject.path}`;
 }
+export type BranchCandidate = z.output<typeof BranchCandidateSchema>;
+export type BranchStart = z.output<typeof BranchStartSchema>;

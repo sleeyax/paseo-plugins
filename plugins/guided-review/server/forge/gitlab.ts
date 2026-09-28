@@ -4,12 +4,14 @@ import { createCli, type Cli } from "./cli.ts";
 import { GITHUB_HOST } from "./github.ts";
 import {
   ForgeError,
+  type BranchChangeRequest,
   type ChangedFile,
   type ChangeRequest,
   type ChangeRequestRef,
   type ChangeRequestState,
   type Forge,
   type ForgeUser,
+  type RepositoryRef,
 } from "./port.ts";
 
 /** Cloning a large repository is the one call that can take minutes. */
@@ -18,6 +20,8 @@ const CLONE_TIMEOUT_MS = 10 * 60_000;
 /** The same caps as on GitHub: enough to understand a change. */
 const MAX_COMMITS = 100;
 const MAX_LINKED_ISSUES = 25;
+/** More open MRs from one branch than anyone would choose between. */
+const MAX_BRANCH_MERGE_REQUESTS = 20;
 
 /** No prompts, no update check and no colour codes: the output is parsed, not read. */
 const GLAB_ENV = { GLAB_CHECK_UPDATE: "0", NO_PROMPT: "1", NO_COLOR: "1", GIT_TERMINAL_PROMPT: "0" };
@@ -77,6 +81,15 @@ const ClosesIssuesResponse = z.array(
 
 const UserResponse = z.object({ username: z.string(), name: z.string().nullish() });
 
+const BranchMergeRequestsResponse = z.array(
+  z.object({
+    title: z.string(),
+    web_url: z.string(),
+    author: z.object({ username: z.string() }).nullable(),
+    sha: z.string(),
+  }),
+);
+
 export type GitLabForgeOptions = {
   run: CommandRunner;
   /** The `glab` executable from the settings. */
@@ -98,14 +111,14 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
   /** Resolves once `glab` is known to be logged in to `host`; a failed check is asked again next time. */
   const loggedIn = (host: string) => remember(hosts, host, () => checkLogin(glab, host));
 
-  const api = async <Schema extends z.ZodType>(ref: ChangeRequestRef, schema: Schema, path: string) => {
-    await loggedIn(ref.host);
-    return glab.json(schema, ["api", "--hostname", ref.host, path]);
+  const api = async <Schema extends z.ZodType>(repository: RepositoryRef, schema: Schema, path: string) => {
+    await loggedIn(repository.host);
+    return glab.json(schema, ["api", "--hostname", repository.host, path]);
   };
 
-  const projectId = (ref: ChangeRequestRef) =>
-    remember(projectIds, `${ref.host}/${ref.project.toLowerCase()}`, async () => {
-      const project = await api(ref, ProjectResponse, `projects/${encodeURIComponent(ref.project)}`);
+  const projectId = (repository: RepositoryRef) =>
+    remember(projectIds, `${repository.host}/${repository.project.toLowerCase()}`, async () => {
+      const project = await api(repository, ProjectResponse, `projects/${encodeURIComponent(repository.project)}`);
       return project.id;
     });
 
@@ -117,6 +130,23 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       const ref = parseMergeRequestUrl(url);
       if (ref !== null) await loggedIn(ref.host);
       return ref;
+    },
+
+    async findByBranch(remote, branch): Promise<BranchChangeRequest[] | null> {
+      // Any host but GitHub's may be a GitLab, as with a URL; one glab is not logged in to fails the check.
+      const host = remote.host.toLowerCase();
+      if (host.replace(/^www\./, "") === GITHUB_HOST) return null;
+      const repository = { host, project: remote.project };
+      const query = new URLSearchParams({ source_branch: branch, state: "opened", per_page: String(MAX_BRANCH_MERGE_REQUESTS) });
+      const mergeRequests = await api(
+        repository,
+        BranchMergeRequestsResponse,
+        `projects/${await projectId(repository)}/merge_requests?${query}`,
+      );
+      return mergeRequests.flatMap((mr) => {
+        const ref = parseMergeRequestUrl(mr.web_url);
+        return ref === null ? [] : [{ ref, title: mr.title, author: mr.author?.username ?? GHOST.login, headSha: mr.sha }];
+      });
     },
 
     async fetchChangeRequest(ref) {

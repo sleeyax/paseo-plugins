@@ -184,3 +184,47 @@ test("clones the pull request's repository with gh", async () => {
     ["repo", "clone", "github.com/sleeyax/paseo-plugins", "/data/clones/github.com/sleeyax/paseo-plugins"],
   ]);
 });
+
+test("finds the open pull request whose source branch is a workspace's branch", async () => {
+  // Recorded for sleeyax/paseo-plugins' feat/guided-review, which has #107 open.
+  const { forge, run } = forgeReplaying([{ stdout: fixture("pull-requests-for-branch.json") }]);
+
+  assert.deepEqual(await forge.findByBranch({ host: "github.com", project: "sleeyax/paseo-plugins" }, "feat/guided-review"), [
+    {
+      ref: {
+        forge: "github",
+        host: "github.com",
+        project: "sleeyax/paseo-plugins",
+        number: 107,
+        url: "https://github.com/sleeyax/paseo-plugins/pull/107",
+      },
+      title: "feat(guided-review): a trunk-first guide to a PR/MR, with a draft review built alongside it",
+      author: "sleeyax",
+      headSha: "5b416c8bfea2017be77fe2081fcbe223e1b82ecb",
+    },
+  ]);
+  assert.deepEqual(run.calls.map((call) => call.args), [
+    [
+      "pr",
+      "list",
+      "--repo",
+      "github.com/sleeyax/paseo-plugins",
+      "--head",
+      "feat/guided-review",
+      "--state",
+      "open",
+      "--json",
+      "number,url,title,author,headRefOid",
+      "--limit",
+      "20",
+    ],
+  ]);
+});
+
+test("a branch with no open pull request finds none, and a repository elsewhere is not GitHub's", async () => {
+  const { forge, run } = forgeReplaying([{ stdout: fixture("pull-requests-for-branch-none.json") }]);
+
+  assert.deepEqual(await forge.findByBranch({ host: "github.com", project: "sleeyax/paseo-plugins" }, "no-such-branch"), []);
+  assert.equal(await forge.findByBranch({ host: "gitlab.com", project: "sleeyax/paseo-plugins" }, "main"), null);
+  assert.equal(run.calls.length, 1, "gh is not asked about another host");
+});
