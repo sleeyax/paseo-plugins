@@ -257,6 +257,41 @@ export const regenerateGuide = defineRpc({
 });
 
 export type HeadCheck = z.output<typeof HeadCheckSchema>;
+
+/**
+ * What a comment box is for, as "Suggest wording" names it: a comment on code at a draft location.
+ * The server looks the lines and the guide's nodes up itself, as for "Ask about this".
+ */
+export const CommentSubjectSchema = z.discriminatedUnion("kind", [z.object({ kind: z.literal("code"), location: DraftLocationSchema })]);
+
+/**
+ * Where a "Suggest wording" request has got to. `ready` carries the text for the box, which nothing
+ * saves; `failed` says why there is none, as a sentence.
+ */
+export const SuggestionSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("running"), suggestionId: z.string() }),
+  z.object({ status: z.literal("ready"), body: z.string() }),
+  z.object({ status: z.literal("failed"), message: z.string() }),
+]);
+
+/**
+ * Has the guide agent word a comment from where it goes and `prompt`, whatever the reviewer typed.
+ * The agent can take longer than an RPC may, so this starts it and the panel follows it through
+ * `getSuggestion`. Only an idle agent is asked; nothing is saved or posted.
+ */
+export const suggestWording = defineRpc({
+  name: "guided-review.drafts.suggest",
+  input: z.object({ reviewId: z.string(), subject: CommentSubjectSchema, prompt: z.string() }),
+  output: SuggestionSchema,
+});
+
+/** A suggestion `suggestWording` started; a finished one is handed out once. */
+export const getSuggestion = defineRpc({
+  name: "guided-review.drafts.suggestion",
+  input: z.object({ suggestionId: z.string() }),
+  output: SuggestionSchema,
+});
+
 export type ReviewHeader = z.output<typeof ReviewHeaderSchema>;
 export type NodeDiff = z.output<typeof NodeDiffSchema>;
 export type StartResult = z.output<typeof StartResultSchema>;
@@ -265,6 +300,8 @@ export type StartProgress = z.output<typeof StartProgressSchema>;
 export type PanelView = z.output<typeof PanelViewSchema>;
 export type GuideSubject = z.output<typeof GuideSubjectSchema>;
 export type AskResult = z.output<typeof AskResultSchema>;
+export type CommentSubject = z.output<typeof CommentSubjectSchema>;
+export type Suggestion = z.output<typeof SuggestionSchema>;
 
 /** Tells one subject apart from another in the panel, as for its "Ask about this" and its code. */
 export function subjectKey(subject: GuideSubject): string {
