@@ -5,6 +5,7 @@ import type { CommandRunner } from "../command-runner.ts";
 import type { Verdict } from "../../shared/submit.ts";
 import { createCli, type Cli } from "./cli.ts";
 import { GITHUB_HOST } from "./github.ts";
+import { CLONE_TIMEOUT_MS, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, userOf } from "./common.ts";
 import { SubmitSteps } from "./submit-steps.ts";
 import {
   ForgeError,
@@ -22,15 +23,6 @@ import {
   type RepositoryRef,
   type SubmitOutcome,
 } from "./port.ts";
-
-/** Cloning a large repository is the one call that can take minutes. */
-const CLONE_TIMEOUT_MS = 10 * 60_000;
-
-/** The same caps as on GitHub: enough to understand a change. */
-const MAX_COMMITS = 100;
-const MAX_LINKED_ISSUES = 25;
-/** More open MRs from one branch than anyone would choose between. */
-const MAX_BRANCH_MERGE_REQUESTS = 20;
 
 /** No prompts, no update check and no colour codes: the output is parsed, not read. */
 const GLAB_ENV = { GLAB_CHECK_UPDATE: "0", NO_PROMPT: "1", NO_COLOR: "1", GIT_TERMINAL_PROMPT: "0" };
@@ -370,7 +362,7 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       const host = remote.host.toLowerCase();
       if (host.replace(/^www\./, "") === GITHUB_HOST) return null;
       const repository = { host, project: remote.project };
-      const query = new URLSearchParams({ source_branch: branch, state: "opened", per_page: String(MAX_BRANCH_MERGE_REQUESTS) });
+      const query = new URLSearchParams({ source_branch: branch, state: "opened", per_page: String(MAX_BRANCH_CHANGE_REQUESTS) });
       const mergeRequests = await api(
         repository,
         BranchMergeRequestsResponse,
@@ -378,7 +370,7 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       );
       return mergeRequests.flatMap((mr) => {
         const ref = parseMergeRequestUrl(mr.web_url);
-        return ref === null ? [] : [{ ref, title: mr.title, author: mr.author?.username ?? GHOST.login, headSha: mr.sha }];
+        return ref === null ? [] : [{ ref, title: mr.title, author: userOf(mr.author && { login: mr.author.username }).login, headSha: mr.sha }];
       });
     },
 
@@ -406,7 +398,7 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
         ref,
         title: mr.title,
         description: mr.description ?? "",
-        author: mr.author ? { login: mr.author.username, name: mr.author.name ?? null } : GHOST,
+        author: userOf(mr.author && { login: mr.author.username, name: mr.author.name }),
         state: STATES[mr.state],
         isDraft: mr.draft ?? mr.work_in_progress ?? false,
         baseBranch: mr.target_branch,
@@ -747,9 +739,6 @@ const STATES: Record<"opened" | "closed" | "locked" | "merged", ChangeRequestSta
   locked: "open",
   merged: "merged",
 };
-
-/** What an MR whose author's account was deleted is shown as. */
-const GHOST: ForgeUser = { login: "ghost", name: null };
 
 const SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 

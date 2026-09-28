@@ -21,6 +21,7 @@ import { ForgeError, type BranchChangeRequest, type ChangedFile, type ChangeRequ
 import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, GuideAgentError, type GuideAgentPort } from "./guide-agent/port.ts";
 import { jsonSchemaOf, runStructured, withOutputSchema } from "./guide-agent/structured.ts";
 import { setAside } from "./file-classes.ts";
+import { oneAtATimePer } from "./one-at-a-time.ts";
 import { layOutGuide, parseGuide } from "./guide-output.ts";
 import { guidePrompt } from "./guide-prompt.ts";
 import { codeWordingContext, WordingSchema, wordingPrompt, type WordingSubjectContext } from "./wording-prompt.ts";
@@ -82,15 +83,15 @@ export class ReviewService {
   readonly #generations = new Map<string, Generation>();
   /** The latest branch guiding asked for in each workspace, by workspace ID. */
   readonly #branchStarts = new Map<string, BranchJob>();
-  /** The last write of each guide's marks, by review and head SHA, which the next one waits for. */
-  readonly #progressWrites = new Map<string, Promise<unknown>>();
+  /** Writes of each guide's marks, by review and head SHA, one at a time. */
+  readonly #progressWrites = oneAtATimePer<string>();
   /** "Suggest wording" requests, by suggestion ID, until the panel has read how they ended. */
   readonly #suggestions = new Map<string, SuggestionJob>();
   /**
-   * The last change to each review's draft links, and to its body, which the next waits for: a node
-   * comment on GitHub rewrites the body the reviewer's own text shares, and both read it first.
+   * Changes to each review's draft links, and to its body, one at a time by review ID: a node comment
+   * on GitHub rewrites the body the reviewer's own text shares, and both read it first.
    */
-  readonly #draftWrites = new Map<string, Promise<unknown>>();
+  readonly #draftWrites = oneAtATimePer<string>();
 
   constructor(options: ReviewServiceOptions) {
     this.#forges = options.forges;
@@ -336,16 +337,7 @@ export class ReviewService {
     subject: GuideSubject;
     understood: boolean;
   }): Promise<GuideProgress> {
-    const key = `${reviewId}@${headSha}`;
-    const write = (this.#progressWrites.get(key) ?? Promise.resolve())
-      .catch(() => {})
-      .then(() => this.#setUnderstood(reviewId, headSha, subject, understood));
-    this.#progressWrites.set(key, write);
-    try {
-      return await write;
-    } finally {
-      if (this.#progressWrites.get(key) === write) this.#progressWrites.delete(key);
-    }
+    return this.#progressWrites(`${reviewId}@${headSha}`, () => this.#setUnderstood(reviewId, headSha, subject, understood));
   }
 
   async #setUnderstood(reviewId: string, headSha: string, subject: GuideSubject, understood: boolean): Promise<GuideProgress> {
@@ -495,14 +487,8 @@ export class ReviewService {
   }
 
   /** Runs `change` once every earlier change to the review's draft links and body has settled. */
-  async #changingDrafts<T>(reviewId: string, change: () => Promise<T>): Promise<T> {
-    const write = (this.#draftWrites.get(reviewId) ?? Promise.resolve()).catch(() => {}).then(change);
-    this.#draftWrites.set(reviewId, write);
-    try {
-      return await write;
-    } finally {
-      if (this.#draftWrites.get(reviewId) === write) this.#draftWrites.delete(reviewId);
-    }
+  #changingDrafts<T>(reviewId: string, change: () => Promise<T>): Promise<T> {
+    return this.#draftWrites(reviewId, change);
   }
 
   /** A link to the node `nodeId` of the guide the panel shows, which must have it. */
