@@ -4,6 +4,8 @@ A trunk-first guide to a pull request, with a draft review built alongside it. P
 
 ## Screenshots
 
+_None yet._
+
 ## Installation
 
 ```sh
