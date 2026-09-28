@@ -1,0 +1,3 @@
+{"data":{"repository":{"pullRequest":{"reviews":{"nodes":[]},"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":"Y3Vyc29yOnYyOpHOAAAAAg=="},"nodes":[
+{"path":"plugins/claude-tty/CLAUDE.md","line":334,"originalLine":334,"startLine":null,"originalStartLine":null,"diffSide":"RIGHT","startDiffSide":null,"subjectType":"LINE","comments":{"nodes":[{"id":"PRRC_kwDOUFGNmM6kZ0a1","body":"Worth saying which version that is.","pullRequestReview":{"id":"PRR_kwDOUFGNmM7xOth1"}}]}}
+]}}}}}
