@@ -12,6 +12,7 @@ import { numberLabel } from "../shared/reference.ts";
 import { useAskAbout } from "./ask-action.tsx";
 import { BranchStartView, isBranchRunning } from "./branch-start.tsx";
 import { GuideView } from "./guide-view.tsx";
+import { useProgress } from "./progress.tsx";
 import { fontSize, leading, MAX_CONTENT_WIDTH, radius, spacing } from "./theme.ts";
 
 const POLL_MS = 2_000;
@@ -39,6 +40,10 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
   const colors = theme.colors;
   const openAgent = navigation ? (agentId: string) => navigation.openAgent({ agentId }) : undefined;
   const ask = useAskAbout(panel.data?.status === "ready" ? panel.data.reviewId : null, openAgent);
+  const progress = useProgress(
+    panel.data?.status === "ready" ? panel.data.reviewId : null,
+    panel.data?.status === "ready" && panel.data.guide.status === "ready" ? panel.data.guide.agentId : null,
+  );
 
   let body: React.ReactNode;
   if (panel.isPending) {
@@ -67,6 +72,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
           theme={theme}
           {...(openAgent ? { openAgent } : {})}
           ask={ask}
+          progress={progress}
           retry={{
             run: () => retry.mutate(reviewId),
             pending: retry.isPending,

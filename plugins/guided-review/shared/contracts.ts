@@ -2,6 +2,7 @@ import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { FileDiffSchema } from "./diff.ts";
 import { GuideStateSchema } from "./guide.ts";
+import { GuideProgressSchema } from "./progress.ts";
 
 /** What the panel shows about a change request before any guide exists. */
 export const ReviewHeaderSchema = z.object({
@@ -160,6 +161,26 @@ export const getNodeDiff = defineRpc({
   name: "guided-review.guide.node-diff",
   input: z.object({ reviewId: z.string(), subject: GuideSubjectSchema }),
   output: NodeDiffSchema,
+});
+
+/**
+ * The reviewer's progress through the guide the panel shows, the one at the review's head SHA; null
+ * while that guide is not ready.
+ */
+export const getProgress = defineRpc({
+  name: "guided-review.progress.get",
+  input: z.object({ reviewId: z.string() }),
+  output: GuideProgressSchema.nullable(),
+});
+
+/**
+ * Marks a subject of the guide at `headSha` understood, or clears the mark. The subjects are the
+ * ones "Ask about this" takes: a node, or a Supporting or Unsorted entry. Returns the progress after.
+ */
+export const setUnderstood = defineRpc({
+  name: "guided-review.progress.set",
+  input: z.object({ reviewId: z.string(), headSha: z.string(), subject: GuideSubjectSchema, understood: z.boolean() }),
+  output: GuideProgressSchema,
 });
 
 export type ReviewHeader = z.output<typeof ReviewHeaderSchema>;

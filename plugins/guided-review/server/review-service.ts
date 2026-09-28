@@ -2,6 +2,7 @@ import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { AskResult, BranchStart, GuideSubject, NodeDiff, PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
 import { coveredPaths, GuideSchema, type CoveredCode, type GuideState, type LayeredGuide } from "../shared/guide.ts";
+import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { askPrompt, codeReferencesOf, type AskSubjectContext } from "./ask-prompt.ts";
 import { resolveCode } from "./diff.ts";
@@ -11,7 +12,7 @@ import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
 import { setAside } from "./file-classes.ts";
 import { layOutGuide, parseGuide } from "./guide-output.ts";
 import { guidePrompt } from "./guide-prompt.ts";
-import { ReviewStore, reviewIdOf, type GuideRecord, type ReviewRecord } from "./review-store.ts";
+import { ReviewStore, reviewIdOf, type GuideRecord, type ProgressRecord, type ReviewRecord } from "./review-store.ts";
 import type { FastForwardResult, ReviewWorkspace, WorkspaceCheckout, WorkspacePort } from "./workspaces/port.ts";
 
 export type ReviewServiceOptions = {
@@ -62,6 +63,8 @@ export class ReviewService {
   readonly #generations = new Map<string, Generation>();
   /** The latest branch guiding asked for in each workspace, by workspace ID. */
   readonly #branchStarts = new Map<string, BranchJob>();
+  /** The last write of each guide's marks, by review and head SHA, which the next one waits for. */
+  readonly #progressWrites = new Map<string, Promise<unknown>>();
 
   constructor(options: ReviewServiceOptions) {
     this.#forges = options.forges;
@@ -241,6 +244,74 @@ export class ReviewService {
     const resolved = resolveCode(changeRequest.files, covers);
     if (subject.kind === "file" && resolved.files.length === 0) throw new Error(`${subject.path} is not one of the change's files.`);
     return { headSha, files: resolved.files };
+  }
+
+  /**
+   * The reviewer's progress through the guide the panel shows: the one at the review's head, in its
+   * workspace. Null while that guide is not ready.
+   */
+  async guideProgress({ reviewId }: { reviewId: string }): Promise<GuideProgress | null> {
+    const record = await this.#store.get(reviewId);
+    // A guide being generated again replaces the one on disk, and its marks with it.
+    if (record === null || this.#generations.has(generationKey(record))) return null;
+    const stored = await this.#store.getGuide(record.id, record.header.headSha);
+    if (stored === null || stored.workspaceId !== record.workspace.id || !isReady(stored)) return null;
+    return summariseProgress(stored.guide, stored.headSha, marksOf(stored, await this.#store.getProgress(record.id, stored.headSha)));
+  }
+
+  /**
+   * Marks a node, or a Supporting or Unsorted entry, of the guide at `headSha` understood, or clears
+   * the mark, and keeps the marks on disk under that head. Marks of one guide are written one at a
+   * time, so two toggles at once both land.
+   */
+  async setUnderstood({
+    reviewId,
+    headSha,
+    subject,
+    understood,
+  }: {
+    reviewId: string;
+    headSha: string;
+    subject: GuideSubject;
+    understood: boolean;
+  }): Promise<GuideProgress> {
+    const key = `${reviewId}@${headSha}`;
+    const write = (this.#progressWrites.get(key) ?? Promise.resolve())
+      .catch(() => {})
+      .then(() => this.#setUnderstood(reviewId, headSha, subject, understood));
+    this.#progressWrites.set(key, write);
+    try {
+      return await write;
+    } finally {
+      if (this.#progressWrites.get(key) === write) this.#progressWrites.delete(key);
+    }
+  }
+
+  async #setUnderstood(reviewId: string, headSha: string, subject: GuideSubject, understood: boolean): Promise<GuideProgress> {
+    const record = await this.#store.get(reviewId);
+    if (record === null) throw new Error("This review is not known here any more. Start it again.");
+    const stored = this.#generations.has(`${record.id}@${headSha}`) ? null : await this.#store.getGuide(record.id, headSha);
+    if (stored === null || !isReady(stored)) throw new Error("There is no finished guide to mark progress in.");
+    const { guide } = stored;
+    if (subject.kind === "node" && !guide.nodes.some((node) => node.id === subject.nodeId)) {
+      throw new Error("That concept is not in the guide any more.");
+    }
+    if (subject.kind === "file" && !guide.supporting.some((entry) => entry.path === subject.path) && !guide.unsorted.includes(subject.path)) {
+      throw new Error(`${subject.path} is not a Supporting or Unsorted file of the guide.`);
+    }
+
+    const marks = marksOf(stored, await this.#store.getProgress(record.id, headSha));
+    const [list, value] = subject.kind === "node" ? [marks.nodes, subject.nodeId] : [marks.files, subject.path];
+    const next = understood ? [...new Set([...list, value])] : list.filter((entry) => entry !== value);
+    const progress: ProgressRecord = {
+      headSha,
+      agentId: stored.agentId,
+      nodes: subject.kind === "node" ? next : marks.nodes,
+      files: subject.kind === "file" ? next : marks.files,
+      updatedAt: this.#now().toISOString(),
+    };
+    await this.#store.saveProgress(record.id, progress);
+    return summariseProgress(guide, headSha, progress);
   }
 
   /** For the `workspace.archived` hook: a review's workspace ending ends its guide agents. */
@@ -565,6 +636,18 @@ function progress(phase: StartPhase): StartProgress {
 
 function notSent(agentId: string | null, message: string): AskResult {
   return { status: "not-sent", agentId, message };
+}
+
+type ReadyGuide = GuideRecord & { status: "ready"; agentId: string; guide: LayeredGuide };
+
+function isReady(record: GuideRecord): record is ReadyGuide {
+  return record.status === "ready" && record.agentId !== null && record.guide !== null;
+}
+
+/** The marks made in `guide`; ones kept for an earlier guide at the same head, by another agent, are not. */
+function marksOf(guide: ReadyGuide, progress: ProgressRecord | null): { nodes: string[]; files: string[] } {
+  if (progress === null || progress.agentId !== guide.agentId) return { nodes: [], files: [] };
+  return { nodes: progress.nodes, files: progress.files };
 }
 
 function generationKey(record: ReviewRecord): string {
