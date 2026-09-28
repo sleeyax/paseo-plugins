@@ -1,11 +1,12 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { parsePullRequestUrl } from "./forge/github.ts";
-import { ForgeError, type ChangeRequest, type ChangeRequestRef, type Forge, type ForgeUser } from "./forge/port.ts";
+import { parseMergeRequestUrl } from "./forge/gitlab.ts";
+import { ForgeError, type ChangeRequest, type ChangeRequestRef, type Forge, type ForgeKind, type ForgeUser } from "./forge/port.ts";
 
 /**
- * A GitHub-shaped forge that answers from what the test put in it and records what it was asked.
- * URLs are matched the real adapter's way, so a test pastes the URLs a reviewer would.
+ * A forge that answers from what the test put in it and records what it was asked. URLs are matched
+ * the real adapter's way, so a test pastes the URLs a reviewer would; it is GitHub unless told otherwise.
  */
 export type FakeForge = Forge & {
   /** Change requests by URL; a URL with none reads as a forge error. */
@@ -17,16 +18,16 @@ export type FakeForge = Forge & {
   failFetch: Error | null;
 };
 
-export function fakeForge(): FakeForge {
+export function fakeForge(kind: ForgeKind = "github"): FakeForge {
   const forge: FakeForge = {
-    kind: "github",
-    urlHint: "a GitHub pull request URL",
+    kind,
+    urlHint: kind === "github" ? "a GitHub pull request URL" : "a GitLab merge request URL",
     changeRequests: new Map(),
     viewer: { login: "reviewer", name: "Rita Reviewer" },
     clones: [],
     failFetch: null,
     async matchUrl(url) {
-      return parsePullRequestUrl(url);
+      return PARSERS[kind](url);
     },
     async fetchChangeRequest(ref) {
       if (forge.failFetch) {
@@ -49,10 +50,15 @@ export function fakeForge(): FakeForge {
   return forge;
 }
 
+const PARSERS: Record<ForgeKind, (url: string) => ChangeRequestRef | null> = {
+  github: parsePullRequestUrl,
+  gitlab: parseMergeRequestUrl,
+};
+
 /** A plausible open PR, for a test to change only what it is about. */
 export function sampleChangeRequest(url: string, overrides: Partial<Omit<ChangeRequest, "ref">> = {}): ChangeRequest {
-  const ref = parsePullRequestUrl(url);
-  if (ref === null) throw new Error(`Not a pull request URL: ${url}`);
+  const ref = parsePullRequestUrl(url) ?? parseMergeRequestUrl(url);
+  if (ref === null) throw new Error(`Not a pull request or merge request URL: ${url}`);
   return {
     ref: ref satisfies ChangeRequestRef,
     title: "Retry failed uploads",

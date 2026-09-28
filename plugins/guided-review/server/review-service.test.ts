@@ -87,6 +87,49 @@ test("a URL that is not a pull request is turned down with a clear message and s
   assert.deepEqual(workspaces.created, []);
 });
 
+test("a GitLab MR URL gets a PR workspace checked out from GitLab, beside GitHub", async (t) => {
+  const data = await mkdtemp(path.join(os.tmpdir(), "guided-review-data-"));
+  t.after(() => rm(data, { recursive: true, force: true }));
+  const mrUrl = "https://gitlab.example.com/acme/platform/uploader/-/merge_requests/7";
+  const gitlab = fakeForge("gitlab");
+  gitlab.changeRequests.set(mrUrl, sampleChangeRequest(mrUrl));
+  const workspaces = fakeWorkspaces();
+  const service = new ReviewService({ forges: [fakeForge(), gitlab], workspaces, dataDirectory: data });
+  const clone = path.join(data, "clones", "gitlab.example.com", "acme", "platform", "uploader");
+
+  const progress = await startAndSettle(service, `${mrUrl}/diffs`);
+
+  assert.equal(progress.phase, "ready");
+  assert.deepEqual(progress.header, { ...HEADER, forge: "gitlab", url: mrUrl, project: "acme/platform/uploader" });
+  assert.deepEqual(gitlab.clones, [{ project: "acme/platform/uploader", directory: clone }]);
+  assert.deepEqual(workspaces.created, [
+    {
+      id: "wks_0000000000000001",
+      repositoryRoot: clone,
+      ref: { forge: "gitlab", host: "gitlab.example.com", project: "acme/platform/uploader", number: 7, url: mrUrl },
+      title: "Review !7: Retry failed uploads",
+    },
+  ]);
+});
+
+test("a URL a forge claims but cannot read is turned down in the forge's words", async (t) => {
+  const data = await mkdtemp(path.join(os.tmpdir(), "guided-review-data-"));
+  t.after(() => rm(data, { recursive: true, force: true }));
+  const gitlab = fakeForge("gitlab");
+  gitlab.matchUrl = async () => {
+    throw new ForgeError("glab is not logged in to gitlab.example.com.");
+  };
+  const workspaces = fakeWorkspaces();
+  const service = new ReviewService({ forges: [fakeForge(), gitlab], workspaces, dataDirectory: data });
+
+  assert.deepEqual(await service.start({ url: "https://gitlab.example.com/acme/app/-/merge_requests/7" }), {
+    status: "rejected",
+    message: "glab is not logged in to gitlab.example.com.",
+  });
+  await service.settled();
+  assert.deepEqual(workspaces.created, []);
+});
+
 test("a repository no Paseo project has is cloned into the data directory once, and the workspace cut from it", async (t) => {
   const { service, forge, workspaces, data } = await withHost(t);
   workspaces.repositories.clear();

@@ -5,9 +5,10 @@ import { PLUGIN_ID } from "./shared/identity.ts";
 import { settingsDocument } from "./shared/settings.ts";
 import { runCommand } from "./server/command-runner.ts";
 import { createGitHubForge } from "./server/forge/github.ts";
+import { createGitLabForge } from "./server/forge/gitlab.ts";
 import { dataDirectory } from "./server/paths.ts";
 import { ReviewService } from "./server/review-service.ts";
-import { readGhPath } from "./server/settings.ts";
+import { readGhPath, readGlabPath } from "./server/settings.ts";
 import { createPaseoWorkspaces } from "./server/workspaces/paseo.ts";
 
 export default function contribute(server: PluginServerContext) {
@@ -21,7 +22,10 @@ export default function contribute(server: PluginServerContext) {
   };
 
   const service = new ReviewService({
-    forges: [createGitHubForge({ run: runCommand, gh: () => readGhPath(settings) })],
+    forges: [
+      createGitHubForge({ run: runCommand, gh: () => readGhPath(settings) }),
+      createGitLabForge({ run: runCommand, glab: () => readGlabPath(settings) }),
+    ],
     workspaces: createPaseoWorkspaces({
       run: runCommand,
       paseo: () => {
