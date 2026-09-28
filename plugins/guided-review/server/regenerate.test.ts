@@ -306,3 +306,31 @@ test("a regenerated guide that failed carries the marks over once Try again writ
 
   assert.deepEqual((await service.guideProgress({ reviewId: REVIEW_ID }))?.understood, { nodes: ["upload-loop"], files: [] });
 });
+
+test("after Regenerate a comment is anchored in the new head's diff, one from the guide it replaced is refused, and drafts stay", async (t) => {
+  const { service, forge } = await withGuide(t);
+  const before = await service.createDraft({ reviewId: REVIEW_ID, headSha: OLD, location: { kind: "file", path: "src/upload.ts" }, body: "Why?" });
+
+  forge.changeRequests.set(URL, atNewHead());
+  await regenerate(service);
+
+  // New line 1 was `b` at the old head and is a new `log` at this one: a panel still drawing the old
+  // guide must not put its comment there.
+  const onB = { kind: "line", path: "src/upload.ts", line: { side: "new", line: 1 } } as const;
+  await assert.rejects(
+    service.createDraft({ reviewId: REVIEW_ID, headSha: OLD, location: onB, body: "Is b right?" }),
+    new Error("This comment is on the guide at bbbbbbb, which was regenerated for ddddddd. Comment on the guide at the new head."),
+  );
+
+  await service.createDraft({ reviewId: REVIEW_ID, headSha: NEW, location: { ...onB, line: { side: "new", line: 3 } }, body: "Is b right?" });
+  const created = forge.created.at(-1)!;
+  assert.equal(created.target.headSha, NEW);
+  assert.deepEqual(created.anchor.kind === "line" && [created.anchor.line.kind, created.anchor.line.newLine], ["added", 3]);
+  assert.equal(forge.created.length, 2);
+
+  assert.deepEqual(
+    (await service.listDrafts({ reviewId: REVIEW_ID })).drafts.map((draft) => draft.id),
+    [before.id, forge.drafts.get(URL)!.at(-1)!.id],
+    "Regenerate leaves the forge's drafts alone",
+  );
+});

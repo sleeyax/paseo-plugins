@@ -196,11 +196,12 @@ export const listDrafts = defineRpc({
 
 /**
  * Saves a comment as a forge draft at once, unpublished until the review is submitted. The location
- * names lines of the diff the panel drew, which the server looks up at the same head.
+ * names lines of the diff the panel drew at `headSha`, the head of the guide it showed, which the
+ * server looks up at that head; a head the review has since been regenerated away from is refused.
  */
 export const createDraft = defineRpc({
   name: "guided-review.drafts.create",
-  input: z.object({ reviewId: z.string(), location: DraftLocationSchema, body: z.string() }),
+  input: z.object({ reviewId: z.string(), headSha: z.string(), location: DraftLocationSchema, body: z.string() }),
   output: DraftSchema,
 });
 

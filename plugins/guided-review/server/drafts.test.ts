@@ -64,11 +64,13 @@ async function withReview(t: TestContext): Promise<{ service: ReviewService; for
   return { service, forge };
 }
 
+const HEAD = "b".repeat(40);
+
 const TARGET = {
   ref: { forge: "github", host: "github.com", project: "acme/uploader", number: 7, url: URL },
   baseSha: "a".repeat(40),
   startSha: "a".repeat(40),
-  headSha: "b".repeat(40),
+  headSha: HEAD,
 };
 const ON_UPLOAD = { path: "src/upload.ts", previousPath: "src/send.ts" };
 
@@ -77,16 +79,19 @@ test("a comment on an added, a removed or an unchanged line reaches the forge wi
 
   const added = await service.createDraft({
     reviewId: REVIEW_ID,
+    headSha: HEAD,
     location: { kind: "line", path: "src/upload.ts", line: { side: "new", line: 13 } },
     body: "  Is logging every upload too much?\n",
   });
   await service.createDraft({
     reviewId: REVIEW_ID,
+    headSha: HEAD,
     location: { kind: "line", path: "src/upload.ts", line: { side: "old", line: 12 } },
     body: "Was this ever awaited?",
   });
   await service.createDraft({
     reviewId: REVIEW_ID,
+    headSha: HEAD,
     location: { kind: "line", path: "src/upload.ts", line: { side: "new", line: 14 } },
     body: "Still true on a retry?",
   });
@@ -120,6 +125,7 @@ test("an unchanged line can be named by its old number too", async (t) => {
 
   await service.createDraft({
     reviewId: REVIEW_ID,
+    headSha: HEAD,
     location: { kind: "line", path: "src/upload.ts", line: { side: "old", line: 42 } },
     body: "Why keep w?",
   });
@@ -137,6 +143,7 @@ test("a range within one hunk is sent in the diff's order, however it was dragge
   // Dragged upwards, from the second added line to the removed one.
   const draft = await service.createDraft({
     reviewId: REVIEW_ID,
+    headSha: HEAD,
     location: { kind: "range", path: "src/upload.ts", start: { side: "new", line: 13 }, end: { side: "old", line: 12 } },
     body: "This whole change wants a test.",
   });
@@ -160,6 +167,7 @@ test("a range of one line is a comment on that line", async (t) => {
 
   await service.createDraft({
     reviewId: REVIEW_ID,
+    headSha: HEAD,
     location: { kind: "range", path: "src/upload.ts", start: { side: "new", line: 42 }, end: { side: "new", line: 42 } },
     body: "z?",
   });
@@ -174,8 +182,8 @@ test("a range of one line is a comment on that line", async (t) => {
 test("a comment on a whole file needs no diff, so a binary file takes one too", async (t) => {
   const { service, forge } = await withReview(t);
 
-  await service.createDraft({ reviewId: REVIEW_ID, location: { kind: "file", path: "src/upload.ts" }, body: "Why the rename?" });
-  await service.createDraft({ reviewId: REVIEW_ID, location: { kind: "file", path: "assets/logo.png" }, body: "Is this the new logo?" });
+  await service.createDraft({ reviewId: REVIEW_ID, headSha: HEAD, location: { kind: "file", path: "src/upload.ts" }, body: "Why the rename?" });
+  await service.createDraft({ reviewId: REVIEW_ID, headSha: HEAD, location: { kind: "file", path: "assets/logo.png" }, body: "Is this the new logo?" });
 
   assert.deepEqual(
     forge.created.map((created) => created.anchor),
@@ -223,7 +231,7 @@ test("a comment the forge could not anchor is turned down before anything is sen
   ] as const;
 
   for (const { location, body, message } of cases) {
-    await assert.rejects(service.createDraft({ reviewId: REVIEW_ID, location, body }), new Error(message));
+    await assert.rejects(service.createDraft({ reviewId: REVIEW_ID, headSha: HEAD, location, body }), new Error(message));
   }
   assert.deepEqual(forge.created, []);
 });
@@ -237,7 +245,7 @@ test("the panel lists the forge's drafts, including ones started on the web, and
   };
   forge.drafts.set(URL, [fromTheWeb]);
 
-  const created = await service.createDraft({ reviewId: REVIEW_ID, location: { kind: "file", path: "src/upload.ts" }, body: "Why?" });
+  const created = await service.createDraft({ reviewId: REVIEW_ID, headSha: HEAD, location: { kind: "file", path: "src/upload.ts" }, body: "Why?" });
   assert.deepEqual(await service.listDrafts({ reviewId: REVIEW_ID }), { drafts: [fromTheWeb, created] });
 
   assert.equal(await service.updateDraft({ reviewId: REVIEW_ID, draftId: "PRRC_web", body: " Edited in the panel. " }), null);
