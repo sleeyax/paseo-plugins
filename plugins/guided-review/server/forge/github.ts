@@ -6,6 +6,7 @@ import {
   type BranchChangeRequest,
   type ChangedFileStatus,
   type ChangeRequest,
+  type ChangeRequestHead,
   type ChangeRequestRef,
   type ChangeRequestState,
   type Forge,
@@ -80,6 +81,23 @@ const PullRequestResponse = z.object({
             }),
           })
           .nullable(),
+      })
+      .nullable(),
+  }),
+});
+
+/** Only where the head is and whether the PR is still open, for noticing a push without reading the PR again. */
+export const PULL_REQUEST_HEAD_QUERY = `query GuidedReviewPullRequestHead($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) { headRefOid state }
+  }
+}`;
+
+const PullRequestHeadResponse = z.object({
+  data: z.object({
+    repository: z
+      .object({
+        pullRequest: z.object({ headRefOid: z.string(), state: z.enum(["OPEN", "CLOSED", "MERGED"]) }).nullable(),
       })
       .nullable(),
   }),
@@ -197,6 +215,15 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
           patch: file.patch ?? null,
         })),
       } satisfies ChangeRequest;
+    },
+
+    async fetchHead(ref): Promise<ChangeRequestHead> {
+      const [owner, name] = ref.project.split("/") as [string, string];
+      const input = JSON.stringify({ query: PULL_REQUEST_HEAD_QUERY, variables: { owner, name, number: ref.number } });
+      const response = await gh.json(PullRequestHeadResponse, ["api", "graphql", "--hostname", ref.host, "--input", "-"], { input });
+      const pr = response.data.repository?.pullRequest;
+      if (!pr) throw new ForgeError(`${ref.project} has no pull request #${ref.number}.`);
+      return { headSha: pr.headRefOid, state: STATES[pr.state] };
     },
 
     async currentUser(ref): Promise<ForgeUser> {
