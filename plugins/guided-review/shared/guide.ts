@@ -42,15 +42,39 @@ export const GuideOverviewSchema = z.object({
     .describe("Where to spend your attention: the one or two foundational nodes that matter most."),
 });
 
+/**
+ * Code a node covers in one file: the whole file's diff, some of its hunks, or line ranges within
+ * them. Hunks are numbered from 1 per file, the way the generation prompt labels them.
+ */
+export const CoveredCodeSchema = z.object({
+  path: z.string().min(1).describe("A changed file's path, exactly as the list of changed files gives it."),
+  hunks: z
+    .array(z.number().int().min(1))
+    .default([])
+    .describe("The numbers of the file's hunks this node covers, as the diff labels them. Leave `hunks` and `lines` empty to cover the whole file."),
+  lines: z
+    .array(
+      z.object({
+        start: z.number().int().min(1).describe("The first line of the range."),
+        end: z.number().int().min(1).describe("The last line of the range, inclusive."),
+      }),
+    )
+    .default([])
+    .describe(
+      "Line ranges this node covers, for when one hunk holds more than one concept: line numbers in the new version of the file, or in the old version for a removed file. A removed line belongs with the new line after it.",
+    ),
+});
+
 export const GuideNodeSchema = z.object({
   id: z.string().min(1).describe("A short slug, unique within the guide, such as `retry-policy`."),
   title: z.string().min(1).describe("The concept's name, a few words."),
   summary: z.string().min(1).describe("What the concept does, in one line."),
   explanation: z.string().min(1).describe("How it works: a short paragraph or two a reviewer reads before its code."),
+  covers: z
+    .array(CoveredCodeSchema)
+    .min(1)
+    .describe("The code this node explains, one entry per file, in the order to read it."),
   decisions: z.array(DecisionSchema).describe("Decisions local to this concept, each with its rejected alternative."),
-  files: z
-    .array(z.string().min(1))
-    .describe("The paths of the changed files this concept covers, exactly as the changed files list gives them."),
   dependencies: z
     .array(DependencySchema)
     .describe("The earlier nodes this concept builds on, each with why; empty for a foundation."),
@@ -67,10 +91,7 @@ export const GuideSchema = z.object({
     .describe("Changed files that support the change rather than make it: tests, docs and pure wiring."),
 });
 
-/**
- * A node as the panel shows it: the agent's node with the layer the service computed from its
- * dependencies, and its files cut down to the changed files it is the one place of.
- */
+/** A node as the panel shows it: the agent's node with the layer the service computed from its dependencies. */
 export const LayeredNodeSchema = GuideNodeSchema.extend({
   /** 0 for the foundations (the trunk); a node in a later layer builds on nodes in earlier ones. */
   layer: z.number().int().min(0),
@@ -80,14 +101,14 @@ export const LayeredNodeSchema = GuideNodeSchema.extend({
 
 /**
  * The guide as the service keeps it and the panel shows it: the agent's guide, laid out in layers,
- * with every changed file in exactly one node, in Supporting, or in Unsorted.
+ * with every changed file covered by some node, in Supporting, or in Unsorted.
  */
 export const LayeredGuideSchema = GuideSchema.extend({
   /** In the agent's order, which puts every node after the nodes it builds on. */
   nodes: z.array(LayeredNodeSchema),
   /** The lockfiles and generated files the agent never saw, then the agent's own entries. */
   supporting: z.array(SupportingEntrySchema),
-  /** Changed files the agent placed nowhere, in the forge's order. */
+  /** Changed files no node covers and Supporting does not list, in the forge's order. */
   unsorted: z.array(z.string()),
 });
 
@@ -104,8 +125,17 @@ export type Guide = z.output<typeof GuideSchema>;
 export type GuideNode = z.output<typeof GuideNodeSchema>;
 export type GuideDecision = z.output<typeof DecisionSchema>;
 export type GuideDependency = z.output<typeof DependencySchema>;
+export type CoveredCode = z.output<typeof CoveredCodeSchema>;
 export type GuideState = z.output<typeof GuideStateSchema>;
 export type SupportingCategory = (typeof SUPPORTING_CATEGORIES)[number];
 export type SupportingEntry = z.output<typeof SupportingEntrySchema>;
 export type LayeredGuide = z.output<typeof LayeredGuideSchema>;
 export type LayeredNode = z.output<typeof LayeredNodeSchema>;
+
+/**
+ * The files a node covers, once each, in the order its `covers` first names them: a node's code is
+ * its `covers`, so this is its file list wherever one is wanted.
+ */
+export function coveredPaths(node: Pick<GuideNode, "covers">): string[] {
+  return [...new Set(node.covers.map((cover) => cover.path))];
+}

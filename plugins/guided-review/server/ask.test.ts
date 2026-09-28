@@ -5,6 +5,7 @@ import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fakeForge, sampleChangeRequest } from "./fake-forge.ts";
 import { fakeGuideAgents, sampleGuide, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
+import type { Guide } from "../shared/guide.ts";
 import type { ChangedFile } from "./forge/port.ts";
 import { fakeWorkspaces } from "./fake-workspaces.ts";
 import { GuideAgentError } from "./guide-agent/port.ts";
@@ -19,22 +20,36 @@ const REVIEW_ID = "github/github.com/acme/uploader/7";
 const RETRY_TEST: ChangedFile = { path: "src/retry.test.ts", previousPath: null, status: "added", additions: 20, deletions: 0, patch: "@@ -0,0 +1,1 @@\n+t" };
 const RETRY_DOC: ChangedFile = { path: "docs/retry.md", previousPath: null, status: "added", additions: 12, deletions: 0, patch: "@@ -0,0 +1,1 @@\n+d" };
 
-async function withHost(t: TestContext): Promise<{ service: ReviewService; agents: FakeGuideAgents }> {
+/** `src/upload.ts` with a second hunk, for nodes that cover part of it. */
+const UPLOAD_IN_TWO: ChangedFile = {
+  path: "src/upload.ts",
+  previousPath: null,
+  status: "modified",
+  additions: 3,
+  deletions: 2,
+  patch: "@@ -1,1 +1,1 @@\n-a\n+b\n@@ -20,3 +20,4 @@ retry\n x\n-y\n+y1\n+y2\n z",
+};
+
+async function withHost(
+  t: TestContext,
+  { guide = sampleGuide(), upload }: { guide?: Guide; upload?: ChangedFile } = {},
+): Promise<{ service: ReviewService; agents: FakeGuideAgents }> {
   const data = await mkdtemp(path.join(os.tmpdir(), "guided-review-ask-"));
   t.after(() => rm(data, { recursive: true, force: true }));
   const forge = fakeForge();
   const changeRequest = sampleChangeRequest(URL);
-  forge.changeRequests.set(URL, { ...changeRequest, files: [...changeRequest.files, RETRY_TEST, RETRY_DOC] });
+  const files = changeRequest.files.map((file) => (upload !== undefined && file.path === upload.path ? upload : file));
+  forge.changeRequests.set(URL, { ...changeRequest, files: [...files, RETRY_TEST, RETRY_DOC] });
   const workspaces = fakeWorkspaces();
   workspaces.repositories.set("github.com/acme/uploader", "/home/r/src/uploader");
   const agents = fakeGuideAgents();
-  agents.answer = () => sampleGuideReply({ ...sampleGuide(), supporting: [{ path: RETRY_TEST.path, category: "test" }] });
+  agents.answer = () => sampleGuideReply({ ...guide, supporting: [{ path: RETRY_TEST.path, category: "test" }] });
   const service = new ReviewService({ forges: [forge], workspaces, guideAgents: agents, dataDirectory: data });
   return { service, agents };
 }
 
-async function withGuide(t: TestContext) {
-  const host = await withHost(t);
+async function withGuide(t: TestContext, options?: Parameters<typeof withHost>[1]) {
+  const host = await withHost(t, options);
   await host.service.start({ url: URL });
   await host.service.settled();
   return host;
@@ -63,6 +78,9 @@ test("asking about a node sends the guide agent a prompt naming it, with what th
         "- Summary: Decides whether and when a failed upload is tried again.",
         "- Explanation: A pure function from the attempt number and the failure to a delay, or to giving up.",
         "- Decision: Full jitter on the backoff. Rather than: A fixed delay, which makes clients retry in lockstep.",
+        "",
+        "The code it covers:",
+        "- src/retry.ts",
       ].join("\n"),
       "Explain this concept in more depth than the guide does: how it works in the surrounding code, why it was done this way (using the description, the commits and the linked issues), and how the rest of the change relies on it.",
       [
@@ -73,6 +91,23 @@ test("asking about a node sends the guide agent a prompt naming it, with what th
       ].join("\n"),
     ].join("\n\n"),
   );
+});
+
+test("asking about a node that covers part of a file names the path and the lines it covers", async (t) => {
+  const guide = sampleGuide();
+  guide.nodes[0]!.covers = [
+    { path: "src/retry.ts", hunks: [], lines: [] },
+    { path: "src/upload.ts", hunks: [], lines: [{ start: 1, end: 1 }] },
+  ];
+  guide.nodes[1]!.covers = [{ path: "src/upload.ts", hunks: [2], lines: [] }];
+  const { service, agents } = await withGuide(t, { guide, upload: UPLOAD_IN_TWO });
+
+  assert.equal((await service.ask({ reviewId: REVIEW_ID, subject: { kind: "node", nodeId: "retry-policy" } })).status, "sent");
+  assert.equal((await service.ask({ reviewId: REVIEW_ID, subject: { kind: "node", nodeId: "uploader" } })).status, "sent");
+
+  const [policy, uploader] = agents.created[0]!.sent;
+  assert.match(policy!, /The code it covers:\n- src\/retry\.ts\n- src\/upload\.ts, line 1\n/);
+  assert.match(uploader!, /The code it covers:\n- src\/upload\.ts, lines 20-23\n/);
 });
 
 test("asking about a Supporting file names the file, how it changed, and its Supporting category", async (t) => {

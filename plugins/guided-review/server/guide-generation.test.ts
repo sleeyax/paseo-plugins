@@ -98,7 +98,9 @@ test("the generation prompt carries the change, forbids findings, and ends with 
   assert.match(prompt, /- c{7} Retry uploads/);
   assert.match(prompt, /- #12 Uploads fail \(open\)/);
   assert.match(prompt, /- src\/retry\.ts \(added, \+12 −0\)/);
-  assert.match(prompt, /### src\/upload\.ts\n\n```diff\n@@ -1,1 \+1,1 @@\n-a\n\+b\n```/);
+  assert.match(prompt, /### src\/upload\.ts\n\nHunk 1:\n\n```diff\n@@ -1,1 \+1,1 @@\n-a\n\+b\n```/);
+  assert.match(prompt, /A node's `covers` names the code it explains/);
+  assert.match(prompt, /"covers"/);
   assert.match(prompt, /Respond with JSON only that matches this JSON Schema, as your final message:\n\{\n/);
   assert.match(prompt, /"needToKnows"/);
   assert.ok(prompt.endsWith("}"));
@@ -161,6 +163,61 @@ test("a guide that points at nodes it does not have, or names two nodes alike, i
     message:
       'The guide agent\'s answer did not match what was asked for: nodes.1.id: "retry-policy" is used by an earlier node; overview.attention.0.nodeId: no node is "backoff".',
   });
+});
+
+test("a guide whose nodes name code the change does not have is invalid", async (t) => {
+  const { service, agents } = await withHost(t);
+  const guide = sampleGuide();
+  guide.nodes[0]!.covers = [{ path: "src/retry.test.ts", hunks: [], lines: [] }];
+  guide.nodes[1]!.covers = [{ path: "src/upload.ts", hunks: [2], lines: [{ start: 40, end: 50 }] }];
+  agents.answer = () => sampleGuideReply(guide);
+
+  await service.start({ url: URL });
+  await service.settled();
+
+  assert.deepEqual(await guideOf(service), {
+    status: "failed",
+    agentId: "agent-1",
+    message:
+      'The guide agent\'s answer did not match what was asked for: nodes.0.covers.0.path: "src/retry.test.ts" is not one of the changed files; nodes.1.covers.0.hunks.0: src/upload.ts has 1 hunk, so no hunk 2; nodes.1.covers.0.lines.0: lines 40–50 are not in the diff of src/upload.ts.',
+  });
+});
+
+test("a node that names only a file's path covers all of it", async (t) => {
+  const { service, agents } = await withHost(t);
+  const guide = sampleGuide() as unknown as { nodes: { covers: unknown }[] };
+  guide.nodes[1]!.covers = [{ path: "src/upload.ts" }];
+  agents.answer = () => sampleGuideReply(guide);
+
+  await service.start({ url: URL });
+  await service.settled();
+
+  const expected = sampleLayeredGuide();
+  expected.nodes[1]!.covers = [{ path: "src/upload.ts", hunks: [], lines: [] }];
+  assert.deepEqual(await guideOf(service), { status: "ready", agentId: "agent-1", guide: expected });
+});
+
+test("a diff too large for the prompt is still listed by its numbered hunks, for nodes to name", async (t) => {
+  const { service, forge, agents } = await withHost(t);
+  const long = Array.from({ length: 5_000 }, (_, index) => `+line ${index}`).join("\n");
+  forge.changeRequests.set(
+    URL,
+    sampleChangeRequest(URL, {
+      files: [
+        { path: "src/upload.ts", previousPath: null, status: "modified", additions: 30, deletions: 7, patch: "@@ -1,1 +1,1 @@\n-a\n+b" },
+        { path: "src/retry.ts", previousPath: null, status: "added", additions: 12, deletions: 0, patch: `@@ -0,0 +1,5000 @@ intro\n${long}` },
+      ],
+    }),
+  );
+
+  await service.start({ url: URL });
+  await service.settled();
+
+  assert.match(
+    agents.created[0]!.prompt,
+    /### src\/retry\.ts\n\n\(The diff is too large to include here\. Read the file in the repository\. Its hunks:\)\n- Hunk 1: @@ -0,0 \+1,5000 @@ intro\n/,
+  );
+  assert.doesNotMatch(agents.created[0]!.prompt, /\+line 4999/);
 });
 
 test("a reply with no JSON, an agent that fails, and one that cannot be created each fail the guide with a reason", async (t) => {

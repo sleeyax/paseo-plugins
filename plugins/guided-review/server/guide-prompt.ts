@@ -1,3 +1,4 @@
+import { splitHunks } from "./diff.ts";
 import type { ChangedFile, ChangeRequest } from "./forge/port.ts";
 
 /** A file's diff past this is left for the agent to read in the checkout, so one file cannot crowd out the rest. */
@@ -66,20 +67,33 @@ const RULES = `Rules:
 - Attention names the one or two foundational nodes that matter most, by their id.
 - A node's summary is one line; its explanation is a short paragraph or two.
 - A node's dependencies name the earlier nodes it builds on, each with the reason it has to be understood first. A node may depend only on nodes listed before it. Foundations depend on nothing; keep the tree to about three layers.
+- A node's \`covers\` names the code it explains, one entry per file: the file's path, and the numbers of the hunks it covers as the diff below labels them ("Hunk 2"). Leave \`hunks\` and \`lines\` empty when the node covers all of the file. When one hunk holds more than one concept, give line ranges in \`lines\` instead, so each node shows only its own lines. Several nodes may cover different hunks of one file.
 - Tests, docs and pure wiring (exports, registration, configuration that only connects the rest) go in supporting, not in a node.
-- Place every file under "Changed files" exactly once: in the files of one node, or in supporting. Use the paths exactly as listed.`;
+- Place every file under "Changed files": cover some or all of it in a node, or list it in supporting. Use the paths exactly as listed.`;
 
 function describeFile(file: ChangedFile): string {
   const renamed = file.previousPath ? ` from ${file.previousPath}` : "";
   return `- ${file.path} (${file.status}${renamed}, +${file.additions} −${file.deletions})`;
 }
 
+/**
+ * A file's diff hunk by hunk, each labelled with the number a node's `covers` names it by. A diff
+ * too large to include is still listed by its headers, so its hunks can be named.
+ */
 function fileDiff(file: ChangedFile): string {
   const heading = `### ${file.path}`;
   if (file.patch === null) return `${heading}\n\n(No diff: the file is binary, or too large for the forge to show. Read it in the repository.)`;
-  if (file.patch.length > MAX_PATCH_CHARS) return `${heading}\n\n(The diff is too large to include here. Read the file in the repository.)`;
-  const fence = "`".repeat(Math.max(3, longestBacktickRun(file.patch) + 1));
-  return `${heading}\n\n${fence}diff\n${file.patch}\n${fence}`;
+  const hunks = splitHunks(file.patch);
+  if (file.patch.length > MAX_PATCH_CHARS) {
+    const headers = hunks.map((hunk, index) => `- Hunk ${index + 1}: ${hunk.split("\n", 1)[0]}`);
+    return [`${heading}\n\n(The diff is too large to include here. Read the file in the repository. Its hunks:)`, ...headers].join("\n");
+  }
+  return [heading, ...hunks.map((hunk, index) => `Hunk ${index + 1}:\n\n${fenced(hunk)}`)].join("\n\n");
+}
+
+function fenced(diff: string): string {
+  const fence = "`".repeat(Math.max(3, longestBacktickRun(diff) + 1));
+  return `${fence}diff\n${diff}\n${fence}`;
 }
 
 function longestBacktickRun(text: string): number {

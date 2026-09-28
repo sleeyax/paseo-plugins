@@ -1,9 +1,10 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import type { AskResult, AskSubject, PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
-import { GuideSchema, type GuideState, type LayeredGuide } from "../shared/guide.ts";
+import type { AskResult, GuideSubject, NodeDiff, PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
+import { coveredPaths, GuideSchema, type GuideState, type LayeredGuide } from "../shared/guide.ts";
 import { numberLabel } from "../shared/reference.ts";
-import { askPrompt, type AskSubjectContext } from "./ask-prompt.ts";
+import { askPrompt, codeReferencesOf, type AskSubjectContext } from "./ask-prompt.ts";
+import { resolveCode } from "./diff.ts";
 import { ForgeError, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
 import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, GuideAgentError, type GuideAgentPort } from "./guide-agent/port.ts";
 import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
@@ -127,7 +128,7 @@ export class ReviewService {
    * about it, for the reviewer to follow up in the agent's chat. Sends only to an idle agent of a
    * finished guide, since a prompt to a busy one would interrupt it; otherwise says why not.
    */
-  async ask({ reviewId, subject }: { reviewId: string; subject: AskSubject }): Promise<AskResult> {
+  async ask({ reviewId, subject }: { reviewId: string; subject: GuideSubject }): Promise<AskResult> {
     const record = await this.#store.get(reviewId);
     if (record === null) return notSent(null, "This review is not known here any more. Start it again.");
     const { headSha } = record.header;
@@ -161,23 +162,42 @@ export class ReviewService {
   }
 
   /** What the prompt says about `subject`, from the stored guide and snapshot, or why it cannot be asked about. */
-  async #askContext(record: ReviewRecord, guide: LayeredGuide, subject: AskSubject): Promise<AskSubjectContext | string> {
+  async #askContext(record: ReviewRecord, guide: LayeredGuide, subject: GuideSubject): Promise<AskSubjectContext | string> {
+    const changeRequest = await this.#store.snapshot(record.id, record.header.headSha);
     if (subject.kind === "node") {
       const node = guide.nodes.find((candidate) => candidate.id === subject.nodeId);
       if (node === undefined) return "That concept is not in the guide any more.";
-      // #93 gives a node its hunks, which become the code references here.
-      return { kind: "node", node, code: [] };
+      if (changeRequest === null) return "What the forge said at this head is missing. Start the review again.";
+      return { kind: "node", node, code: codeReferencesOf(resolveCode(changeRequest.files, node.covers).files) };
     }
-    const changeRequest = await this.#store.snapshot(record.id, record.header.headSha);
     const file = changeRequest?.files.find((candidate) => candidate.path === subject.path);
     if (file === undefined) return `${subject.path} is not one of the change's files.`;
     const supporting = guide.supporting.find((entry) => entry.path === file.path);
     if (supporting !== undefined) return { kind: "file", file, category: supporting.category };
     if (guide.unsorted.includes(file.path)) return { kind: "file", file, category: null };
-    const node = guide.nodes.find((candidate) => candidate.files.includes(file.path));
-    return node === undefined
-      ? `${file.path} is not in the guide any more.`
-      : `${file.path} belongs to the concept "${node.title}". Ask about that concept instead.`;
+    const nodes = guide.nodes.filter((candidate) => coveredPaths(candidate).includes(file.path));
+    if (nodes.length === 0) return `${file.path} is not in the guide any more.`;
+    const titles = nodes.map((node) => `"${node.title}"`).join(", ");
+    return nodes.length === 1
+      ? `${file.path} belongs to the concept ${titles}. Ask about that concept instead.`
+      : `${file.path} belongs to the concepts ${titles}. Ask about one of those instead.`;
+  }
+
+  /**
+   * The hunks one node of the review's current guide covers, parsed from what the forge said at the
+   * guide's head, in the order the node names its files.
+   */
+  async nodeDiff({ reviewId, nodeId }: { reviewId: string; nodeId: string }): Promise<NodeDiff> {
+    const record = await this.#store.get(reviewId);
+    if (record === null) throw new Error("This review is not known here any more. Start it again.");
+    const { headSha } = record.header;
+    const stored = await this.#store.getGuide(record.id, headSha);
+    if (stored?.status !== "ready" || stored.guide === null) throw new Error("The guide is not ready yet.");
+    const node = stored.guide.nodes.find((candidate) => candidate.id === nodeId);
+    if (node === undefined) throw new Error(`The guide has no concept "${nodeId}". Reopen the panel.`);
+    const changeRequest = await this.#store.snapshot(record.id, headSha);
+    if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
+    return { headSha, files: resolveCode(changeRequest.files, node.covers).files };
   }
 
   /** For the `workspace.archived` hook: a review's workspace ending ends its guide agents. */
@@ -282,7 +302,7 @@ export class ReviewService {
         generation.agentId = agent.id;
         await save({ status: "generating", guide: null, message: null });
       }
-      const parsed = parseGuide(await this.#guideAgents.reply(generation.agentId));
+      const parsed = parseGuide(await this.#guideAgents.reply(generation.agentId), changeRequest.files);
       if (!parsed.ok) return save({ status: "failed", guide: null, message: parsed.message });
       const changed = changeRequest.files.map((file) => file.path);
       await save({ status: "ready", guide: layOutGuide(parsed.guide, changed, files.setAside), message: null });
