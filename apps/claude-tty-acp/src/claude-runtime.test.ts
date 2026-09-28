@@ -20,6 +20,8 @@ const CLEAR_INPUT_LINE = "\u0015";
 const CLEAR_INPUT_CONFIRMATIONS = 3;
 /** And after this many keys that changed nothing, which is what a box it cannot empty costs. */
 const CLEAR_INPUT_UNCHANGED = 4;
+/** The key that moves a startup menu's marker down. */
+const CURSOR_DOWN = "\u001b[B";
 
 /**
  * The runtime waits are sized for a real Claude on a loaded host, and a fake PTY that answers at once only has to be outlasted by these.
@@ -110,6 +112,23 @@ function keySequence(keystrokes: string[]): string[] {
   for (const key of keystrokes) {
     if (key === CLEAR_INPUT_LINE) {
       if (sequence.at(-1) !== "clear") sequence.push("clear");
+      continue;
+    }
+    sequence.push(key);
+  }
+  return sequence;
+}
+
+/**
+ * The keys that answered a startup menu, with the run of down keys before the confirm collapsed into a single `down`.
+ * The adapter presses down again whenever its next look finds the marker unmoved, and a runner that stalls past that
+ * look before the fake repaints takes another, so how many downs it took is the runner's, not the test's.
+ */
+function menuKeys(keystrokes: string[]): string[] {
+  const sequence: string[] = [];
+  for (const key of keystrokes) {
+    if (key === CURSOR_DOWN) {
+      if (sequence.at(-1) !== "down") sequence.push("down");
       continue;
     }
     sequence.push(key);
@@ -341,14 +360,14 @@ test("asks through ACP before accepting Claude workspace trust", async () => {
   try {
     const session = await agent.newSession({ cwd, mcpServers: [] });
     const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
-    await waitFor(() => permissionRequests.length === 1 && spawned !== null && spawned.writes.length === 4);
+    await waitFor(() => permissionRequests.length === 1 && spawned !== null && menuKeys(spawned.writes).length === 4);
     assert.equal(permissionRequests[0]!.toolCall.title, "Is this a project you created or one you trust?");
     assert.deepEqual(permissionRequests[0]!.toolCall.locations, [{ path: cwd }]);
     assert.deepEqual(permissionRequests[0]!.options, [
       { optionId: "deny-workspace", name: "No, exit", kind: "reject_once" },
       { optionId: "trust-workspace", name: "Yes, trust this folder", kind: "reject_once" },
     ]);
-    assert.deepEqual((spawned as unknown as FakePty).writes, ["\u001b[B", "\r", "\u001b[200~hello \u001b[201~", "\r"]);
+    assert.deepEqual(menuKeys((spawned as unknown as FakePty).writes), ["down", "\r", "\u001b[200~hello \u001b[201~", "\r"]);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
     assert.deepEqual(await turn, { stopReason: "end_turn" });
   } finally {
@@ -482,7 +501,7 @@ test("asks through ACP before letting a CLAUDE.md import files from outside the 
   try {
     const session = await agent.newSession({ cwd, mcpServers: [] });
     const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
-    await waitFor(() => permissionRequests.length === 1 && spawned !== null && spawned.writes.length === 4);
+    await waitFor(() => permissionRequests.length === 1 && spawned !== null && menuKeys(spawned.writes).length === 4);
     assert.equal(permissionRequests[0]!.toolCall.title, "Let this project's CLAUDE.md import files from outside it?");
     // The files are the question, so the card has to carry the ones Claude listed rather than the words around them.
     assert.deepEqual((permissionRequests[0]!.toolCall.rawInput as { imports?: string[] }).imports, EXTERNAL_IMPORTS);
@@ -490,7 +509,7 @@ test("asks through ACP before letting a CLAUDE.md import files from outside the 
       { optionId: "disable-external-imports", name: "No, disable external imports", kind: "reject_once" },
       { optionId: "allow-external-imports", name: "Yes, allow external imports", kind: "reject_once" },
     ]);
-    assert.deepEqual((spawned as unknown as FakePty).writes, ["[B", "\r", "[200~hello [201~", "\r"]);
+    assert.deepEqual(menuKeys((spawned as unknown as FakePty).writes), ["down", "\r", "\u001b[200~hello \u001b[201~", "\r"]);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
     assert.deepEqual(await turn, { stopReason: "end_turn" });
   } finally {
@@ -2283,8 +2302,7 @@ test("keeps the whole conversation when Claude asks how to resume a suspended se
     const writes = spawns[1]!.pty.writes;
     assert.deepEqual(spawns[1]!.args.slice(0, 2), ["--resume", created.sessionId]);
     // Down then Enter answers with "Resume full session as-is", and the prompt is pasted only after that.
-    assert.deepEqual(writes.slice(0, 2), ["\u001b[B", "\r"]);
-    assert.equal(writes[2], "\u001b[200~second \u001b[201~");
+    assert.deepEqual(menuKeys(writes).slice(0, 3), ["down", "\r", "\u001b[200~second \u001b[201~"]);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "second done" });
     assert.deepEqual(await second, { stopReason: "end_turn" });
   } finally {
@@ -2405,7 +2423,9 @@ test("presses again when Claude drops the key that moves its resume question", a
 
     const second = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "second" }] });
     await waitFor(() => spawns.length === 2 && spawns[1]!.pty.writes.some((write) => write.startsWith("\u001b[200~")), 3_000);
-    assert.deepEqual(spawns[1]!.pty.writes.slice(0, 3), ["\u001b[B", "\u001b[B", "\r"]);
+    const writes = spawns[1]!.pty.writes;
+    assert.deepEqual(menuKeys(writes).slice(0, 2), ["down", "\r"]);
+    assert.ok(writes.indexOf("\r") >= 2, `did not press down again after the dropped key: ${JSON.stringify(writes)}`);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: created.sessionId, last_assistant_message: "second done" });
     assert.deepEqual(await second, { stopReason: "end_turn" });
   } finally {
@@ -3719,13 +3739,13 @@ test("asks through ACP before accepting Claude's bypass permissions disclaimer",
     const session = await agent.newSession({ cwd, mcpServers: [] });
     await agent.setSessionMode({ sessionId: session.sessionId, modeId: "bypassPermissions" });
     const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hello" }] });
-    await waitFor(() => permissionRequests.length === 1 && spawned !== null && spawned.writes.length === 4);
+    await waitFor(() => permissionRequests.length === 1 && spawned !== null && menuKeys(spawned.writes).length === 4);
     assert.equal(permissionRequests[0]!.toolCall.title, "Run Claude Code without asking permission for anything?");
     assert.deepEqual(permissionRequests[0]!.options, [
       { optionId: "deny-bypass", name: "No, exit", kind: "reject_once" },
       { optionId: "accept-bypass", name: "Yes, I accept", kind: "reject_once" },
     ]);
-    assert.deepEqual((spawned as unknown as FakePty).writes, ["\u001b[B", "\r", "\u001b[200~hello \u001b[201~", "\r"]);
+    assert.deepEqual(menuKeys((spawned as unknown as FakePty).writes), ["down", "\r", "\u001b[200~hello \u001b[201~", "\r"]);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
     assert.deepEqual(await turn, { stopReason: "end_turn" });
   } finally {
