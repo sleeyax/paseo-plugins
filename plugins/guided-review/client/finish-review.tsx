@@ -148,6 +148,11 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate }: F
               textAlignVertical: "top",
             }}
           />
+          {header.forge === "github" && drafts.drafts.some((draft) => draft.location.kind === "general") ? (
+            <Text style={{ ...small, color: colors.foregroundMuted }}>
+              Your comments on concepts, listed below, go after this text in the review body, a paragraph each.
+            </Text>
+          ) : null}
           {body !== saved ? (
             <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[2] }}>
               <BoxButton colors={colors} label={save.isPending ? "Saving…" : "Save body"} disabled={busy} onPress={() => save.mutate()} />

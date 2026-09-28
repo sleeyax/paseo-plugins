@@ -455,7 +455,7 @@ test("drafts saved at once start one pending review between them", async () => {
 });
 
 test("each anchor becomes the thread fields GitHub anchors it by", async () => {
-  const cases: { name: string; anchor: DraftAnchor; fields: Record<string, unknown>; answer: Parameters<typeof addedThread>[0] }[] = [
+  const cases: { name: string; anchor: Exclude<DraftAnchor, { kind: "general" }>; fields: Record<string, unknown>; answer: Parameters<typeof addedThread>[0] }[] = [
     {
       name: "an added line is on the RIGHT by its new number",
       anchor: { kind: "line", ...PACKAGE_JSON, line: ADDED },
@@ -522,6 +522,13 @@ test("a line GitHub cannot place fails in GitHub's words", async () => {
     forge.createDraft(PR_105_TARGET, { anchor: { kind: "line", ...PACKAGE_JSON, line: ADDED }, body: "Why?" }),
     new ForgeError("gh failed: Line could not be resolved"),
   );
+});
+
+test("a comment on the pull request as a whole is not a draft thread: GitHub keeps it in the review body", async () => {
+  const { forge, run } = forgeReplaying([]);
+
+  await assert.rejects(forge.createDraft(PR_105_TARGET, { anchor: { kind: "general" }, body: "About the bump: why now?" }), ForgeError);
+  assert.equal(run.calls.length, 0, "gh was not run");
 });
 
 test("edits a draft's text and deletes a draft by its comment ID", async () => {

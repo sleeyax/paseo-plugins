@@ -6,9 +6,9 @@ import { Platform, Pressable, Text, View, type GestureResponderEvent } from "rea
 import * as contracts from "../shared/contracts.ts";
 import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
 import type { DiffHunk, DiffLine, FileDiff } from "../shared/diff.ts";
-import { isLine, lastLineOf, lineRefOf, type DraftLocation, type LineRef } from "../shared/drafts.ts";
+import { isLine, lastLineOf, lineRefOf, pathOf, type DraftLocation, type LineRef } from "../shared/drafts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
-import { DraftCard, DraftsContext, NewCommentBox, type DraftsControl } from "./drafts.tsx";
+import { CommentNodeContext, DraftCard, DraftsContext, NewCommentBox, type DraftsControl } from "./drafts.tsx";
 import { fontSize, leading, radius, spacing, tint } from "./theme.ts";
 
 type Colors = PluginTheme["colors"];
@@ -54,12 +54,15 @@ export function NodeCode({ reviewId, agentId, subject, theme }: NodeCodeProps) {
   if (diff.isError) {
     return <Muted colors={colors} color={colors.statusDanger}>{diff.error instanceof Error ? diff.error.message : String(diff.error)}</Muted>;
   }
+  // A comment on a node's code is linked to the node; on a Supporting or Unsorted file, to none.
   return (
-    <View style={{ gap: spacing[3], marginTop: spacing[1] }}>
-      {diff.data.files.map((file) => (
-        <FileDiffView key={file.path} file={file} colors={colors} />
-      ))}
-    </View>
+    <CommentNodeContext.Provider value={subject.kind === "node" ? subject.nodeId : null}>
+      <View style={{ gap: spacing[3], marginTop: spacing[1] }}>
+        {diff.data.files.map((file) => (
+          <FileDiffView key={file.path} file={file} colors={colors} />
+        ))}
+      </View>
+    </CommentNodeContext.Provider>
   );
 }
 
@@ -74,7 +77,7 @@ export function FileDiffView({ file, colors }: { file: FileDiff; colors: Colors 
   const drafts = useContext(DraftsContext);
   const place = useId();
   const fileBox = drafts?.open?.kind === "new" && drafts.open.place === `${place}:file` ? drafts.open : null;
-  const fileDrafts = drafts?.drafts.filter((draft) => draft.location.path === file.path && draft.location.kind === "file") ?? [];
+  const fileDrafts = drafts?.drafts.filter((draft) => draft.location.kind === "file" && draft.location.path === file.path) ?? [];
   return (
     <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, overflow: "hidden", backgroundColor: colors.surface0 }}>
       <FileHeader
@@ -221,7 +224,7 @@ function HunkLines({
       {hunk.lines.map((line, index) => {
         const lineDrafts =
           drafts?.drafts.filter((draft) => {
-            const last = draft.location.path === path ? lastLineOf(draft.location) : null;
+            const last = pathOf(draft.location) === path ? lastLineOf(draft.location) : null;
             return last !== null && isLine(line, last);
           }) ?? [];
         return (
@@ -278,6 +281,7 @@ function selectionOf(hunk: DiffHunk, location: DraftLocation): Selection | null 
       return from === -1 || to === -1 ? null : { from, to };
     }
     case "file":
+    case "general":
       return null;
   }
 }

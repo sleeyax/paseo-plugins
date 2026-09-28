@@ -60,6 +60,8 @@ export function locationOfAnchor(anchor: DraftAnchor): DraftLocation {
       return { kind: "range", path: anchor.path, start: lineRefOf(anchor.start), end: lineRefOf(anchor.end) };
     case "file":
       return { kind: "file", path: anchor.path };
+    case "general":
+      return { kind: "general" };
   }
 }
 
@@ -126,6 +128,8 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
       return structuredClone(forge.drafts.get(ref.url) ?? []);
     },
     async createDraft(target, { anchor, body }) {
+      // As the real adapter: GitHub's comment on the whole pull request is a paragraph of the review body.
+      if (kind === "github" && anchor.kind === "general") throw new ForgeError("GitHub keeps a comment on the pull request as a whole in the review body.");
       forge.created.push(structuredClone({ target, anchor, body }));
       const draft: Draft = { id: `draft-${forge.created.length}`, body, location: locationOfAnchor(anchor) };
       forge.drafts.set(target.ref.url, [...(forge.drafts.get(target.ref.url) ?? []), draft]);

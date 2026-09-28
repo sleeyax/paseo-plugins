@@ -45,6 +45,18 @@ export function carryMarks(previous: GuideAtHead & { marks: Understood }, next: 
 }
 
 /**
+ * The node of `next` that covers exactly the code the node `nodeId` of `previous` covers, compared
+ * as `carryMarks` compares them; null when there is none, or nothing to compare. How a draft written
+ * from a node of an earlier guide finds its node in a later one.
+ */
+export function followNode(previous: GuideAtHead, nodeId: string, next: GuideAtHead): string | null {
+  const node = previous.guide.nodes.find((candidate) => candidate.id === nodeId);
+  const key = node === undefined ? null : keyOf(resolveCode(previous.files, node.covers).files);
+  if (key === null) return null;
+  return next.guide.nodes.find((candidate) => keyOf(resolveCode(next.files, candidate.covers).files) === key)?.id ?? null;
+}
+
+/**
  * What a subject's code says, as one string two subjects share only when their code is the same:
  * each file by path, with its lines' kinds and text. Null when there is nothing to compare, which
  * includes a file whose diff the forge withheld, since a binary or oversized change cannot be told
