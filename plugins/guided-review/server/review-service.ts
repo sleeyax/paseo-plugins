@@ -182,6 +182,7 @@ export class ReviewService {
     } catch (error) {
       if (!(error instanceof ForgeError)) throw error;
       const message = `Could not check ${record.ref.url} for new commits: ${error.message}`;
+      this.#log(message);
       return { guideHeadSha, forgeHeadSha: null, moved: false, state: null, message };
     }
   }
