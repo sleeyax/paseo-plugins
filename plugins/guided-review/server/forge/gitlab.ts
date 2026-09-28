@@ -2,8 +2,10 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Draft, DraftLocation, LineRef } from "../../shared/drafts.ts";
 import type { CommandRunner } from "../command-runner.ts";
+import type { Verdict } from "../../shared/submit.ts";
 import { createCli, type Cli } from "./cli.ts";
 import { GITHUB_HOST } from "./github.ts";
+import { SubmitSteps } from "./submit-steps.ts";
 import {
   ForgeError,
   type AnchorLine,
@@ -18,6 +20,7 @@ import {
   type Forge,
   type ForgeUser,
   type RepositoryRef,
+  type SubmitOutcome,
 } from "./port.ts";
 
 /** Cloning a large repository is the one call that can take minutes. */
@@ -142,6 +145,32 @@ const DiscussionResponse = z.object({
   notes: z.array(z.object({ position: PositionResponse.nullish() })),
 });
 
+/** `GET version`: `19.5.0-pre`, `17.11.3-ee`. */
+const VersionResponse = z.object({ version: z.string() });
+
+/** `GET …/reviewers`: each reviewer with their state, `requested_changes` among them. */
+const ReviewersResponse = z.array(z.object({ user: z.object({ username: z.string() }), state: z.string().nullish() }));
+
+/** A GraphQL mutation's answer, which reports a failure as HTTP 200 with `errors` in the payload. */
+const RequestChangesResponse = z.object({
+  data: z.object({ mergeRequestRequestChanges: z.object({ errors: z.array(z.string()) }).nullable() }).nullish(),
+  errors: z.array(z.object({ message: z.string() })).nullish(),
+});
+
+/** Takes the project's full path, not its numeric ID, and the IID as a string. */
+export const REQUEST_CHANGES_MUTATION =
+  "mutation($projectPath: ID!, $iid: String!) { mergeRequestRequestChanges(input: { projectPath: $projectPath, iid: $iid }) { errors } }";
+
+/** The first GitLab whose `bulk_publish` takes `note` and `reviewer_state`; an older one ignores both. */
+const BULK_PUBLISH_BODY_VERSION = [19, 2] as const;
+
+/** The reviewer state a bulk publish sets for each verdict; an approval is a call of its own after it. */
+const REVIEWER_STATES: Record<Verdict, "requested_changes" | "reviewed"> = {
+  approve: "reviewed",
+  "request-changes": "requested_changes",
+  comment: "reviewed",
+};
+
 export type GitLabForgeOptions = {
   run: CommandRunner;
   /** The `glab` executable from the settings. */
@@ -205,6 +234,74 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
     await loggedIn(ref.host);
     // GitLab answers 204 with no body.
     await glab.text(["api", "--hostname", ref.host, "--method", "DELETE", `${await draftNotes(ref)}/${id}`]);
+  };
+
+  const mergeRequest = async (ref: ChangeRequestRef) => `projects/${await projectId(ref)}/merge_requests/${ref.number}`;
+
+  /** A `POST` whose answer is not read, like `bulk_publish`'s empty 204, sent as JSON the way `send` sends one. */
+  const post = async (ref: ChangeRequestRef, path: string, body: Record<string, unknown>) => {
+    await loggedIn(ref.host);
+    await glab.text(
+      ["api", "--hostname", ref.host, "--method", "POST", "--header", "Content-Type: application/json", "--input", "-", path],
+      { input: JSON.stringify(body) },
+    );
+  };
+
+  /**
+   * Whether this GitLab's `bulk_publish` takes the review body as `note`. One older than 19.2
+   * publishes the drafts and silently drops it, and one whose version cannot be read is taken for
+   * such: the body then goes as an MR note of its own, which is what a newer GitLab makes of it too.
+   */
+  const publishesBody = async (ref: ChangeRequestRef): Promise<boolean> => {
+    try {
+      const { version } = await api(ref, VersionResponse, "version");
+      const match = /^(\d+)\.(\d+)/.exec(version);
+      if (match === null) return false;
+      const [major, minor] = [Number(match[1]), Number(match[2])];
+      const [needMajor, needMinor] = BULK_PUBLISH_BODY_VERSION;
+      return major > needMajor || (major === needMajor && minor >= needMinor);
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * Makes the viewer's reviewer state Requested changes where the bulk publish did not: an older
+   * GitLab ignores `reviewer_state`, and a newer one does not say whether setting it worked. The
+   * reviewer list says whether it took, and the GraphQL mutation sets it when it did not or when the
+   * list cannot be read. The mutation fails as HTTP 200 with `errors`, which are read here.
+   */
+  const requestChanges = async (ref: ChangeRequestRef) => {
+    const took = await (async () => {
+      try {
+        const viewer = (await api(ref, UserResponse, "user")).username.toLowerCase();
+        const reviewers = await api(ref, ReviewersResponse, `${await mergeRequest(ref)}/reviewers`);
+        return reviewers.some((reviewer) => reviewer.user.username.toLowerCase() === viewer && reviewer.state === "requested_changes");
+      } catch {
+        return false;
+      }
+    })();
+    if (took) return;
+
+    await loggedIn(ref.host);
+    const response = await glab.json(RequestChangesResponse, [
+      "api",
+      "--hostname",
+      ref.host,
+      "graphql",
+      "-f",
+      `query=${REQUEST_CHANGES_MUTATION}`,
+      "-f",
+      `projectPath=${ref.project}`,
+      "-f",
+      `iid=${ref.number}`,
+    ]);
+    const payload = response.data?.mergeRequestRequestChanges;
+    const errors = [...(response.errors ?? []).map((error) => error.message), ...(payload?.errors ?? [])];
+    if (errors.length === 0 && !payload) errors.push("it answered with no result");
+    if (errors.length > 0) {
+      throw new ForgeError(`GitLab did not record your request for changes: ${errors.join("; ")}. Request changes on the merge request's page.`);
+    }
   };
 
   return {
@@ -362,13 +459,78 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       await deleteDraftNote(ref, draftNoteId(draftId));
     },
 
-    // GitLab has no draft review body, so the service keeps it until submit. Submitting comes with its own ticket.
+    // GitLab has no draft review body, so the service keeps it until submit.
     reviewBody: null,
-    async submitReview() {
-      throw new ForgeError("Submitting a review of a GitLab merge request is not supported yet.");
+
+    /**
+     * Publishes every draft note at once with `bulk_publish`, the body as its `note` and the verdict
+     * as its `reviewer_state` (`requested_changes`, else `reviewed`). A GitLab older than 19.2 drops
+     * both, so there the body is posted as an MR note of its own. An approval is the approve endpoint
+     * after, on the guide's head, which GitLab refuses once the MR has moved on; a request for changes
+     * is confirmed in the reviewer list and set through GraphQL when it did not take. Nothing after a
+     * failed publish is tried, so no verdict goes out without the comments it was given with.
+     */
+    async submitReview(target, { verdict, body }): Promise<SubmitOutcome> {
+      const { ref } = target;
+      const steps = new SubmitSteps();
+      const withNote = body !== "" && (await publishesBody(ref));
+      const separateNote = body !== "" && !withNote;
+      const notTried = "Not tried, since your drafts were not published.";
+
+      const publish = await steps.run("publish", withNote ? "Publish your drafts and the review body" : "Publish your drafts", async () =>
+        post(ref, `${await draftNotes(ref)}/bulk_publish`, { ...(withNote ? { note: body } : {}), reviewer_state: REVIEWER_STATES[verdict] }),
+      );
+
+      let bodyOut = !separateNote;
+      if (separateNote) {
+        const label = "Post the review body";
+        if (publish.ok) bodyOut = (await steps.run("note", label, async () => post(ref, `${await mergeRequest(ref)}/notes`, { body }))).ok;
+        else steps.skip("note", label, notTried);
+      }
+
+      if (verdict === "approve") {
+        if (!publish.ok) steps.skip("approve", "Approve", notTried);
+        else {
+          await steps.run("approve", "Approve", async () => {
+            try {
+              // The head the guide explained: GitLab answers 409 when the MR's is another.
+              await post(ref, `${await mergeRequest(ref)}/approve`, { sha: target.headSha });
+            } catch (error) {
+              if (error instanceof ForgeError && /HTTP 409/.test(error.message)) {
+                throw new ForgeError("GitLab did not approve, as the MR has commits newer than the guide. Regenerate the guide to approve them.");
+              }
+              throw error;
+            }
+          });
+        }
+      }
+
+      if (verdict === "request-changes") {
+        if (publish.ok) await steps.run("request-changes", "Request changes", () => requestChanges(ref));
+        else steps.skip("request-changes", "Request changes", notTried);
+      }
+
+      return { published: publish.ok && bodyOut, steps: steps.steps };
     },
-    async discardReview() {
-      throw new ForgeError("Discarding a review of a GitLab merge request is not supported yet.");
+
+    /**
+     * Deletes every one of the viewer's draft notes, MR-level ones included, one by one, since GitLab
+     * has no bulk delete. Each is tried whatever became of the one before, and any left are named.
+     */
+    async discardReview(ref) {
+      const notes = await list(ref, DraftNoteResponse, `${await draftNotes(ref)}?per_page=100`);
+      const failures: string[] = [];
+      for (const note of notes) {
+        try {
+          await deleteDraftNote(ref, draftNoteId(String(note.id)));
+        } catch (error) {
+          failures.push(`${note.id} (${(error as Error).message})`);
+        }
+      }
+      if (failures.length > 0) {
+        const count = failures.length === 1 ? "One of your draft notes" : `${failures.length} of your draft notes`;
+        throw new ForgeError(`${count} could not be deleted: ${failures.join(", ")}. Delete what is left on the merge request's page.`);
+      }
     },
   };
 }
