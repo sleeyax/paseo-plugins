@@ -1,4 +1,5 @@
 import type { StartPhase, StartProgress } from "../shared/contracts.ts";
+import { numberLabel } from "../shared/reference.ts";
 
 export type Tone = "muted" | "danger";
 
@@ -10,10 +11,10 @@ export function isFinished(phase: StartPhase): boolean {
 /** The line the start surface shows while a review is being prepared. */
 export function describeProgress(progress: StartProgress): { text: string; tone: Tone } {
   const header = progress.header;
-  const name = header ? `#${header.number} in ${header.project}` : "the pull request";
+  const name = header ? `${numberLabel(header.forge, header.number)} in ${header.project}` : "the PR or MR";
   switch (progress.phase) {
     case "reading":
-      return { text: "Reading the pull request…", tone: "muted" };
+      return { text: "Reading the PR or MR…", tone: "muted" };
     case "cloning":
       return { text: `No Paseo project has ${header?.project ?? "this repository"}, so it is being cloned…`, tone: "muted" };
     case "creating-workspace":

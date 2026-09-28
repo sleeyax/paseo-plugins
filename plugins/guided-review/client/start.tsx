@@ -6,6 +6,7 @@ import React, { useEffect, useState } from "react";
 import { ScrollView, Text } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
+import { numberLabel } from "../shared/reference.ts";
 import { openPanelWhenReady } from "./open-panel.ts";
 import { describeProgress, isFinished } from "./start-progress.ts";
 import { fontSize, leading, MAX_CONTENT_WIDTH, spacing } from "./theme.ts";
@@ -13,7 +14,7 @@ import { fontSize, leading, MAX_CONTENT_WIDTH, spacing } from "./theme.ts";
 const POLL_MS = 1_000;
 
 /**
- * Where a PR URL is pasted. The Command Center cannot take text, so its item opens this surface, and
+ * Where a PR or MR URL is pasted. The Command Center cannot take text, so its item opens this surface, and
  * a surface is not handed the client context, so the panel opener comes in through the closure.
  */
 export function createStartSurface(openPanel: (workspaceId: string) => void) {
@@ -64,11 +65,12 @@ export function createStartSurface(openPanel: (workspaceId: string) => void) {
     };
 
     const line = current === null ? null : describeProgress(current);
+    const number = current?.header ? numberLabel(current.header.forge, current.header.number) : null;
     const status =
-      current?.phase === "ready" && panel !== "opening" && current.header
+      current?.phase === "ready" && panel !== "opening" && number
         ? panel === "opened"
-          ? `Opened #${current.header.number} in its workspace.`
-          : `The workspace for #${current.header.number} is ready; open "Review #${current.header.number}" from the sidebar.`
+          ? `Opened ${number} in its workspace.`
+          : `The workspace for ${number} is ready; open "Review ${number}" from the sidebar.`
         : line?.text;
 
     return (
@@ -85,8 +87,8 @@ export function createStartSurface(openPanel: (workspaceId: string) => void) {
         <SettingsSection title="Start a guided review">
           <SettingsCard>
             <SettingsInput
-              label="Pull request URL"
-              hint="The guide is prepared in a Paseo workspace checked out at the pull request"
+              label="Pull request or merge request URL"
+              hint="A GitHub PR, or a GitLab MR on a host glab is logged in to. The guide is prepared in a Paseo workspace checked out at it"
               placeholder="https://github.com/owner/repo/pull/123"
               error={rejection}
               disabled={busy}
@@ -96,7 +98,7 @@ export function createStartSurface(openPanel: (workspaceId: string) => void) {
               }}
             />
             <SettingsAction
-              label="Read the pull request and open its workspace"
+              label="Read it and open its workspace"
               actionLabel={busy ? "Starting…" : "Start"}
               disabled={busy || url.trim() === ""}
               onPress={() => void submit()}

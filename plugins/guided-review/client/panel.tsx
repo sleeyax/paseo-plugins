@@ -8,6 +8,7 @@ import { ScrollView, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import type { ReviewHeader } from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
+import { numberLabel } from "../shared/reference.ts";
 import { fontSize, leading, MAX_CONTENT_WIDTH, radius, spacing } from "./theme.ts";
 
 /** The "Guided Review" tab: the review this workspace was created for, found by the workspace's ID. */
@@ -25,7 +26,7 @@ export function GuidePanel({ workspaceId, theme, layout }: PluginWorkspacePanelP
     body = (
       <Note color={colors.foregroundMuted}>
         No guided review lives in this workspace. Start one from the Command Center with "Guided Review: start from a
-        pull request URL".
+        PR or MR URL".
       </Note>
     );
   } else {
@@ -76,7 +77,7 @@ function Header({ header, theme }: { header: ReviewHeader; theme: PluginTheme })
           <Text style={{ ...small, color: stateColor }}>{header.isDraft ? "Draft" : STATE_LABELS[header.state]}</Text>
         </View>
         <Text style={{ ...small, color: colors.foregroundMuted }}>
-          {header.project} #{header.number} by {header.author}
+          {header.project} {numberLabel(header.forge, header.number)} by {header.author}
         </Text>
       </View>
       <Text style={{ ...small, color: colors.foregroundMuted }}>
