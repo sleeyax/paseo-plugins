@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { AskResult, BranchStart, GuideSubject, HeadCheck, NodeDiff, PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
+import type { CommentSubject, Suggestion } from "../shared/contracts.ts";
 import { coveredPaths, GuideSchema, type CoveredCode, type GuideState, type LayeredGuide } from "../shared/guide.ts";
 import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
 import { numberLabel } from "../shared/reference.ts";
@@ -11,10 +13,11 @@ import { carryMarks } from "./carry-over.ts";
 import { resolveCode } from "./diff.ts";
 import { ForgeError, type BranchChangeRequest, type ChangedFile, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
 import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, GuideAgentError, type GuideAgentPort } from "./guide-agent/port.ts";
-import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
+import { jsonSchemaOf, runStructured, withOutputSchema } from "./guide-agent/structured.ts";
 import { setAside } from "./file-classes.ts";
 import { layOutGuide, parseGuide } from "./guide-output.ts";
 import { guidePrompt } from "./guide-prompt.ts";
+import { codeWordingContext, WordingSchema, wordingPrompt, type WordingSubjectContext } from "./wording-prompt.ts";
 import { ReviewStore, reviewIdOf, type GuideRecord, type ProgressRecord, type ReviewRecord } from "./review-store.ts";
 import type { FastForwardResult, ReviewWorkspace, WorkspaceCheckout, WorkspacePort } from "./workspaces/port.ts";
 
@@ -50,6 +53,8 @@ type LocalCheckout = WorkspaceCheckout & { branch: string; repository: NonNullab
 type PrepareMode = "start" | "regenerate";
 /** A guide being generated; `agentId` is set once its agent exists. */
 type Generation = { agentId: string | null; done: Promise<void> };
+/** A "Suggest wording" request to the guide agent `agentId`. */
+type SuggestionJob = { agentId: string; state: Suggestion; done: Promise<void> };
 
 /**
  * The plugin's top level: every RPC the panel and the start surface call is a method here, and it
@@ -73,6 +78,8 @@ export class ReviewService {
   readonly #branchStarts = new Map<string, BranchJob>();
   /** The last write of each guide's marks, by review and head SHA, which the next one waits for. */
   readonly #progressWrites = new Map<string, Promise<unknown>>();
+  /** "Suggest wording" requests, by suggestion ID, until the panel has read how they ended. */
+  readonly #suggestions = new Map<string, SuggestionJob>();
 
   constructor(options: ReviewServiceOptions) {
     this.#forges = options.forges;
@@ -393,6 +400,68 @@ export class ReviewService {
     return null;
   }
 
+  /**
+   * "Suggest wording": has the review's guide agent word a comment on `subject` from what the reviewer
+   * typed, as a background job the panel follows through `suggestion`, since the agent may take longer
+   * than an RPC may. Asks only an idle agent of a finished guide, one request at a time; otherwise says
+   * why not. The text goes back to the comment box; nothing is saved or posted.
+   */
+  async suggestWording({ reviewId, subject, prompt }: { reviewId: string; subject: CommentSubject; prompt: string }): Promise<Suggestion> {
+    const record = await this.#store.get(reviewId);
+    if (record === null) return notSuggested("This review is not known here any more. Start it again.");
+    const { headSha } = record.header;
+    if (this.#generations.has(generationKey(record))) {
+      return notSuggested("The guide agent is still writing the guide. Try again once the guide is ready.");
+    }
+    const stored = await this.#store.getGuide(record.id, headSha);
+    if (stored === null || stored.workspaceId !== record.workspace.id || !isReady(stored)) {
+      return notSuggested("There is no finished guide yet, so there is no guide agent to suggest wording.");
+    }
+    const agentId = stored.agentId;
+
+    const changeRequest = await this.#store.snapshot(record.id, headSha);
+    if (changeRequest === null) return notSuggested("What the forge said at this head is missing. Start the review again.");
+    let context: WordingSubjectContext;
+    try {
+      context = codeWordingContext(changeRequest.files, stored.guide.nodes, subject.location);
+    } catch (error) {
+      return notSuggested(errorMessage(error));
+    }
+
+    const busy = "The guide agent is busy with another answer. Try again once it has finished.";
+    if ([...this.#suggestions.values()].some((job) => job.agentId === agentId && job.state.status === "running")) return notSuggested(busy);
+    switch (await this.#guideAgents.status(agentId)) {
+      case "busy":
+        return notSuggested(busy);
+      case "gone":
+        return notSuggested("The guide agent is gone: it was archived or closed, so there is no one to suggest wording.");
+      case "idle":
+        break;
+    }
+
+    const suggestionId = randomUUID();
+    const job: SuggestionJob = { agentId, state: { status: "running", suggestionId }, done: Promise.resolve() };
+    this.#suggestions.set(suggestionId, job);
+    job.done = runStructured(this.#guideAgents, agentId, wordingPrompt(record.ref, headSha, context, prompt), WordingSchema)
+      .then(({ body }) => {
+        const text = body.trim();
+        job.state = text === "" ? notSuggested("The guide agent suggested no wording. Try again.") : { status: "ready", body: text };
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof GuideAgentError)) this.#log(`Suggesting wording for ${record.header.url} failed: ${errorMessage(error)}`);
+        job.state = notSuggested(errorMessage(error));
+      });
+    return job.state;
+  }
+
+  /** Where a suggestion has got to. A finished one is handed out once, then forgotten. */
+  async suggestion({ suggestionId }: { suggestionId: string }): Promise<Suggestion> {
+    const job = this.#suggestions.get(suggestionId);
+    if (job === undefined) return notSuggested("The suggestion was lost, most likely to a plugin restart. Try again.");
+    if (job.state.status !== "running") this.#suggestions.delete(suggestionId);
+    return job.state;
+  }
+
   async #reviewForge(reviewId: string): Promise<{ record: ReviewRecord; forge: Forge }> {
     const record = await this.#store.get(reviewId);
     if (record === null) throw new Error("This review is not known here any more. Start it again.");
@@ -410,7 +479,9 @@ export class ReviewService {
   /** Resolves once no background job is running, including the ones a finishing job started. */
   async settled(): Promise<void> {
     for (;;) {
-      const running = [...this.#branchStarts.values(), ...this.#jobs.values(), ...this.#generations.values()].map((job) => job.done);
+      const running = [...this.#branchStarts.values(), ...this.#jobs.values(), ...this.#generations.values(), ...this.#suggestions.values()].map(
+        (job) => job.done,
+      );
       await Promise.all(running);
       const now = [...this.#branchStarts.values(), ...this.#jobs.values()].map((job) => job.done);
       if (this.#generations.size === 0 && now.every((done) => running.includes(done))) return;
@@ -858,6 +929,10 @@ function draftText(body: string): string {
   const text = body.trim();
   if (text === "") throw new Error("Write the comment before saving it.");
   return text;
+}
+
+function notSuggested(message: string): Suggestion {
+  return { status: "failed", message };
 }
 
 function notSent(agentId: string | null, message: string): AskResult {

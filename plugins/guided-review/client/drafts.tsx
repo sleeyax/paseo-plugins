@@ -6,7 +6,8 @@ import { Pressable, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import { describeLocation, type Draft, type DraftList, type DraftLocation } from "../shared/drafts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
-import { BoxButton, CommentBox } from "./comment-box.tsx";
+import type { CommentSubject } from "../shared/contracts.ts";
+import { BoxButton, CommentBox, type CommentBoxAction } from "./comment-box.tsx";
 import { fontSize, leading, radius, spacing } from "./theme.ts";
 
 type Colors = PluginTheme["colors"];
@@ -31,6 +32,11 @@ export type DraftsControl = {
   create: (location: DraftLocation, body: string) => Promise<void>;
   update: (draftId: string, body: string) => Promise<void>;
   remove: (draftId: string) => Promise<void>;
+  /**
+   * The guide agent's wording for a comment on `subject`, from what the reviewer `typed`. Throws the
+   * reason, as a sentence, when there is none; saves nothing.
+   */
+  suggestWording: (subject: CommentSubject, typed: string) => Promise<string>;
   open: OpenBox | null;
   setOpen: (box: OpenBox | null) => void;
 };
@@ -48,6 +54,8 @@ export function useDrafts(reviewId: string | null, headSha: string | null): Draf
   const createDraft = useRpc(contracts.createDraft);
   const updateDraft = useRpc(contracts.updateDraft);
   const deleteDraft = useRpc(contracts.deleteDraft);
+  const suggestWording = useRpc(contracts.suggestWording);
+  const getSuggestion = useRpc(contracts.getSuggestion);
   const queryClient = useQueryClient();
   const queryKey = [PLUGIN_ID, "drafts", reviewId, headSha];
   const query = useQuery({
@@ -83,6 +91,16 @@ export function useDrafts(reviewId: string | null, headSha: string | null): Draf
       await deleteDraft({ reviewId, draftId });
       change((drafts) => drafts.filter((draft) => draft.id !== draftId));
     },
+    suggestWording: async (subject, typed) => {
+      // The agent's turn can outlast an RPC, so the server runs it as a job this follows.
+      let suggestion = await suggestWording({ reviewId, subject, prompt: typed });
+      while (suggestion.status === "running") {
+        await new Promise((resolve) => setTimeout(resolve, SUGGESTION_POLL_MS));
+        suggestion = await getSuggestion({ suggestionId: suggestion.suggestionId });
+      }
+      if (suggestion.status === "failed") throw new Error(suggestion.message);
+      return suggestion.body;
+    },
     open,
     setOpen,
   };
@@ -99,8 +117,20 @@ export function NewCommentBox({ control, location, colors }: { control: DraftsCo
       title={`Comment on ${describeLocation(location)}`}
       onSave={(body) => control.create(location, body)}
       onCancel={() => control.setOpen(null)}
+      actions={[suggestWordingAction(control, { kind: "code", location })]}
     />
   );
+}
+
+/** How often a comment box asks whether the guide agent has worded its comment yet. */
+const SUGGESTION_POLL_MS = 1000;
+
+/**
+ * "Suggest wording": the guide agent words the comment from where it goes and what the reviewer
+ * typed, and the box gets the result to edit. A failure is shown in the box, which keeps the text.
+ */
+export function suggestWordingAction(control: DraftsControl, subject: CommentSubject): CommentBoxAction {
+  return { label: "Suggest wording", runningLabel: "Suggesting…", run: (body) => control.suggestWording(subject, body) };
 }
 
 /** A draft, with its edit and delete; editing swaps it for a comment box in the same place. */
@@ -134,6 +164,7 @@ export function DraftCard({
         initialBody={draft.body}
         onSave={(body) => control.update(draft.id, body)}
         onCancel={() => control.setOpen(null)}
+        actions={[suggestWordingAction(control, { kind: "code", location: draft.location })]}
       />
     );
   }
