@@ -586,7 +586,13 @@ export class ReviewService {
     if (changeRequest === null) return notSuggested("What the forge said at this head is missing. Start the review again.");
     let context: WordingSubjectContext;
     try {
-      context = codeWordingContext(changeRequest.files, stored.guide.nodes, subject.location);
+      if (subject.kind === "node") {
+        const node = stored.guide.nodes.find((candidate) => candidate.id === subject.nodeId);
+        if (node === undefined) return notSuggested("That concept is not in the guide any more.");
+        context = { kind: "node", node, code: codeReferencesOf(resolveCode(changeRequest.files, node.covers).files) };
+      } else {
+        context = codeWordingContext(changeRequest.files, stored.guide.nodes, subject.location);
+      }
     } catch (error) {
       return notSuggested(errorMessage(error));
     }

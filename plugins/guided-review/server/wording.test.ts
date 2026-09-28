@@ -6,13 +6,13 @@ import test, { type TestContext } from "node:test";
 import type { CommentSubject } from "../shared/contracts.ts";
 import type { DraftLocation } from "../shared/drafts.ts";
 import { fakeForge, sampleChangeRequest, type FakeForge } from "./fake-forge.ts";
-import { fakeGuideAgents, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
+import { fakeGuideAgents, sampleGuide, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
 import { fakeWorkspaces } from "./fake-workspaces.ts";
 import type { ChangedFile } from "./forge/port.ts";
 import { GuideAgentError } from "./guide-agent/port.ts";
 import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
 import { ReviewService } from "./review-service.ts";
-import { WordingSchema } from "./wording-prompt.ts";
+import { WordingSchema, wordingPrompt } from "./wording-prompt.ts";
 
 /**
  * "Suggest wording", driven through the RPCs the panel calls: what reaches the guide agent, what the
@@ -265,4 +265,65 @@ test("a failed guide has no agent to suggest wording", async (t) => {
     status: "failed",
     message: "There is no finished guide yet, so there is no guide agent to suggest wording.",
   });
+});
+
+test("a node's comment is worded about its concept, to stand on its own with no code beside it", async (t) => {
+  const { service, forge, agents } = await withGuide(t);
+
+  const result = await suggest(service, { kind: "node", nodeId: "retry-policy" }, "why jitter");
+  assert.deepEqual(result, { status: "ready", body: "Why is the upload logged only once it has been sent?" });
+
+  assert.deepEqual(agents.created[0]!.sent, [
+    withOutputSchema(
+      [
+        `The reviewer of ${URL} at bbbbbbbbbbbb is writing a review comment and wants you to word it.`,
+        [
+          'It goes on the pull request as a whole, not on any line or file: it is about one concept of the change, the node "retry-policy", "Retry policy" of your guide.',
+          "What the guide says about it:",
+          "- Summary: Decides whether and when a failed upload is tried again.",
+          "- Explanation: A pure function from the attempt number and the failure to a delay, or to giving up.",
+          "- Decision: Full jitter on the backoff. Rather than: A fixed delay, which makes clients retry in lockstep.",
+          "",
+          "The code it covers:",
+          "- src/retry.ts",
+        ].join("\n"),
+        [
+          "What the reviewer typed, as a rough draft or an instruction:",
+          "```",
+          "why jitter",
+          "```",
+          "Turn it into the comment they mean to post: keep their point, their stance and every question they ask, and make it clear and concise. If they wrote an instruction rather than a draft, follow it.",
+        ].join("\n"),
+        [
+          "The comment is posted on GitHub as the reviewer's own, as a paragraph of the review's summary, where the author and other reviewers read it with no code beside it. None of them has seen your guide, so it must read correctly without it.",
+          '- Open with what the comment is about, named in plain words for what the code does, as in "About the retry handling: …", so it stands on its own.',
+          "- Do not use the guide's vocabulary: no trunk, leaf, node or layer, no titles or IDs from the guide, and no mention of the guide or of this chat. Name code by its files, functions and behaviour.",
+          "- Word only what the reviewer wants to say. Do not add bugs, security issues, risks, style problems or fixes of your own.",
+          "- Write the comment's text only: no greeting, no sign-off and no preamble.",
+          "- Do not change anything. Read files in your working directory, the repository at the change's head commit, where the diff alone does not explain something.",
+        ].join("\n"),
+      ].join("\n\n"),
+      jsonSchemaOf(WordingSchema),
+    ),
+  ]);
+  assert.deepEqual(forge.created, []);
+  assert.equal(forge.bodies.get(URL), undefined, "nothing is written to the review body");
+});
+
+test("on GitLab a node's comment is worded as a thread of its own on the merge request", () => {
+  const ref = { forge: "gitlab", host: "gitlab.com", project: "acme/uploader", number: 7, url: "https://gitlab.com/acme/uploader/-/merge_requests/7" } as const;
+  const node = sampleGuide().nodes[0]!;
+
+  const prompt = wordingPrompt(ref, HEAD, { kind: "node", node, code: [{ path: "src/retry.ts", ranges: [] }] }, "");
+
+  assert.match(prompt, /It goes on the merge request as a whole, not on any line or file/);
+  assert.match(prompt, /posted on GitLab as the reviewer's own, as a thread of its own on the merge request, where/);
+  assert.match(prompt, /"About the retry handling: …"/);
+});
+
+test("a node the guide does not have gets no wording", async (t) => {
+  const { service, agents } = await withGuide(t);
+
+  assert.deepEqual(await suggest(service, { kind: "node", nodeId: "gone" }, "x"), { status: "failed", message: "That concept is not in the guide any more." });
+  assert.deepEqual(agents.created[0]!.sent, []);
 });
