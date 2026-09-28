@@ -1,5 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
+import { FileDiffSchema } from "./diff.ts";
 import { GuideStateSchema } from "./guide.ts";
 
 /** What the panel shows about a change request before any guide exists. */
@@ -77,11 +78,11 @@ export const generateGuide = defineRpc({
 });
 
 /**
- * What an "Ask about this" action points at: a node of the guide, or a changed file the guide keeps
- * outside its nodes, in its Supporting or Unsorted group. The server looks the rest up in the stored
- * guide, so the prompt says what the guide says rather than what the panel sent.
+ * A part of the guide the panel acts on: a node, or a changed file the guide keeps outside its
+ * nodes, in its Supporting or Unsorted group. The server looks the rest up in the stored guide, so
+ * what it answers with is what the guide says rather than what the panel sent.
  */
-export const AskSubjectSchema = z.discriminatedUnion("kind", [
+export const GuideSubjectSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("node"), nodeId: z.string() }),
   z.object({ kind: z.literal("file"), path: z.string() }),
 ]);
@@ -99,19 +100,34 @@ export const AskResultSchema = z.discriminatedUnion("status", [
  */
 export const askAbout = defineRpc({
   name: "guided-review.guide.ask",
-  input: z.object({ reviewId: z.string(), subject: AskSubjectSchema }),
+  input: z.object({ reviewId: z.string(), subject: GuideSubjectSchema }),
   output: AskResultSchema,
 });
 
+/** The code a guide node covers, ready to draw: its files in reading order, each cut down to the node's hunks. */
+export const NodeDiffSchema = z.object({
+  /** The head the guide, and so these hunks, were read at. */
+  headSha: z.string(),
+  files: z.array(FileDiffSchema),
+});
+
+/** The hunks of one node of the review's current guide; fails while the guide is not ready. */
+export const getNodeDiff = defineRpc({
+  name: "guided-review.guide.node-diff",
+  input: z.object({ reviewId: z.string(), nodeId: z.string() }),
+  output: NodeDiffSchema,
+});
+
 export type ReviewHeader = z.output<typeof ReviewHeaderSchema>;
+export type NodeDiff = z.output<typeof NodeDiffSchema>;
 export type StartResult = z.output<typeof StartResultSchema>;
 export type StartPhase = (typeof START_PHASES)[number];
 export type StartProgress = z.output<typeof StartProgressSchema>;
 export type PanelView = z.output<typeof PanelViewSchema>;
-export type AskSubject = z.output<typeof AskSubjectSchema>;
+export type GuideSubject = z.output<typeof GuideSubjectSchema>;
 export type AskResult = z.output<typeof AskResultSchema>;
 
-/** Tells one subject's "Ask about this" apart from another's in the panel. */
-export function askSubjectKey(subject: AskSubject): string {
+/** Tells one subject apart from another in the panel, as for its "Ask about this" and its code. */
+export function subjectKey(subject: GuideSubject): string {
   return subject.kind === "node" ? `node:${subject.nodeId}` : `file:${subject.path}`;
 }

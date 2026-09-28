@@ -1,13 +1,15 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import React from "react";
 import { Pressable, Text, View } from "react-native";
-import type { Guide, GuideDecision, GuideState, LayeredGuide, LayeredNode } from "../shared/guide.ts";
+import { coveredPaths, type Guide, type GuideDecision, type GuideState, type LayeredGuide, type LayeredNode } from "../shared/guide.ts";
 import { AskAction, type AskControl } from "./ask-action.tsx";
+import { NodeCode } from "./diff-view.tsx";
 import { fontSize, leading, radius, spacing } from "./theme.ts";
 
 type Colors = PluginTheme["colors"];
 
 export type GuideViewProps = {
+  reviewId: string;
   state: GuideState;
   theme: PluginTheme;
   /** Opens the guide agent's chat; absent on hosts without client navigation. */
@@ -18,7 +20,7 @@ export type GuideViewProps = {
 };
 
 /** The guide under the header: its generation while it runs, its failure with a retry, or the guide itself. */
-export function GuideView({ state, theme, openAgent, retry, ask }: GuideViewProps) {
+export function GuideView({ reviewId, state, theme, openAgent, retry, ask }: GuideViewProps) {
   const colors = theme.colors;
   const agentLink =
     state.agentId !== null && openAgent ? (
@@ -57,14 +59,27 @@ export function GuideView({ state, theme, openAgent, retry, ask }: GuideViewProp
         <>
           <Overview guide={state.guide} colors={colors} />
           {agentLink ? <View style={{ alignItems: "flex-start" }}>{agentLink}</View> : null}
-          <Tree guide={state.guide} colors={colors} ask={ask} />
+          <Tree reviewId={reviewId} agentId={state.agentId} guide={state.guide} theme={theme} ask={ask} />
         </>
       );
   }
 }
 
 /** The nodes by layer, trunk first, then Supporting and Unsorted. */
-function Tree({ guide, colors, ask }: { guide: LayeredGuide; colors: Colors; ask: AskControl }) {
+function Tree({
+  reviewId,
+  agentId,
+  guide,
+  theme,
+  ask,
+}: {
+  reviewId: string;
+  agentId: string;
+  guide: LayeredGuide;
+  theme: PluginTheme;
+  ask: AskControl;
+}) {
+  const colors = theme.colors;
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
   const layers: LayeredNode[][] = [];
   for (const node of guide.nodes) (layers[node.layer] ??= []).push(node);
@@ -75,7 +90,14 @@ function Tree({ guide, colors, ask }: { guide: LayeredGuide; colors: Colors; ask
         <React.Fragment key={layer}>
           <Heading colors={colors}>{layerTitle(layer)}</Heading>
           {nodes.map((node) => (
-            <NodeCard key={node.id} node={node} titles={titles} colors={colors} ask={ask} />
+            <NodeCard
+              key={node.id}
+              node={node}
+              titles={titles}
+              colors={colors}
+              ask={ask}
+              code={<NodeCode reviewId={reviewId} agentId={agentId} nodeId={node.id} theme={theme} />}
+            />
           ))}
         </React.Fragment>
       ))}
@@ -143,18 +165,21 @@ function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
   );
 }
 
-/** A node; a leaf, which follows what the trunk already explained, is drawn lighter. */
+/** A node; a leaf, which follows what the trunk already explained, is drawn lighter. Its code (`code`) comes last. */
 function NodeCard({
   node,
   titles,
   colors,
   ask,
+  code,
 }: {
   node: LayeredNode;
   titles: ReadonlyMap<string, string>;
   colors: Colors;
   ask: AskControl;
+  code: React.ReactNode;
 }) {
+  const files = coveredPaths(node);
   return (
     <Card colors={colors} light={node.leaf}>
       <Text
@@ -182,15 +207,16 @@ function NodeCard({
       ) : null}
       <Body colors={colors}>{node.explanation}</Body>
       {node.decisions.length > 0 ? <Decisions decisions={node.decisions} colors={colors} /> : null}
-      {node.files.length > 0 ? (
+      {files.length > 0 ? (
         <>
           <Label colors={colors}>Files</Label>
-          {node.files.map((file) => (
+          {files.map((file) => (
             <FileLine key={file} colors={colors} path={file} />
           ))}
         </>
       ) : null}
       <AskAction subject={{ kind: "node", nodeId: node.id }} ask={ask} colors={colors} />
+      {code}
     </Card>
   );
 }

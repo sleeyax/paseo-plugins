@@ -51,6 +51,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
       <View style={{ gap: spacing[3] }}>
         <Header header={panel.data.header} theme={theme} />
         <GuideView
+          reviewId={reviewId}
           state={panel.data.guide}
           theme={theme}
           {...(openAgent ? { openAgent } : {})}

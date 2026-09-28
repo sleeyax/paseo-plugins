@@ -4,7 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import React, { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
-import { askSubjectKey, type AskSubject } from "../shared/contracts.ts";
+import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
 import { fontSize, leading, radius, spacing } from "./theme.ts";
 
 /**
@@ -13,8 +13,8 @@ import { fontSize, leading, radius, spacing } from "./theme.ts";
  * action and, under the subject that asked, why nothing was sent.
  */
 export type AskControl = {
-  run: (subject: AskSubject) => void;
-  /** The `askSubjectKey` of the subject being asked about, while the request is out. */
+  run: (subject: GuideSubject) => void;
+  /** The `subjectKey` of the subject being asked about, while the request is out. */
   pendingKey: string | null;
   /** Why the last ask sent nothing, under the subject it was about. */
   notice: { key: string; message: string } | null;
@@ -28,28 +28,28 @@ export function useAskAbout(reviewId: string | null, openAgent: ((agentId: strin
   const askAbout = useRpc(contracts.askAbout);
   const [notice, setNotice] = useState<AskControl["notice"]>(null);
   const mutation = useMutation({
-    mutationFn: ({ reviewId, subject }: { reviewId: string; subject: AskSubject }) => askAbout({ reviewId, subject }),
+    mutationFn: ({ reviewId, subject }: { reviewId: string; subject: GuideSubject }) => askAbout({ reviewId, subject }),
     onMutate: () => setNotice(null),
     onSuccess: (result, { subject }) => {
-      const key = askSubjectKey(subject);
+      const key = subjectKey(subject);
       if (result.status === "not-sent") setNotice({ key, message: result.message });
       else if (openAgent) openAgent(result.agentId);
       else setNotice({ key, message: "Sent. Open the guide agent's chat to read the answer." });
     },
     onError: (error, { subject }) =>
-      setNotice({ key: askSubjectKey(subject), message: error instanceof Error ? error.message : String(error) }),
+      setNotice({ key: subjectKey(subject), message: error instanceof Error ? error.message : String(error) }),
   });
   return {
     run: (subject) => {
       if (reviewId !== null) mutation.mutate({ reviewId, subject });
     },
-    pendingKey: mutation.isPending && mutation.variables ? askSubjectKey(mutation.variables.subject) : null,
+    pendingKey: mutation.isPending && mutation.variables ? subjectKey(mutation.variables.subject) : null,
     notice,
   };
 }
 
-export function AskAction({ subject, ask, colors }: { subject: AskSubject; ask: AskControl; colors: PluginTheme["colors"] }) {
-  const key = askSubjectKey(subject);
+export function AskAction({ subject, ask, colors }: { subject: GuideSubject; ask: AskControl; colors: PluginTheme["colors"] }) {
+  const key = subjectKey(subject);
   const pending = ask.pendingKey === key;
   const small = { fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) };
   return (

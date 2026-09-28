@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import type { Guide, GuideNode } from "../shared/guide.ts";
+import { coveredPaths, type CoveredCode, type Guide, type GuideNode } from "../shared/guide.ts";
 import { fakeForge, sampleChangeRequest } from "./fake-forge.ts";
 import { fakeGuideAgents, sampleGuide, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
 import { fakeWorkspaces } from "./fake-workspaces.ts";
@@ -38,18 +38,19 @@ async function generated(service: ReviewService, agents: FakeGuideAgents, guide:
   return panel.status === "ready" ? panel.guide : null;
 }
 
-function file(filePath: string): ChangedFile {
-  return { path: filePath, previousPath: null, status: "modified", additions: 1, deletions: 1, patch: "@@ -1,1 +1,1 @@\n-a\n+b" };
+function file(filePath: string, patch = "@@ -1,1 +1,1 @@\n-a\n+b"): ChangedFile {
+  return { path: filePath, previousPath: null, status: "modified", additions: 1, deletions: 1, patch };
 }
 
-function node(id: string, files: string[], dependsOn: string[] = []): GuideNode {
+/** A node covering `covers`, where a bare path covers the whole file. */
+function node(id: string, covers: (string | CoveredCode)[], dependsOn: string[] = []): GuideNode {
   return {
     id,
     title: `The ${id}`,
     summary: `What ${id} does.`,
     explanation: `How ${id} works.`,
+    covers: covers.map((cover) => (typeof cover === "string" ? { path: cover, hunks: [], lines: [] } : cover)),
     decisions: [],
-    files,
     dependencies: dependsOn.map((nodeId) => ({ nodeId, reason: `${id} builds on ${nodeId}.` })),
   };
 }
@@ -150,14 +151,14 @@ test("lockfiles and generated files are never shown to the agent and go straight
   assert.deepEqual(guide.guide.unsorted, []);
 });
 
-test("files the agent placed nowhere go to Unsorted without a retry, and each file is placed once", async (t) => {
+test("a file some node covers any part of is placed, several nodes may share one, and the rest go to Unsorted without a retry", async (t) => {
   const { service, agents } = await withHost(t, [
     file("src/upload.ts"),
     file("src/retry.ts"),
     file("src/retry.test.ts"),
     file("README.md"),
     file("src/index.ts"),
-    file("src/clock.ts"),
+    file("src/clock.ts", "@@ -1,1 +1,1 @@\n-a\n+b\n@@ -10,1 +10,1 @@\n-c\n+d"),
   ]);
 
   const guide = await generated(
@@ -165,11 +166,12 @@ test("files the agent placed nowhere go to Unsorted without a retry, and each fi
     agents,
     guideOf(
       [
-        node("retry-policy", ["./src/retry.ts", "src/clock.ts", "src/missing.ts"]),
-        node("uploader", ["src/upload.ts", "src/clock.ts"], ["retry-policy"]),
+        node("retry-policy", ["./src/retry.ts", { path: "src/clock.ts", hunks: [1], lines: [] }]),
+        node("uploader", [{ path: "src/upload.ts", hunks: [1], lines: [] }, { path: "src/clock.ts", hunks: [2], lines: [] }], ["retry-policy"]),
       ],
       [
         { path: "src/retry.test.ts", category: "test" },
+        // A node covers it already, so Supporting does not list it again.
         { path: "src/upload.ts", category: "wiring" },
         { path: "src/retry.test.ts", category: "test" },
       ],
@@ -179,14 +181,40 @@ test("files the agent placed nowhere go to Unsorted without a retry, and each fi
   assert.equal(guide?.status, "ready");
   if (guide?.status !== "ready") return;
   assert.deepEqual(
-    guide.guide.nodes.map(({ id, files }) => ({ id, files })),
+    guide.guide.nodes.map((entry) => ({ id: entry.id, files: coveredPaths(entry) })),
     [
       { id: "retry-policy", files: ["src/retry.ts", "src/clock.ts"] },
-      { id: "uploader", files: ["src/upload.ts"] },
+      { id: "uploader", files: ["src/upload.ts", "src/clock.ts"] },
     ],
   );
   assert.deepEqual(guide.guide.supporting, [{ path: "src/retry.test.ts", category: "test" }]);
   assert.deepEqual(guide.guide.unsorted, ["README.md", "src/index.ts"]);
   assert.equal(agents.created.length, 1);
   assert.deepEqual(agents.created[0]!.sent, []);
+});
+
+test("a lockfile a node covers stays in Supporting, where the paths put it", async (t) => {
+  const { service, agents } = await withHost(t, [file("src/upload.ts"), file("src/retry.ts"), file("pnpm-lock.yaml")]);
+
+  const guide = await generated(service, agents, {
+    ...sampleGuide(),
+    nodes: [sampleGuide().nodes[0]!, { ...sampleGuide().nodes[1]!, covers: [...sampleGuide().nodes[1]!.covers, { path: "pnpm-lock.yaml", hunks: [], lines: [] }] }],
+  });
+
+  assert.equal(guide?.status, "ready");
+  if (guide?.status !== "ready") return;
+  assert.deepEqual(guide.guide.supporting, [{ path: "pnpm-lock.yaml", category: "lockfile" }]);
+  assert.deepEqual(guide.guide.unsorted, []);
+});
+
+test("a node covering a path the change does not have fails the guide", async (t) => {
+  const { service, agents } = await withHost(t);
+
+  const guide = await generated(service, agents, guideOf([node("policy", ["src/retry.ts", "src/missing.ts"]), node("uploader", ["src/upload.ts"])]));
+
+  assert.deepEqual(guide, {
+    status: "failed",
+    agentId: "agent-1",
+    message: 'The guide agent\'s answer did not match what was asked for: nodes.0.covers.1.path: "src/missing.ts" is not one of the changed files.',
+  });
 });
