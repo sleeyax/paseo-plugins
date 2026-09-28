@@ -76,8 +76,42 @@ export const generateGuide = defineRpc({
   output: GuideStateSchema,
 });
 
+/**
+ * What an "Ask about this" action points at: a node of the guide, or a changed file the guide keeps
+ * outside its nodes, in its Supporting or Unsorted group. The server looks the rest up in the stored
+ * guide, so the prompt says what the guide says rather than what the panel sent.
+ */
+export const AskSubjectSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("node"), nodeId: z.string() }),
+  z.object({ kind: z.literal("file"), path: z.string() }),
+]);
+
+export const AskResultSchema = z.discriminatedUnion("status", [
+  /** The prompt is in the guide agent's chat, which the panel then opens. */
+  z.object({ status: z.literal("sent"), agentId: z.string() }),
+  /** Nothing was sent; `message` says why, as a sentence. `agentId` is set while there is an agent to open. */
+  z.object({ status: z.literal("not-sent"), agentId: z.string().nullable(), message: z.string() }),
+]);
+
+/**
+ * Sends the guide agent a prompt about the subject, for the reviewer to follow up in its chat. Only
+ * an idle agent is sent to, because a prompt to a busy one would interrupt its turn.
+ */
+export const askAbout = defineRpc({
+  name: "guided-review.guide.ask",
+  input: z.object({ reviewId: z.string(), subject: AskSubjectSchema }),
+  output: AskResultSchema,
+});
+
 export type ReviewHeader = z.output<typeof ReviewHeaderSchema>;
 export type StartResult = z.output<typeof StartResultSchema>;
 export type StartPhase = (typeof START_PHASES)[number];
 export type StartProgress = z.output<typeof StartProgressSchema>;
 export type PanelView = z.output<typeof PanelViewSchema>;
+export type AskSubject = z.output<typeof AskSubjectSchema>;
+export type AskResult = z.output<typeof AskResultSchema>;
+
+/** Tells one subject's "Ask about this" apart from another's in the panel. */
+export function askSubjectKey(subject: AskSubject): string {
+  return subject.kind === "node" ? `node:${subject.nodeId}` : `file:${subject.path}`;
+}

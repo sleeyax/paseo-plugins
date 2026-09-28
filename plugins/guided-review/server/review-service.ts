@@ -1,10 +1,11 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import type { PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
-import { GuideSchema, type GuideState } from "../shared/guide.ts";
+import type { AskResult, AskSubject, PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
+import { GuideSchema, type Guide, type GuideState } from "../shared/guide.ts";
 import { numberLabel } from "../shared/reference.ts";
+import { askPrompt, type AskSubjectContext } from "./ask-prompt.ts";
 import { ForgeError, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
-import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, type GuideAgentPort } from "./guide-agent/port.ts";
+import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, GuideAgentError, type GuideAgentPort } from "./guide-agent/port.ts";
 import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
 import { parseGuide } from "./guide-output.ts";
 import { guidePrompt } from "./guide-prompt.ts";
@@ -118,6 +119,59 @@ export class ReviewService {
     const previous = await this.#store.getGuide(record.id, record.header.headSha);
     if (previous?.agentId) await this.#guideAgents.archive(previous.agentId);
     return this.#generate(record, null);
+  }
+
+  /**
+   * "Ask about this": sends the guide agent a prompt naming the subject, with what the guide says
+   * about it, for the reviewer to follow up in the agent's chat. Sends only to an idle agent of a
+   * finished guide, since a prompt to a busy one would interrupt it; otherwise says why not.
+   */
+  async ask({ reviewId, subject }: { reviewId: string; subject: AskSubject }): Promise<AskResult> {
+    const record = await this.#store.get(reviewId);
+    if (record === null) return notSent(null, "This review is not known here any more. Start it again.");
+    const { headSha } = record.header;
+    const running = this.#generations.get(generationKey(record));
+    if (running) return notSent(running.agentId, "The guide agent is still writing the guide. Ask once the guide is ready.");
+    const stored = await this.#store.getGuide(record.id, headSha);
+    if (stored === null || stored.workspaceId !== record.workspace.id || stored.status !== "ready" || stored.agentId === null) {
+      return notSent(stored?.agentId ?? null, "There is no finished guide to ask about yet.");
+    }
+    const agentId = stored.agentId;
+
+    const context = await this.#askContext(record, stored.guide!, subject);
+    if (typeof context === "string") return notSent(agentId, context);
+
+    switch (await this.#guideAgents.status(agentId)) {
+      case "busy":
+        return notSent(agentId, "The guide agent is busy with another answer. Ask again once it has finished.");
+      case "gone":
+        return notSent(null, "The guide agent is gone: it was archived or closed. Generate the guide again to ask about it.");
+      case "idle":
+        break;
+    }
+    try {
+      await this.#guideAgents.send(agentId, askPrompt(record.ref, headSha, context));
+    } catch (error) {
+      // The agent got busy, or went, between the check and the send.
+      if (error instanceof GuideAgentError) return notSent(agentId, error.message);
+      throw error;
+    }
+    return { status: "sent", agentId };
+  }
+
+  /** What the prompt says about `subject`, from the stored guide and snapshot, or why it cannot be asked about. */
+  async #askContext(record: ReviewRecord, guide: Guide, subject: AskSubject): Promise<AskSubjectContext | string> {
+    if (subject.kind === "node") {
+      const node = guide.nodes.find((candidate) => candidate.id === subject.nodeId);
+      if (node === undefined) return "That concept is not in the guide any more.";
+      // #93 gives a node its hunks, which become the code references here.
+      return { kind: "node", node, code: [] };
+    }
+    const changeRequest = await this.#store.snapshot(record.id, record.header.headSha);
+    const file = changeRequest?.files.find((candidate) => candidate.path === subject.path);
+    if (file === undefined) return `${subject.path} is not one of the change's files.`;
+    // #92's Supporting group gives the file its category; a file it does not hold is Unsorted.
+    return { kind: "file", file, category: null };
   }
 
   /** For the `workspace.archived` hook: a review's workspace ending ends its guide agents. */
@@ -285,6 +339,10 @@ export class ReviewService {
 
 function progress(phase: StartPhase): StartProgress {
   return { phase, header: null, workspaceId: null, message: null };
+}
+
+function notSent(agentId: string | null, message: string): AskResult {
+  return { status: "not-sent", agentId, message };
 }
 
 function generationKey(record: ReviewRecord): string {
