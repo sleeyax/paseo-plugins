@@ -1,8 +1,10 @@
 import { z } from "zod";
 import type { CommandRunner } from "../command-runner.ts";
+import { oneAtATimePer } from "../one-at-a-time.ts";
 import { createCli } from "./cli.ts";
 import type { Draft, DraftLocation } from "../../shared/drafts.ts";
 import type { Verdict } from "../../shared/submit.ts";
+import { CLONE_TIMEOUT_MS, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, userOf } from "./common.ts";
 import { SubmitSteps } from "./submit-steps.ts";
 import {
   ForgeError,
@@ -20,15 +22,6 @@ import {
 } from "./port.ts";
 
 export const GITHUB_HOST = "github.com";
-
-/** Cloning a large repository is the one call that can take minutes. */
-const CLONE_TIMEOUT_MS = 10 * 60_000;
-
-/** Enough to understand a PR; the guide does not need a hundred-and-first commit's message. */
-const MAX_COMMITS = 100;
-const MAX_LINKED_ISSUES = 25;
-/** More open PRs from one branch than anyone would choose between. */
-const MAX_BRANCH_PULL_REQUESTS = 20;
 
 /** No prompts, no update nags and no colour codes: the output is parsed, not read. */
 const GH_ENV = { GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", NO_COLOR: "1" };
@@ -327,16 +320,8 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
    * once would otherwise both find none and start two, and GitHub turns the second down. A body
    * write, a submit and a discard queue here too, so none acts on a review another is starting.
    */
-  const creating = new Map<string, Promise<unknown>>();
-  const oneAtATime = <T>(ref: ChangeRequestRef, run: () => Promise<T>): Promise<T> => {
-    const next = (creating.get(ref.url) ?? Promise.resolve()).catch(() => {}).then(run);
-    creating.set(ref.url, next);
-    const forget = () => {
-      if (creating.get(ref.url) === next) creating.delete(ref.url);
-    };
-    next.then(forget, forget);
-    return next;
-  };
+  const creating = oneAtATimePer<string>();
+  const oneAtATime = <T>(ref: ChangeRequestRef, run: () => Promise<T>): Promise<T> => creating(ref.url, run);
 
   const pendingReview = async (target: DraftTarget): Promise<string> => {
     const { ref } = target;
@@ -384,11 +369,11 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
         "--json",
         "number,url,title,author,headRefOid",
         "--limit",
-        String(MAX_BRANCH_PULL_REQUESTS),
+        String(MAX_BRANCH_CHANGE_REQUESTS),
       ]);
       return pullRequests.flatMap((pr) => {
         const ref = parsePullRequestUrl(pr.url);
-        return ref === null ? [] : [{ ref, title: pr.title, author: pr.author?.login ?? GHOST.login, headSha: pr.headRefOid }];
+        return ref === null ? [] : [{ ref, title: pr.title, author: userOf(pr.author).login, headSha: pr.headRefOid }];
       });
     },
 
@@ -413,7 +398,7 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
         ref,
         title: pr.title,
         description: pr.body,
-        author: pr.author ? { login: pr.author.login, name: pr.author.name ?? null } : GHOST,
+        author: userOf(pr.author),
         state: STATES[pr.state],
         isDraft: pr.isDraft,
         baseBranch: pr.baseRefName,
@@ -585,9 +570,6 @@ const STATES: Record<"OPEN" | "CLOSED" | "MERGED", ChangeRequestState> = {
   CLOSED: "closed",
   MERGED: "merged",
 };
-
-/** GitHub's name for the author of a PR whose account was deleted. */
-const GHOST: ForgeUser = { login: "ghost", name: null };
 
 const NAME = /^[A-Za-z0-9_.-]+$/;
 
