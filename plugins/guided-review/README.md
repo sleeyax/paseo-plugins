@@ -24,6 +24,8 @@ The concepts are shown in layers, foundations first: each concept names the conc
 
 To dig into a concept, select **Ask about this** on it. The plugin sends the guide agent a prompt naming the concept, with what the guide says about it, and opens the agent's chat, where you carry on the conversation. Each file in Supporting and Unsorted has its own **Ask about this**, which names the file, how it changed and where the guide put it. The agent answers only when it is idle, since a new prompt would cut off the answer it is writing; while it is busy the panel says so, and you ask again once it has finished.
 
+To comment on the code, tap a line in any diff in the panel, drag across lines to comment on a range (on a touch screen, rest your finger on the first line before dragging, since a plain swipe scrolls), or select **Comment on file** in a file's header. A range stays within one hunk, as the forges require. Saving puts the comment on the forge at once as a draft: on GitHub, a thread on your pending review, which is the one you already started on github.com if there is one. Nothing is published until you submit the review. Your drafts show under the lines they are on and in **Your drafts** above the guide, including the ones you started on the web, and you edit and delete them there; select **Refresh** to pick up drafts added on the web since the panel opened. GitLab drafts are not supported yet.
+
 The workspace is a worktree of a local clone. The plugin uses the Paseo project whose `origin` is the repository the pull request or merge request targets; when there is none, it clones the repository once with `gh repo clone` or `glab repo clone` into `$PASEO_HOME/plugin-data/guided-review/clones/` and reuses that clone for every later review of it.
 
 Requires Paseo 0.9 or newer.
@@ -51,6 +53,9 @@ Requires Paseo 0.9 or newer.
 | **The guide agent did not finish within 30 minutes** | Open the guide agent to see where it got stuck, then select **Try again**. |
 | **The guide agent is busy with another answer** | It is still answering an earlier question. Open its chat to follow it, and ask again once it has finished. |
 | **The guide agent is gone: it was archived or closed** | The guide has no agent left to answer questions; its chat was archived or closed. |
+| **… is not in the diff, so a comment cannot be anchored there** | Forges take line comments only on lines the diff shows. Comment on a line in a hunk, or on the whole file. |
+| **A comment on several lines has to stay within one hunk of the diff** | Drag within one hunk, or leave one comment per hunk. |
+| **gh failed: … could not be resolved** when saving a draft | GitHub could not place the comment, usually because the pull request has moved on since the guide was written. Comment on the whole file instead. |
 
 Run `paseo plugin logs guided-review` for more detail.
 
