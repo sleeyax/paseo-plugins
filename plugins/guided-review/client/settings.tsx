@@ -4,6 +4,7 @@ import { SettingsAction, SettingsCard, SettingsInput, SettingsSection } from "@g
 import React, { useState } from "react";
 import { Text } from "react-native";
 import { settingsDocument } from "../shared/settings.ts";
+import { GuideAgentSettings } from "./guide-agent-settings.tsx";
 import { fontSize, leading, spacing } from "./theme.ts";
 
 type Saved = Extract<SettingsState<typeof settingsDocument.schema>, { status: "ready" }>;
@@ -27,7 +28,12 @@ export function GuidedReviewSettings({ theme }: PluginSurfaceProps) {
       </SettingsSection>
     );
   }
-  return <ForgeClis theme={theme} settings={settings} />;
+  return (
+    <>
+      <ForgeClis theme={theme} settings={settings} />
+      <GuideAgentSettings theme={theme} settings={settings} />
+    </>
+  );
 }
 
 /**
