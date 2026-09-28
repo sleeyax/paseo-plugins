@@ -37,6 +37,11 @@ Sending to a busy agent interrupts its turn (`PaseoAgentSendOptions` has no `act
 
 The guide is generated as a background job keyed by review and head SHA, and `server/review-store.ts` keeps a record per head SHA from the moment the agent is asked, with its agent ID. A panel read that finds a `generating` record with no job behind it waits on the same agent again, which is how a generation survives a plugin reload. A guide belongs to the workspace it was generated in; a new workspace for the review gets a new guide and agent.
 
+`GuideSchema` in `shared/guide.ts` is what the agent writes; `LayeredGuideSchema` is what the store keeps and the panel shows, and only `layOutGuide` in `server/guide-output.ts` turns one into the other.
+A dependency may point only at a node listed earlier, which `parseGuide` enforces and which is what makes the nodes a DAG without a cycle check; the agent never writes a layer.
+Layers are longest-path from the foundations, capped at `MAX_LAYERS`: a deeper chain stays in the last layer, still in the agent's order.
+Coverage places each changed path once, first match wins: the lockfiles and generated files `server/file-classes.ts` set aside before the prompt was built, then the first node naming it, then the agent's Supporting, else Unsorted. A path the change does not have is dropped, and nothing is retried.
+
 The SDK gives a plugin no data directory. `server/paths.ts` derives one in the Paseo home, per daemon, because the workspace IDs it records mean something only to that daemon.
 
 `server/command-runner.ts` keeps the whole of stdout, decoded once, because a truncated JSON document is worse than none; only a runaway command past 256 MiB is cut off, and that is a failure rather than a truncation.
