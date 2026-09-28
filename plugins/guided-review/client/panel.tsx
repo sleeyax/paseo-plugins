@@ -46,7 +46,10 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
     panel.data?.status === "ready" ? panel.data.reviewId : null,
     panel.data?.status === "ready" && panel.data.guide.status === "ready" ? panel.data.guide.agentId : null,
   );
-  const drafts = useDrafts(panel.data?.status === "ready" ? panel.data.reviewId : null);
+  const drafts = useDrafts(
+    panel.data?.status === "ready" ? panel.data.reviewId : null,
+    panel.data?.status === "ready" ? panel.data.header.headSha : null,
+  );
 
   let body: React.ReactNode;
   if (panel.isPending) {

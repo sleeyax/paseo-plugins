@@ -362,11 +362,18 @@ export class ReviewService {
 
   /**
    * Saves a comment on the forge as a draft at once. The location names lines of the diff the panel
-   * drew, at the review's head, so they are looked up in what the forge said at that head.
+   * drew at `headSha`, which must still be the review's head: Regenerate moves the review to a new
+   * head, whose lines are numbered differently, so a comment from a guide it replaced is refused
+   * rather than put on whatever line now has its number.
    */
-  async createDraft({ reviewId, location, body }: { reviewId: string; location: DraftLocation; body: string }): Promise<Draft> {
+  async createDraft({ reviewId, headSha: drawnAt, location, body }: { reviewId: string; headSha: string; location: DraftLocation; body: string }): Promise<Draft> {
     const { record, forge } = await this.#reviewForge(reviewId);
     const text = draftText(body);
+    if (drawnAt !== record.header.headSha) {
+      throw new Error(
+        `This comment is on the guide at ${drawnAt.slice(0, 7)}, which was regenerated for ${record.header.headSha.slice(0, 7)}. Comment on the guide at the new head.`,
+      );
+    }
     const changeRequest = await this.#store.snapshot(record.id, record.header.headSha);
     if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
     const anchor = anchorAt(changeRequest.files, location);

@@ -38,20 +38,27 @@ export type DraftsControl = {
 /** Null outside a review, where the diff view offers no commenting. */
 export const DraftsContext = createContext<DraftsControl | null>(null);
 
-export function useDrafts(reviewId: string | null): DraftsControl | null {
+/**
+ * `headSha` is the head of the guide the panel shows, whose diff every comment's lines are read in.
+ * A guide regenerated for a new head lists the drafts again, where the forge now puts them, and
+ * closes a box opened on the old guide.
+ */
+export function useDrafts(reviewId: string | null, headSha: string | null): DraftsControl | null {
   const listDrafts = useRpc(contracts.listDrafts);
   const createDraft = useRpc(contracts.createDraft);
   const updateDraft = useRpc(contracts.updateDraft);
   const deleteDraft = useRpc(contracts.deleteDraft);
   const queryClient = useQueryClient();
-  const queryKey = [PLUGIN_ID, "drafts", reviewId];
+  const queryKey = [PLUGIN_ID, "drafts", reviewId, headSha];
   const query = useQuery({
     queryKey,
     queryFn: () => listDrafts({ reviewId: reviewId! }),
     enabled: reviewId !== null,
   });
-  const [open, setOpen] = useState<OpenBox | null>(null);
-  if (reviewId === null) return null;
+  const [opened, setOpened] = useState<{ headSha: string; box: OpenBox } | null>(null);
+  if (reviewId === null || headSha === null) return null;
+  const open = opened !== null && opened.headSha === headSha ? opened.box : null;
+  const setOpen = (box: OpenBox | null) => setOpened(box === null ? null : { headSha, box });
 
   // Writes land in the cache as the forge answered them, rather than waiting on a fresh listing.
   const change = (update: (drafts: Draft[]) => Draft[]) =>
@@ -63,7 +70,7 @@ export function useDrafts(reviewId: string | null): DraftsControl | null {
     error: query.isError ? (query.error instanceof Error ? query.error.message : String(query.error)) : null,
     refresh: () => void query.refetch(),
     create: async (location, body) => {
-      const draft = await createDraft({ reviewId, location, body });
+      const draft = await createDraft({ reviewId, headSha, location, body });
       change((drafts) => [...drafts, draft]);
       setOpen(null);
     },
