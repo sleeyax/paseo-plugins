@@ -334,3 +334,34 @@ test("after Regenerate a comment is anchored in the new head's diff, one from th
     "Regenerate leaves the forge's drafts alone",
   );
 });
+
+test("after Regenerate, wording is suggested from the new head's lines, and a request from the guide it replaced is refused", async (t) => {
+  const { service, forge, agents } = await withGuide(t);
+  forge.changeRequests.set(URL, atNewHead());
+  await regenerate(service);
+  agents.answer = () => '```json\n{ "body": "Is b right?" }\n```';
+  const sentBefore = agents.created.map((agent) => agent.sent.length);
+
+  // New line 1 is a new `log` at this head and was `b` at the old one: the old guide's box must not
+  // have it worded from the new head's line of that number.
+  const onLine = (line: number) => ({ kind: "code", location: { kind: "line", path: "src/upload.ts", line: { side: "new", line } } }) as const;
+  assert.deepEqual(await service.suggestWording({ reviewId: REVIEW_ID, headSha: OLD, subject: onLine(1), prompt: "b?" }), {
+    status: "failed",
+    message: "This comment is on the guide at bbbbbbb, which was regenerated for ddddddd. Comment on the guide at the new head.",
+  });
+  assert.deepEqual(
+    agents.created.map((agent) => agent.sent.length),
+    sentBefore,
+    "no agent is asked",
+  );
+
+  const started = await service.suggestWording({ reviewId: REVIEW_ID, headSha: NEW, subject: onLine(3), prompt: "b?" });
+  assert.equal(started.status, "running");
+  await service.settled();
+  assert.deepEqual(await service.suggestion({ suggestionId: started.status === "running" ? started.suggestionId : "" }), { status: "ready", body: "Is b right?" });
+  const prompt = agents.created.at(-1)!.sent.at(-1)!;
+  assert.match(prompt, /at dddddddddddd/);
+  assert.match(prompt, /It goes on line 3 of src\/upload\.ts\. The line as the diff shows it:\n```diff\n\+b\n```/);
+  assert.match(prompt, /- "upload-loop", /, "the node is the new guide's");
+  assert.deepEqual(forge.created, []);
+});
