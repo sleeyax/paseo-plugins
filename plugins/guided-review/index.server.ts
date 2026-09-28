@@ -69,6 +69,14 @@ export default function contribute(server: PluginServerContext) {
     connected(context);
     return service.generateGuide(input);
   });
+  server.handle(contracts.checkHead, (input, context) => {
+    connected(context);
+    return service.checkHead(input);
+  });
+  server.handle(contracts.regenerateGuide, (input, context) => {
+    connected(context);
+    return service.regenerate(input);
+  });
   server.handle(contracts.askAbout, (input, context) => {
     connected(context);
     return service.ask(input);

@@ -198,18 +198,40 @@ test("a review attached to the reviewer's branch is fast-forwarded again when it
   openLocal({ status: "current" });
   await guideBranch(service);
 
-  forge.changeRequests.set(URL, sampleChangeRequest(URL, { headBranch: BRANCH, headSha: "d".repeat(40) }));
-  openLocal({ status: "fast-forwarded", from: HEAD });
+  forge.changeRequests.set(URL, sampleChangeRequest(URL, { headBranch: BRANCH, title: "Retry uploads with backoff" }));
   await service.start({ url: URL });
   await service.settled();
 
   assert.deepEqual(
-    workspaces.fastForwards.map((entry) => entry.headSha),
-    [HEAD, "d".repeat(40)],
+    workspaces.fastForwards.map((entry) => entry.workspaceId),
+    [LOCAL, LOCAL],
   );
   assert.deepEqual(workspaces.created, []);
   const panel = await service.panel({ workspaceId: LOCAL });
-  assert.equal(panel.status === "ready" && panel.header.headSha, "d".repeat(40));
+  assert.equal(panel.status === "ready" && panel.header.title, "Retry uploads with backoff");
+});
+
+test("after a push, guiding the branch again leaves it and its guide where they are, for Regenerate to move", async (t) => {
+  const { service, forge, workspaces, guideAgents, openLocal } = await withHost(t);
+  openLocal({ status: "current" });
+  await guideBranch(service);
+
+  forge.changeRequests.set(URL, sampleChangeRequest(URL, { headBranch: BRANCH, headSha: "d".repeat(40) }));
+  openLocal({ status: "fast-forwarded", from: HEAD });
+  await service.startBranch({ workspaceId: LOCAL, url: null });
+  await service.settled();
+
+  assert.deepEqual(workspaces.fastForwards.map((entry) => entry.headSha), [HEAD]);
+  assert.equal(guideAgents.created.length, 1);
+  const panel = await service.panel({ workspaceId: LOCAL });
+  assert.equal(panel.status === "ready" && panel.header.headSha, HEAD);
+  assert.deepEqual(await service.checkHead({ reviewId: REVIEW_ID }), {
+    guideHeadSha: HEAD,
+    forgeHeadSha: "d".repeat(40),
+    moved: true,
+    state: "open",
+    message: null,
+  });
 });
 
 test("once the attached branch has local work, a new start moves the guide to a PR workspace and says why", async (t) => {
