@@ -307,8 +307,8 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
 
     /**
      * The viewer's draft notes, which GitLab keeps to their author. A reply to a published thread
-     * sits where the thread does, so the MR's discussions are read when there is one. A draft on the
-     * MR as a whole has no place in the diff and is left out.
+     * sits where the thread does, so the MR's discussions are read when there is one. A draft with
+     * no place in the diff, on the MR as a whole or a reply to a thread that is, is `general`.
      */
     async listDrafts(ref) {
       const notes = await list(ref, DraftNoteResponse, `${await draftNotes(ref)}?per_page=100`);
@@ -320,7 +320,7 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       }
       return notes.flatMap((note) => {
         const location = locationOf(note.position) ?? (note.discussion_id ? locationOf(threads.get(note.discussion_id)) : null);
-        return location === null ? [] : [{ id: String(note.id), body: note.note, location }];
+        return [{ id: String(note.id), body: note.note, location: location ?? { kind: "general" } }];
       });
     },
 
@@ -328,9 +328,14 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
      * A draft note at the anchor's position. GitLab can take a position and keep another, or none,
      * without an error, so the one it answers with is checked against the one sent, and a draft
      * that did not land where it was put is deleted again rather than left in the wrong place.
+     * A `general` draft is sent with no position, an MR-level draft note, its own thread once published.
      */
     async createDraft(target, { anchor, body }): Promise<Draft> {
       const { ref } = target;
+      if (anchor.kind === "general") {
+        const created = await send(ref, DraftNoteResponse, "POST", await draftNotes(ref), { note: body });
+        return { id: String(created.id), body: created.note, location: { kind: "general" } };
+      }
       const position = positionOf(target, anchor);
       const created = await send(ref, DraftNoteResponse, "POST", await draftNotes(ref), { note: body, position });
       const location = samePosition(position, created.position) ? locationOf(created.position) : null;
@@ -384,7 +389,7 @@ function draftNoteId(draftId: string): string {
  * an added line, `old_line` for a removed one and both for an unchanged one; a range as its last
  * line plus a `line_range` whose ends carry their `line_code`s; a file as a `file` position.
  */
-function positionOf(target: DraftTarget, anchor: DraftAnchor): Record<string, unknown> {
+function positionOf(target: DraftTarget, anchor: Exclude<DraftAnchor, { kind: "general" }>): Record<string, unknown> {
   const base = {
     base_sha: target.baseSha,
     start_sha: target.startSha,

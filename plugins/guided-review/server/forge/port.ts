@@ -100,13 +100,17 @@ export type AnchorFile = { path: string; previousPath: string | null };
 
 /**
  * Where a new draft goes, resolved against the diff by the service so an adapter only translates:
- * a line, a range of one hunk's lines in the diff's order, or the file as a whole. The forge-neutral
- * form a draft comes back in is `DraftLocation` in `shared/drafts.ts`.
+ * a line, a range of one hunk's lines in the diff's order, the file as a whole, or the change as a
+ * whole (`general`). The forge-neutral form a draft comes back in is `DraftLocation` in `shared/drafts.ts`.
+ *
+ * Only GitLab takes a `general` draft, as a draft note without a position. On GitHub such a comment
+ * is a paragraph of the pending review's body, which the service writes through `reviewBody`.
  */
 export type DraftAnchor =
   | (AnchorFile & { kind: "line"; line: AnchorLine })
   | (AnchorFile & { kind: "range"; start: AnchorLine; end: AnchorLine })
-  | (AnchorFile & { kind: "file" });
+  | (AnchorFile & { kind: "file" })
+  | { kind: "general" };
 
 export type ForgeKind = "github" | "gitlab";
 

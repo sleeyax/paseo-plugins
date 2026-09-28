@@ -9,9 +9,10 @@ import type { AnchorLine, ChangedFile, DraftAnchor } from "./forge/port.ts";
  * the location is not somewhere a forge can put a comment.
  *
  * A range must stay within one hunk, which GitHub requires; its ends may come in either order, and
- * a range of one line is that line.
+ * a range of one line is that line. A `general` location is on no file, so there is nothing to look up.
  */
 export function anchorAt(files: readonly ChangedFile[], location: DraftLocation): DraftAnchor {
+  if (location.kind === "general") return { kind: "general" };
   const file = files.find((candidate) => candidate.path === location.path);
   if (file === undefined) throw new Error(`${location.path} is not one of the change's files.`);
   const at = { path: file.path, previousPath: file.previousPath };

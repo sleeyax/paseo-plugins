@@ -485,6 +485,8 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
     },
 
     async createDraft(target, { anchor, body }) {
+      // A pending review has no comment on the pull request as a whole, only its body, which the service writes.
+      if (anchor.kind === "general") throw new ForgeError("GitHub keeps a comment on the pull request as a whole in the review body, not as a draft.");
       return oneAtATime(target.ref, async () => {
         const pullRequestReviewId = await pendingReview(target);
         const input = { pullRequestReviewId, path: anchor.path, body, ...threadAnchor(anchor) };
@@ -545,7 +547,7 @@ type GitHubSide = z.output<typeof DiffSide>;
  * side by its old number, any other line on the RIGHT by its new one; a range's first line in
  * `startLine`/`startSide` and its last in `line`/`side`; a file as subject type FILE with no line.
  */
-function threadAnchor(anchor: DraftAnchor): Record<string, string | number> {
+function threadAnchor(anchor: Exclude<DraftAnchor, { kind: "general" }>): Record<string, string | number> {
   const point = (line: AnchorLine): { line: number; side: GitHubSide } =>
     line.kind === "removed" ? { line: line.oldLine!, side: "LEFT" } : { line: line.newLine!, side: "RIGHT" };
   switch (anchor.kind) {

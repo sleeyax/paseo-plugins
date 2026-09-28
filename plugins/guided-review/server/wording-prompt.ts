@@ -32,9 +32,10 @@ export type WordingSubjectContext = {
  * the nodes that cover them. Throws, in a sentence for the panel, when a comment cannot go there.
  */
 export function codeWordingContext(files: readonly ChangedFile[], nodes: readonly GuideNode[], location: DraftLocation): WordingSubjectContext {
+  if (location.kind === "general") throw new Error("A comment on the change as a whole is a node's comment; suggest its wording from the node.");
   const anchor = anchorAt(files, location);
   const file = files.find((candidate) => candidate.path === location.path)!;
-  if (anchor.kind === "file") {
+  if (anchor.kind === "file" || anchor.kind === "general") {
     return { kind: "code", location, file, lines: [], nodes: nodes.filter((node) => coveredPaths(node).includes(file.path)) };
   }
 
