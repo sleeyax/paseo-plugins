@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ReviewHeader } from "../shared/contracts.ts";
-import type { Guide } from "../shared/guide.ts";
+import type { LayeredGuide } from "../shared/guide.ts";
 import type { ChangeRequest, ChangeRequestRef, ForgeUser } from "./forge/port.ts";
 import type { ReviewWorkspace } from "./workspaces/port.ts";
 
@@ -27,7 +27,8 @@ export type GuideRecord = {
   /** Null until the agent exists. */
   agentId: string | null;
   status: "generating" | "ready" | "failed";
-  guide: Guide | null;
+  /** Laid out in layers and checked for coverage, as the panel shows it. */
+  guide: LayeredGuide | null;
   /** Why generation failed, as a sentence. */
   message: string | null;
   updatedAt: string;
