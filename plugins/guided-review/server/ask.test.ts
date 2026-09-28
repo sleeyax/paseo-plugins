@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fakeForge, sampleChangeRequest } from "./fake-forge.ts";
-import { fakeGuideAgents, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
+import { fakeGuideAgents, sampleGuide, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
+import type { ChangedFile } from "./forge/port.ts";
 import { fakeWorkspaces } from "./fake-workspaces.ts";
 import { GuideAgentError } from "./guide-agent/port.ts";
 import { ReviewService } from "./review-service.ts";
@@ -14,15 +15,20 @@ import { ReviewService } from "./review-service.ts";
 const URL = "https://github.com/acme/uploader/pull/7";
 const REVIEW_ID = "github/github.com/acme/uploader/7";
 
+/** Beside `sampleChangeRequest`'s files: a test the guide puts in Supporting, and a doc it places nowhere. */
+const RETRY_TEST: ChangedFile = { path: "src/retry.test.ts", previousPath: null, status: "added", additions: 20, deletions: 0, patch: "@@ -0,0 +1,1 @@\n+t" };
+const RETRY_DOC: ChangedFile = { path: "docs/retry.md", previousPath: null, status: "added", additions: 12, deletions: 0, patch: "@@ -0,0 +1,1 @@\n+d" };
+
 async function withHost(t: TestContext): Promise<{ service: ReviewService; agents: FakeGuideAgents }> {
   const data = await mkdtemp(path.join(os.tmpdir(), "guided-review-ask-"));
   t.after(() => rm(data, { recursive: true, force: true }));
   const forge = fakeForge();
-  forge.changeRequests.set(URL, sampleChangeRequest(URL));
+  const changeRequest = sampleChangeRequest(URL);
+  forge.changeRequests.set(URL, { ...changeRequest, files: [...changeRequest.files, RETRY_TEST, RETRY_DOC] });
   const workspaces = fakeWorkspaces();
   workspaces.repositories.set("github.com/acme/uploader", "/home/r/src/uploader");
   const agents = fakeGuideAgents();
-  agents.answer = () => sampleGuideReply();
+  agents.answer = () => sampleGuideReply({ ...sampleGuide(), supporting: [{ path: RETRY_TEST.path, category: "test" }] });
   const service = new ReviewService({ forges: [forge], workspaces, guideAgents: agents, dataDirectory: data });
   return { service, agents };
 }
@@ -69,16 +75,30 @@ test("asking about a node sends the guide agent a prompt naming it, with what th
   );
 });
 
-test("asking about a changed file outside the nodes names the file, how it changed, and that the guide left it unsorted", async (t) => {
+test("asking about a Supporting file names the file, how it changed, and its Supporting category", async (t) => {
   const { service, agents } = await withGuide(t);
 
-  assert.deepEqual(await service.ask({ reviewId: REVIEW_ID, subject: { kind: "file", path: "src/retry.ts" } }), {
+  assert.deepEqual(await service.ask({ reviewId: REVIEW_ID, subject: { kind: "file", path: "src/retry.test.ts" } }), {
     status: "sent",
     agentId: "agent-1",
   });
 
   const prompt = agents.created[0]!.sent[0]!;
-  assert.match(prompt, /wants to understand one changed file your guide kept outside its concepts: src\/retry\.ts\./);
+  assert.match(prompt, /wants to understand one changed file your guide kept outside its concepts: src\/retry\.test\.ts\./);
+  assert.match(prompt, /The guide lists it under Supporting, as test\./);
+  assert.doesNotMatch(prompt, /Unsorted/);
+});
+
+test("asking about an Unsorted file names the file, how it changed, and that the guide left it unsorted", async (t) => {
+  const { service, agents } = await withGuide(t);
+
+  assert.deepEqual(await service.ask({ reviewId: REVIEW_ID, subject: { kind: "file", path: "docs/retry.md" } }), {
+    status: "sent",
+    agentId: "agent-1",
+  });
+
+  const prompt = agents.created[0]!.sent[0]!;
+  assert.match(prompt, /wants to understand one changed file your guide kept outside its concepts: docs\/retry\.md\./);
   assert.match(prompt, /The file was added, \+12 −0\. The guide did not place it in any concept or in its Supporting group; it is listed as Unsorted\./);
   assert.match(prompt, /Explain what this file's change does and which part of the change it belongs to\./);
   assert.match(prompt, /- Explain only\./);
@@ -125,6 +145,11 @@ test("a guide agent that is gone, a guide still being written, and an unknown su
     status: "not-sent",
     agentId: "agent-1",
     message: "src/other.ts is not one of the change's files.",
+  });
+  assert.deepEqual(await service.ask({ reviewId: REVIEW_ID, subject: { kind: "file", path: "src/retry.ts" } }), {
+    status: "not-sent",
+    agentId: "agent-1",
+    message: 'src/retry.ts belongs to the concept "Retry policy". Ask about that concept instead.',
   });
 
   await agents.archive("agent-1");
