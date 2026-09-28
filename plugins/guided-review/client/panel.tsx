@@ -9,10 +9,13 @@ import * as contracts from "../shared/contracts.ts";
 import type { ReviewHeader } from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { numberLabel } from "../shared/reference.ts";
+import { BranchStartView, isBranchRunning } from "./branch-start.tsx";
 import { GuideView } from "./guide-view.tsx";
 import { fontSize, leading, MAX_CONTENT_WIDTH, radius, spacing } from "./theme.ts";
 
 const POLL_MS = 2_000;
+/** An empty panel is asked again now and then, since the Command Center item starts a branch's guide from outside it. */
+const IDLE_POLL_MS = 5_000;
 
 /** The "Guided Review" tab: the review this workspace was created for, found by the workspace's ID. */
 export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWorkspacePanelProps) {
@@ -21,7 +24,11 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
     queryKey: [PLUGIN_ID, "panel", workspaceId],
     queryFn: () => getPanel({ workspaceId }),
     // The guide is written by a background job, which the panel follows until it ends.
-    refetchInterval: (query) => (query.state.data?.status === "ready" && query.state.data.guide.status === "generating" ? POLL_MS : false),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data?.status === "none") return isBranchRunning(data.branch) ? POLL_MS : IDLE_POLL_MS;
+      return data?.status === "ready" && data.guide.status === "generating" ? POLL_MS : false;
+    },
   });
   const generate = useRpc(contracts.generateGuide);
   const retry = useMutation({
@@ -37,16 +44,20 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
     body = <Note color={colors.statusDanger}>{panel.error instanceof Error ? panel.error.message : String(panel.error)}</Note>;
   } else if (panel.data.status === "none") {
     body = (
-      <Note color={colors.foregroundMuted}>
-        No guided review lives in this workspace. Start one from the Command Center with "Guided Review: start from a
-        PR or MR URL".
-      </Note>
+      <BranchStartView
+        workspaceId={workspaceId}
+        branch={panel.data.branch}
+        theme={theme}
+        {...(navigation ? { openWorkspace: (id: string) => navigation.openWorkspace({ workspaceId: id }) } : {})}
+        onStarted={() => void panel.refetch()}
+      />
     );
   } else {
     const { reviewId } = panel.data;
     body = (
       <View style={{ gap: spacing[3] }}>
         <Header header={panel.data.header} theme={theme} />
+        {panel.data.note ? <Note color={colors.statusWarning}>{panel.data.note}</Note> : null}
         <GuideView
           state={panel.data.guide}
           theme={theme}
