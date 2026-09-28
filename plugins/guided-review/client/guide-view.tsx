@@ -80,6 +80,7 @@ function Tree({
   ask: AskControl;
 }) {
   const colors = theme.colors;
+  const fileCode = (file: string) => <NodeCode reviewId={reviewId} agentId={agentId} subject={{ kind: "file", path: file }} theme={theme} />;
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
   const layers: LayeredNode[][] = [];
   for (const node of guide.nodes) (layers[node.layer] ??= []).push(node);
@@ -96,7 +97,7 @@ function Tree({
               titles={titles}
               colors={colors}
               ask={ask}
-              code={<NodeCode reviewId={reviewId} agentId={agentId} nodeId={node.id} theme={theme} />}
+              code={<NodeCode reviewId={reviewId} agentId={agentId} subject={{ kind: "node", nodeId: node.id }} theme={theme} />}
             />
           ))}
         </React.Fragment>
@@ -106,7 +107,15 @@ function Tree({
           <Heading colors={colors}>Supporting</Heading>
           <Card colors={colors} light>
             {guide.supporting.map((entry) => (
-              <FileEntry key={entry.path} colors={colors} path={entry.path} note={entry.category} ask={ask} />
+              <FileEntry
+                key={entry.path}
+                colors={colors}
+                path={entry.path}
+                note={entry.category}
+                ask={ask}
+                folded={entry.category === "lockfile" || entry.category === "generated"}
+                code={fileCode(entry.path)}
+              />
             ))}
           </Card>
         </>
@@ -119,7 +128,7 @@ function Tree({
               The guide agent placed these changed files nowhere, so no concept explains them.
             </Body>
             {guide.unsorted.map((file) => (
-              <FileEntry key={file} colors={colors} path={file} ask={ask} />
+              <FileEntry key={file} colors={colors} path={file} ask={ask} code={fileCode(file)} />
             ))}
           </Card>
         </>
@@ -221,12 +230,35 @@ function NodeCard({
   );
 }
 
-/** A Supporting or Unsorted file, which the reviewer can ask about on its own. */
-function FileEntry({ colors, path, note, ask }: { colors: Colors; path: string; note?: string; ask: AskControl }) {
+/**
+ * A Supporting or Unsorted file, which the reviewer can ask about on its own and read the whole diff
+ * of, since tests and wiring get review comments too. A `folded` entry, a lockfile or a generated
+ * file, starts with its diff hidden, as it is long and seldom read.
+ */
+function FileEntry({
+  colors,
+  path,
+  note,
+  ask,
+  code,
+  folded,
+}: {
+  colors: Colors;
+  path: string;
+  note?: string;
+  ask: AskControl;
+  code: React.ReactNode;
+  folded?: boolean;
+}) {
+  const [open, setOpen] = React.useState(!folded);
   return (
     <View style={{ gap: spacing[1] }}>
       <FileLine colors={colors} path={path} note={note} />
       <AskAction subject={{ kind: "file", path }} ask={ask} colors={colors} />
+      <View style={{ alignItems: "flex-start" }}>
+        <Link colors={colors} label={open ? "Hide the diff" : "Show the diff"} onPress={() => setOpen(!open)} />
+      </View>
+      {open ? code : null}
     </View>
   );
 }

@@ -1,7 +1,7 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { AskResult, GuideSubject, NodeDiff, PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
-import { coveredPaths, GuideSchema, type GuideState, type LayeredGuide } from "../shared/guide.ts";
+import { coveredPaths, GuideSchema, type CoveredCode, type GuideState, type LayeredGuide } from "../shared/guide.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { askPrompt, codeReferencesOf, type AskSubjectContext } from "./ask-prompt.ts";
 import { resolveCode } from "./diff.ts";
@@ -184,20 +184,29 @@ export class ReviewService {
   }
 
   /**
-   * The hunks one node of the review's current guide covers, parsed from what the forge said at the
-   * guide's head, in the order the node names its files.
+   * The hunks a subject of the review's current guide covers, parsed from what the forge said at the
+   * guide's head: a node's, in the order it names its files, or the whole diff of a changed file,
+   * which is what a Supporting or Unsorted entry shows.
    */
-  async nodeDiff({ reviewId, nodeId }: { reviewId: string; nodeId: string }): Promise<NodeDiff> {
+  async nodeDiff({ reviewId, subject }: { reviewId: string; subject: GuideSubject }): Promise<NodeDiff> {
     const record = await this.#store.get(reviewId);
     if (record === null) throw new Error("This review is not known here any more. Start it again.");
     const { headSha } = record.header;
     const stored = await this.#store.getGuide(record.id, headSha);
     if (stored?.status !== "ready" || stored.guide === null) throw new Error("The guide is not ready yet.");
-    const node = stored.guide.nodes.find((candidate) => candidate.id === nodeId);
-    if (node === undefined) throw new Error(`The guide has no concept "${nodeId}". Reopen the panel.`);
+    let covers: CoveredCode[];
+    if (subject.kind === "node") {
+      const node = stored.guide.nodes.find((candidate) => candidate.id === subject.nodeId);
+      if (node === undefined) throw new Error(`The guide has no concept "${subject.nodeId}". Reopen the panel.`);
+      covers = node.covers;
+    } else {
+      covers = [{ path: subject.path, hunks: [], lines: [] }];
+    }
     const changeRequest = await this.#store.snapshot(record.id, headSha);
     if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
-    return { headSha, files: resolveCode(changeRequest.files, node.covers).files };
+    const resolved = resolveCode(changeRequest.files, covers);
+    if (subject.kind === "file" && resolved.files.length === 0) throw new Error(`${subject.path} is not one of the change's files.`);
+    return { headSha, files: resolved.files };
   }
 
   /** For the `workspace.archived` hook: a review's workspace ending ends its guide agents. */
