@@ -7,12 +7,16 @@ import {
   ADD_THREAD_MUTATION,
   createGitHubForge,
   DELETE_COMMENT_MUTATION,
+  DELETE_REVIEW_MUTATION,
   DRAFTS_QUERY,
   PENDING_REVIEW_QUERY,
   PULL_REQUEST_HEAD_QUERY,
   PULL_REQUEST_QUERY,
+  REVIEW_BODY_QUERY,
   START_REVIEW_MUTATION,
+  SUBMIT_REVIEW_MUTATION,
   UPDATE_COMMENT_MUTATION,
+  UPDATE_REVIEW_MUTATION,
 } from "./github.ts";
 import { ForgeError, type AnchorLine, type ChangeRequestRef, type DraftAnchor, type DraftTarget } from "./port.ts";
 
@@ -534,4 +538,124 @@ test("edits a draft's text and deletes a draft by its comment ID", async () => {
     { query: UPDATE_COMMENT_MUTATION, variables: { id: "PRRC_kwDOUFGNmM6kZ1a1", body: "42" } },
     { query: DELETE_COMMENT_MUTATION, variables: { id: "PRRC_kwDOUFGNmM6kZ1a2" } },
   ]);
+});
+
+/*
+ * Finishing a review. The answers are built by hand from GitHub's schema, as the draft ones are:
+ * recording them would publish or delete a real review.
+ */
+
+/** `REVIEW_BODY_QUERY`'s answer: the viewer's pending review with `body`, or none. */
+function reviewBody(body: string | null): string {
+  const nodes = body === null ? [] : [{ id: PENDING_REVIEW_ID, viewerDidAuthor: true, body }];
+  return JSON.stringify({ data: { repository: { pullRequest: { reviews: { nodes } } } } });
+}
+
+function submitted(state: string): string {
+  return JSON.stringify({ data: { submitPullRequestReview: { pullRequestReview: { id: PENDING_REVIEW_ID, state } } } });
+}
+
+test("submits the pending review, its comments and body with it, as the verdict GitHub calls it by", async () => {
+  const cases = [
+    { verdict: "approve", event: "APPROVE", state: "APPROVED", label: "Publish the review and approve" },
+    { verdict: "request-changes", event: "REQUEST_CHANGES", state: "CHANGES_REQUESTED", label: "Publish the review and request changes" },
+    { verdict: "comment", event: "COMMENT", state: "COMMENTED", label: "Publish the review as a comment" },
+  ] as const;
+
+  for (const { verdict, event, state, label } of cases) {
+    const { forge, run } = forgeReplaying([{ stdout: fixture("pending-review.json") }, { stdout: submitted(state) }]);
+
+    const outcome = await forge.submitReview(PR_105_TARGET, { verdict, body: "Reads well.\n\nOne question on the lockfile." });
+
+    assert.deepEqual(
+      graphqlCalls(run),
+      [
+        { query: PENDING_REVIEW_QUERY, variables: { owner: "sleeyax", name: "paseo-plugins", number: 105 } },
+        { query: SUBMIT_REVIEW_MUTATION, variables: { id: PENDING_REVIEW_ID, event, body: "Reads well.\n\nOne question on the lockfile." } },
+      ],
+      verdict,
+    );
+    assert.deepEqual(outcome, { published: true, steps: [{ id: "submit", label, status: "done", message: null }] }, verdict);
+  }
+});
+
+test("a submit with nothing pending, like an approval without comments, starts the review on the guide's head first", async () => {
+  const { forge, run } = forgeReplaying([
+    { stdout: fixture("pending-review-none.json") },
+    { stdout: fixture("start-review.json") },
+    { stdout: submitted("APPROVED") },
+  ]);
+
+  await forge.submitReview(PR_105_TARGET, { verdict: "approve", body: "" });
+
+  assert.deepEqual(graphqlCalls(run).slice(1), [
+    {
+      query: START_REVIEW_MUTATION,
+      variables: { pullRequestId: "PR_kwDOUFGNmM8AAAABFhb6LA", commitOID: "a711a639b04f3bd2bfe514157e0c19880fe33028" },
+    },
+    { query: SUBMIT_REVIEW_MUTATION, variables: { id: "PRR_kwDOUFGNmM7x0Qaa", event: "APPROVE", body: "" } },
+  ]);
+});
+
+test("a submit GitHub turns down is reported as a failed step in GitHub's words, not thrown", async () => {
+  const { forge } = forgeReplaying([
+    { stdout: fixture("pending-review.json") },
+    { exitCode: 1, stderr: "gh: Can not request changes on your own pull request\n" },
+  ]);
+
+  const outcome = await forge.submitReview(PR_105_TARGET, { verdict: "request-changes", body: "Please split this." });
+
+  assert.deepEqual(outcome, {
+    published: false,
+    steps: [
+      {
+        id: "submit",
+        label: "Publish the review and request changes",
+        status: "failed",
+        message: "gh failed: Can not request changes on your own pull request",
+      },
+    ],
+  });
+});
+
+test("discarding deletes the viewer's pending review, and with none pending changes nothing", async () => {
+  const { forge, run } = forgeReplaying([
+    { stdout: reviewBody("Draft body") },
+    { stdout: JSON.stringify({ data: { deletePullRequestReview: { pullRequestReview: { id: PENDING_REVIEW_ID } } } }) },
+    { stdout: reviewBody(null) },
+  ]);
+
+  await forge.discardReview(PR_105);
+  await forge.discardReview(PR_105);
+
+  assert.deepEqual(graphqlCalls(run), [
+    { query: REVIEW_BODY_QUERY, variables: { owner: "sleeyax", name: "paseo-plugins", number: 105 } },
+    { query: DELETE_REVIEW_MUTATION, variables: { id: PENDING_REVIEW_ID } },
+    { query: REVIEW_BODY_QUERY, variables: { owner: "sleeyax", name: "paseo-plugins", number: 105 } },
+  ]);
+});
+
+test("the review body is the pending review's own, read from it and written to it", async () => {
+  const { forge, run } = forgeReplaying([
+    { stdout: reviewBody("Started on github.com") },
+    { stdout: reviewBody(null) },
+    { stdout: fixture("pending-review.json") },
+    { stdout: JSON.stringify({ data: { updatePullRequestReview: { pullRequestReview: { id: PENDING_REVIEW_ID } } } }) },
+    { stdout: reviewBody(null) },
+  ]);
+  const body = forge.reviewBody!;
+
+  assert.equal(await body.read(PR_105), "Started on github.com");
+  assert.equal(await body.read(PR_105), "", "no pending review has no body");
+  await body.write(PR_105_TARGET, "42");
+  // Clearing the body of a review that is not there starts none.
+  await body.write(PR_105_TARGET, "");
+
+  const calls = graphqlCalls(run);
+  assert.deepEqual(
+    calls.map((call) => call.query),
+    [REVIEW_BODY_QUERY, REVIEW_BODY_QUERY, PENDING_REVIEW_QUERY, UPDATE_REVIEW_MUTATION, REVIEW_BODY_QUERY],
+  );
+  // The text goes as a JSON string, so a body of "42" stays text.
+  assert.deepEqual(calls[3]?.variables, { id: PENDING_REVIEW_ID, body: "42" });
 });

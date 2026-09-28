@@ -1,12 +1,13 @@
 import type { DiffLine } from "../../shared/diff.ts";
 import type { Draft } from "../../shared/drafts.ts";
+import type { SubmitStep, Verdict } from "../../shared/submit.ts";
 
 /**
  * What the review service asks of a forge. Each forge has one adapter implementing it over its CLI
  * (`gh`, `glab`) through a command runner, so a test replays recorded output through a fake runner
  * and the service is tested against a fake of this port.
  *
- * Grows with the tickets that need it: submitting and discarding a review.
+ * Grows with the tickets that need it.
  */
 export interface Forge {
   readonly kind: ForgeKind;
@@ -47,7 +48,38 @@ export interface Forge {
   /** Replaces a draft's text, leaving where it sits as it is. */
   updateDraft(ref: ChangeRequestRef, draftId: string, body: string): Promise<void>;
   deleteDraft(ref: ChangeRequestRef, draftId: string): Promise<void>;
+
+  /**
+   * Where the forge keeps the review body until the review is submitted: the pending review's own
+   * body on GitHub. Null on a forge that keeps none (GitLab), whose body the service keeps instead.
+   * Either way the body a submit publishes is the one `submitReview` is handed.
+   */
+  readonly reviewBody: ReviewBodyStore | null;
+  /**
+   * Publishes the reviewer's drafts and `body` with the verdict, in as many calls as the forge takes,
+   * and says how each went rather than throwing at the first to fail, so the panel can say what
+   * landed. A review with nothing pending yet is started on `target`'s head first.
+   */
+  submitReview(target: DraftTarget, submission: ReviewSubmission): Promise<SubmitOutcome>;
+  /** Throws the reviewer's pending review away with every draft on it; nothing to discard is not a failure. */
+  discardReview(ref: ChangeRequestRef): Promise<void>;
 }
+
+/** The review body a forge keeps on its pending review, before the review is submitted. */
+export type ReviewBodyStore = {
+  /** The body as the forge has it; empty when there is none, or no pending review. */
+  read(ref: ChangeRequestRef): Promise<string>;
+  /** Replaces the body, starting a pending review on `target`'s head for a non-empty one when there is none. */
+  write(target: DraftTarget, body: string): Promise<void>;
+};
+
+export type ReviewSubmission = { verdict: Verdict; body: string };
+
+/**
+ * How a submit went, step by step. `published` is whether the drafts and the body went out, so
+ * nothing is pending any more, whatever became of the verdict after.
+ */
+export type SubmitOutcome = { published: boolean; steps: SubmitStep[] };
 
 /**
  * The change request a draft is written against, at the head the panel's diff was read at: a

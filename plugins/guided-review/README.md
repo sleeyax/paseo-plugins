@@ -34,6 +34,8 @@ To comment on the code, tap a line in any diff in the panel, drag across lines t
 
 To have a comment worded for you, type a rough thought or an instruction in the comment box, or nothing at all, and select **Suggest wording**. The guide agent writes the comment from the lines it is on, the concept they belong to, your conversation with it so far and what you typed, and the box gets the text for you to edit and save; nothing is saved or posted until you do. The wording is meant for people who have never seen the guide, so it names code by its files and functions rather than by the guide's concepts, and it adds no findings of its own. Like **Ask about this**, it asks only an idle agent: while the agent is busy, or when it fails, the box says so and keeps what you typed.
 
+When you are done, select **Finish review** below your drafts. It shows the review body, which is your pending review's own body on GitHub (so one started on github.com is there too), and every draft with where it sits, and offers **Approve**, **Request changes** and **Comment**. **Save body** keeps an edited body without submitting; a submit sends the body as it is in the box. On your own pull request, and on a closed or merged one, only **Comment** is offered, though you can still write drafts. When commits were pushed since the guide was written, **Approve** and **Request changes** are held back, so a verdict only ever applies to code the guide explained, with **Regenerate the guide** beside them; the plugin asks the forge again the moment you submit, and holds them back too while it cannot. After a submit the panel lists each step the forge took and whether it landed, so a partial failure tells you what is left to do on the forge. **Discard review** deletes your pending review, its drafts and its body, after you confirm. Submitting a GitLab review is not supported yet.
+
 The workspace is a worktree of a local clone. The plugin uses the Paseo project whose `origin` is the repository the pull request or merge request targets; when there is none, it clones the repository once with `gh repo clone` or `glab repo clone` into `$PASEO_HOME/plugin-data/guided-review/clones/` and reuses that clone for every later review of it.
 
 Requires Paseo 0.9 or newer.
@@ -70,6 +72,8 @@ Requires Paseo 0.9 or newer.
 | **… is not in the diff, so a comment cannot be anchored there** | Forges take line comments only on lines the diff shows. Comment on a line in a hunk, or on the whole file. |
 | **A comment on several lines has to stay within one hunk of the diff** | Drag within one hunk, or leave one comment per hunk. |
 | **gh failed: … could not be resolved** when saving a draft | GitHub could not place the comment, usually because the pull request has moved on since the guide was written. Comment on the whole file instead. |
+| **Could not check … for new commits: …** under the verdicts | The forge could not be asked where the head is, so **Approve** and **Request changes** are held back until it can; **Comment** still works. Close and reopen **Finish review** to ask again. |
+| **Only part of your review went through** | The steps marked **Failed** did not land, and the ones after them were not tried. Finish those on the forge's web page. |
 
 Run `paseo plugin logs guided-review` for more detail.
 
