@@ -21,6 +21,12 @@ export const DraftLocationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("range"), path: z.string(), start: LineRefSchema, end: LineRefSchema }),
   /** The file as a whole, not any line of it. */
   z.object({ kind: z.literal("file"), path: z.string() }),
+  /**
+   * The change as a whole, on no file: a GitLab draft note without a position, which becomes a thread
+   * of its own on the merge request, or a paragraph of the GitHub pending review's body. What the
+   * panel writes here is a node's comment; which node is kept locally, never on the forge.
+   */
+  z.object({ kind: z.literal("general") }),
 ]);
 
 /** One of the reviewer's unpublished comments, as it is on the forge. */
@@ -31,11 +37,19 @@ export const DraftSchema = z.object({
   location: DraftLocationSchema,
 });
 
-export const DraftListSchema = z.object({ drafts: z.array(DraftSchema) });
+/**
+ * A draft as the panel lists it: as the forge has it, with the node of the guide it was written from
+ * when the panel wrote it there. The link is kept locally and never posted; a draft started on the
+ * web, or from a Supporting or Unsorted file, has none.
+ */
+export const LinkedDraftSchema = DraftSchema.extend({ nodeId: z.string().nullable() });
+
+export const DraftListSchema = z.object({ drafts: z.array(LinkedDraftSchema) });
 
 export type LineRef = z.output<typeof LineRefSchema>;
 export type DraftLocation = z.output<typeof DraftLocationSchema>;
 export type Draft = z.output<typeof DraftSchema>;
+export type LinkedDraft = z.output<typeof LinkedDraftSchema>;
 export type DraftList = z.output<typeof DraftListSchema>;
 
 /** How a draft on `line` names it. */
@@ -48,7 +62,12 @@ export function isLine(line: Pick<DiffLine, "oldLine" | "newLine">, ref: LineRef
   return (ref.side === "old" ? line.oldLine : line.newLine) === ref.line;
 }
 
-/** The line a draft is shown under: its only line, or a range's last. Null for a file's draft. */
+/** The file a draft is on; null for one on the change as a whole. */
+export function pathOf(location: DraftLocation): string | null {
+  return location.kind === "general" ? null : location.path;
+}
+
+/** The line a draft is shown under: its only line, or a range's last. Null for a file's draft, or a general one. */
 export function lastLineOf(location: DraftLocation): LineRef | null {
   switch (location.kind) {
     case "line":
@@ -56,11 +75,12 @@ export function lastLineOf(location: DraftLocation): LineRef | null {
     case "range":
       return location.end;
     case "file":
+    case "general":
       return null;
   }
 }
 
-/** Where a draft is, in a few words: "line 12", "old lines 3–5", "the file". */
+/** Where a draft is, in a few words: "line 12", "old lines 3–5", "the file", "the change as a whole". */
 export function describeLocation(location: DraftLocation): string {
   switch (location.kind) {
     case "line":
@@ -72,6 +92,8 @@ export function describeLocation(location: DraftLocation): string {
     }
     case "file":
       return "the file";
+    case "general":
+      return "the change as a whole";
   }
 }
 
