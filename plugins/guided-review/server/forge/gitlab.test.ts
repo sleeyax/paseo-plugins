@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import type { LineRef } from "../../shared/drafts.ts";
+import { anchorAt } from "../anchors.ts";
 import { fakeCommandRunner, type ScriptedResult } from "../fake-command-runner.ts";
 import { createGitLabForge, parseMergeRequestUrl } from "./gitlab.ts";
-import { ForgeError, type ChangeRequestRef } from "./port.ts";
+import { ForgeError, type AnchorLine, type ChangeRequestRef, type DraftAnchor, type DraftTarget } from "./port.ts";
 
 /**
  * Recorded from `glab` 1.119 against gitlab.com's gitlab-org/cli!3931, a merged MR from a fork, and
@@ -369,4 +371,275 @@ test("a repository on a host glab is not logged in to is turned down before anyt
 
   await assert.rejects(forge.findByBranch({ host: "gitlab.example.com", project: "acme/app" }, "main"), ForgeError);
   assert.equal(run.calls.length, 1, "only the login check ran");
+});
+
+// Drafts. Nothing here is recorded, since a draft note is a write to a real MR: `draft-notes.ndjson`,
+// `discussions.ndjson` and the answers below are built by hand from GitLab's draft notes and
+// discussions API docs, on !3931's diff refs and files.
+
+const MR_3931_TARGET: DraftTarget = {
+  ref: MR_3931,
+  baseSha: "a34c75cf567863b8d4acbcf739625ca291a3c99d",
+  startSha: "c1c0a9f1f0fd33d96b9aa47c690734e8628c6847",
+  headSha: "8e1ef79fe55aae06f0c7246e550f8c30075b7564",
+};
+const DIFF_REFS = { base_sha: MR_3931_TARGET.baseSha, start_sha: MR_3931_TARGET.startSha, head_sha: MR_3931_TARGET.headSha };
+
+/** Lines of the first hunk of discussions.go in !3931, `@@ -143,28 +143,52 @@`, as `parsePatch` reads them. */
+const GO_PATH = "internal/commands/mr/mrutils/discussions.go";
+const GO = { path: GO_PATH, previousPath: null };
+const GO_PATHS = { old_path: GO_PATH, new_path: GO_PATH };
+/** `echo -n internal/commands/mr/mrutils/discussions.go | sha1sum` */
+const GO_SHA1 = "58b4176ff8bffa189fe52755b949fc37c46ca010";
+const CONTEXT_145: AnchorLine = { kind: "context", oldLine: 145, newLine: 145, oldPos: 145, newPos: 145 };
+const ADDED_146: AnchorLine = { kind: "added", oldLine: null, newLine: 146, oldPos: 146, newPos: 146 };
+const ADDED_147: AnchorLine = { kind: "added", oldLine: null, newLine: 147, oldPos: 146, newPos: 147 };
+const REMOVED_148: AnchorLine = { kind: "removed", oldLine: 148, newLine: null, oldPos: 148, newPos: 159 };
+const MD_PATH = "docs/source/mr/note/create.md";
+
+const DRAFT_NOTES = "projects/34675721/merge_requests/3931/draft_notes";
+const JSON_BODY = ["--header", "Content-Type: application/json", "--input", "-"];
+
+/** The first `count` draft notes of the hand-built listing. */
+function draftNotesFixture(count?: number): string {
+  return fixture("draft-notes.ndjson").split("\n").filter((line) => line !== "").slice(0, count).join("\n");
+}
+
+/** A draft note as GitLab answers with one: its entity's every field, the position's unset ones null. */
+function draftNote(id: number, note: string, position: Record<string, unknown> | null): ScriptedResult {
+  const kept =
+    position === null
+      ? null
+      : { old_path: null, new_path: null, old_line: null, new_line: null, line_range: null, ...position };
+  return {
+    stdout: JSON.stringify({
+      id,
+      author_id: 21230898,
+      merge_request_id: 533339747,
+      resolve_discussion: false,
+      discussion_id: null,
+      note,
+      commit_id: null,
+      line_code: null,
+      position: kept,
+    }),
+  };
+}
+
+test("the anchor lines above are the diff's own, with GitLab's running counters", async () => {
+  const { forge } = forgeReplaying(READ_MR);
+  const files = (await forge.fetchChangeRequest(MR_3931)).files;
+  const at = (line: LineRef) => {
+    const anchor = anchorAt(files, { kind: "line", path: GO_PATH, line });
+    return anchor.kind === "line" ? anchor.line : null;
+  };
+
+  assert.deepEqual(at({ side: "new", line: 145 }), CONTEXT_145);
+  assert.deepEqual(at({ side: "new", line: 146 }), ADDED_146);
+  assert.deepEqual(at({ side: "new", line: 147 }), ADDED_147);
+  assert.deepEqual(at({ side: "old", line: 148 }), REMOVED_148);
+});
+
+test("lists the viewer's draft notes by the project's numeric ID, a reply where its thread is, and not the MR-level ones", async () => {
+  const { forge, run } = forgeReplaying([
+    LOGGED_IN,
+    { stdout: fixture("project.json") },
+    { stdout: fixture("draft-notes.ndjson") },
+    { stdout: fixture("discussions.ndjson") },
+  ]);
+
+  const drafts = await forge.listDrafts(MR_3931);
+
+  assert.deepEqual(
+    run.calls.slice(1).map((call) => call.args),
+    [
+      ["api", "--hostname", "gitlab.com", "projects/gitlab-org%2Fcli"],
+      ["api", "--hostname", "gitlab.com", `${DRAFT_NOTES}?per_page=100`, "--paginate", "--output", "ndjson"],
+      ["api", "--hostname", "gitlab.com", "projects/34675721/merge_requests/3931/discussions?per_page=100", "--paginate", "--output", "ndjson"],
+    ],
+  );
+  assert.deepEqual(drafts, [
+    // Started on the web, which sends a one-line `line_range` even for a single line.
+    { id: "101", body: "Why a second lookup here?", location: { kind: "line", path: GO_PATH, line: { side: "new", line: 146 } } },
+    {
+      id: "102",
+      body: "This block reads well.",
+      location: { kind: "range", path: GO_PATH, start: { side: "new", line: 145 }, end: { side: "new", line: 147 } },
+    },
+    { id: "103", body: "Was this message used anywhere else?", location: { kind: "line", path: GO_PATH, line: { side: "old", line: 148 } } },
+    { id: "104", body: "The docs could mention the flag earlier.", location: { kind: "file", path: MD_PATH } },
+    { id: "106", body: "Agreed, and the same goes for replies.", location: { kind: "line", path: MD_PATH, line: { side: "new", line: 25 } } },
+  ]);
+});
+
+test("without a reply among the drafts the MR's discussions are not read", async () => {
+  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, { stdout: draftNotesFixture(5) }]);
+
+  assert.deepEqual((await forge.listDrafts(MR_3931)).map((draft) => draft.id), ["101", "102", "103", "104"]);
+  assert.equal(run.calls.length, 3);
+});
+
+test("each anchor becomes the draft note position GitLab anchors it by, sent as JSON to the numeric project ID", async () => {
+  const range = (start: AnchorLine, end: AnchorLine): DraftAnchor => ({ kind: "range", ...GO, start, end });
+  const cases: { anchor: DraftAnchor; position: Record<string, unknown>; location: unknown }[] = [
+    {
+      anchor: { kind: "line", ...GO, line: ADDED_146 },
+      position: { position_type: "text", ...DIFF_REFS, ...GO_PATHS, new_line: 146 },
+      location: { kind: "line", path: GO_PATH, line: { side: "new", line: 146 } },
+    },
+    {
+      anchor: { kind: "line", ...GO, line: REMOVED_148 },
+      position: { position_type: "text", ...DIFF_REFS, ...GO_PATHS, old_line: 148 },
+      location: { kind: "line", path: GO_PATH, line: { side: "old", line: 148 } },
+    },
+    {
+      anchor: { kind: "line", ...GO, line: CONTEXT_145 },
+      position: { position_type: "text", ...DIFF_REFS, ...GO_PATHS, old_line: 145, new_line: 145 },
+      location: { kind: "line", path: GO_PATH, line: { side: "new", line: 145 } },
+    },
+    {
+      anchor: range(CONTEXT_145, ADDED_147),
+      position: {
+        position_type: "text",
+        ...DIFF_REFS,
+        ...GO_PATHS,
+        new_line: 147,
+        line_range: {
+          start: { line_code: `${GO_SHA1}_145_145`, type: null, old_line: 145, new_line: 145 },
+          end: { line_code: `${GO_SHA1}_146_147`, type: "new", old_line: null, new_line: 147 },
+        },
+      },
+      location: { kind: "range", path: GO_PATH, start: { side: "new", line: 145 }, end: { side: "new", line: 147 } },
+    },
+    {
+      anchor: range(ADDED_146, REMOVED_148),
+      position: {
+        position_type: "text",
+        ...DIFF_REFS,
+        ...GO_PATHS,
+        old_line: 148,
+        line_range: {
+          start: { line_code: `${GO_SHA1}_146_146`, type: "new", old_line: null, new_line: 146 },
+          end: { line_code: `${GO_SHA1}_148_159`, type: "old", old_line: 148, new_line: null },
+        },
+      },
+      location: { kind: "range", path: GO_PATH, start: { side: "new", line: 146 }, end: { side: "old", line: 148 } },
+    },
+    {
+      anchor: { kind: "file", path: "cmd/new.go", previousPath: "cmd/old.go" },
+      position: { position_type: "file", ...DIFF_REFS, old_path: "cmd/old.go", new_path: "cmd/new.go" },
+      location: { kind: "file", path: "cmd/new.go" },
+    },
+  ];
+
+  for (const { anchor, position, location } of cases) {
+    const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, draftNote(201, "Why?", position)]);
+
+    const draft = await forge.createDraft(MR_3931_TARGET, { anchor, body: "Why?" });
+
+    const call = run.calls.at(-1)!;
+    assert.deepEqual(call.args, ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, DRAFT_NOTES], anchor.kind);
+    assert.deepEqual(JSON.parse(call.input!), { note: "Why?", position }, JSON.stringify(anchor));
+    assert.deepEqual(draft, { id: "201", body: "Why?", location });
+    assert.equal(run.calls.length, 3, "nothing is taken back");
+  }
+});
+
+test("a draft GitLab kept somewhere other than where it was put is deleted again, and the reviewer told", async () => {
+  const sent = { position_type: "text", ...DIFF_REFS, ...GO_PATHS, old_line: 145, new_line: 145 };
+  for (const kept of [
+    // A body read as a form loses its position, which leaves an MR-level draft.
+    null,
+    { position_type: "text", ...DIFF_REFS, ...GO_PATHS, new_line: 145 },
+    { ...sent, head_sha: "73472a4e0000000000000000000000000000000" },
+  ]) {
+    const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, draftNote(202, "Why?", kept), {}]);
+
+    await assert.rejects(
+      forge.createDraft(MR_3931_TARGET, { anchor: { kind: "line", ...GO, line: CONTEXT_145 }, body: "Why?" }),
+      new ForgeError("GitLab did not keep the comment where it was put, so the draft was deleted again. This GitLab may not take comments of this kind."),
+    );
+    assert.deepEqual(run.calls.at(-1)?.args, ["api", "--hostname", "gitlab.com", "--method", "DELETE", `${DRAFT_NOTES}/202`]);
+  }
+
+  // A range GitLab kept as its last line alone is not the range either.
+  const rangeSent = positionOfRange();
+  const { forge, run } = forgeReplaying([
+    LOGGED_IN,
+    { stdout: fixture("project.json") },
+    draftNote(203, "Why?", { ...rangeSent, line_range: null }),
+    {},
+  ]);
+  await assert.rejects(forge.createDraft(MR_3931_TARGET, { anchor: { kind: "range", ...GO, start: CONTEXT_145, end: ADDED_147 }, body: "Why?" }), ForgeError);
+  assert.deepEqual(run.calls.at(-1)?.args.at(-1), `${DRAFT_NOTES}/203`);
+});
+
+function positionOfRange(): Record<string, unknown> {
+  return {
+    position_type: "text",
+    ...DIFF_REFS,
+    ...GO_PATHS,
+    new_line: 147,
+    line_range: {
+      start: { line_code: `${GO_SHA1}_145_145`, type: null, old_line: 145, new_line: 145 },
+      end: { line_code: `${GO_SHA1}_146_147`, type: "new", old_line: null, new_line: 147 },
+    },
+  };
+}
+
+test("a misplaced draft that cannot be deleted either is left for the reviewer to delete, in so many words", async () => {
+  const { forge } = forgeReplaying([
+    LOGGED_IN,
+    { stdout: fixture("project.json") },
+    draftNote(204, "Why?", null),
+    { exitCode: 1, stderr: "glab: 404 Not found (HTTP 404)\n" },
+  ]);
+
+  await assert.rejects(
+    forge.createDraft(MR_3931_TARGET, { anchor: { kind: "file", ...GO }, body: "Why?" }),
+    new ForgeError(
+      "GitLab did not keep the comment where it was put, and deleting the misplaced draft failed too (glab failed: 404 Not found (HTTP 404)). Delete it on the merge request's page before submitting.",
+    ),
+  );
+});
+
+test("an edit sends the draft's own position back with the new text, since one sent without it is wiped", async () => {
+  const [, rangeDraft, , , mrLevelDraft] = draftNotesFixture().split("\n");
+  const { forge, run } = forgeReplaying([
+    LOGGED_IN,
+    { stdout: fixture("project.json") },
+    { stdout: rangeDraft },
+    { stdout: rangeDraft },
+    { stdout: mrLevelDraft },
+    { stdout: mrLevelDraft },
+  ]);
+
+  await forge.updateDraft(MR_3931, "102", "This block reads very well.");
+  await forge.updateDraft(MR_3931, "105", "Overall this looks great.");
+
+  assert.deepEqual(
+    run.calls.slice(2).map((call) => call.args),
+    [
+      ["api", "--hostname", "gitlab.com", `${DRAFT_NOTES}/102`],
+      ["api", "--hostname", "gitlab.com", "--method", "PUT", ...JSON_BODY, `${DRAFT_NOTES}/102`],
+      ["api", "--hostname", "gitlab.com", `${DRAFT_NOTES}/105`],
+      ["api", "--hostname", "gitlab.com", "--method", "PUT", ...JSON_BODY, `${DRAFT_NOTES}/105`],
+    ],
+  );
+  assert.deepEqual(JSON.parse(run.calls[3]!.input!), { note: "This block reads very well.", position: JSON.parse(rangeDraft!).position });
+  // An MR-level draft's all-null position is not one GitLab would take back.
+  assert.deepEqual(JSON.parse(run.calls[5]!.input!), { note: "Overall this looks great." });
+});
+
+test("deletes a draft note by its ID, and takes nothing but a GitLab ID", async () => {
+  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, {}]);
+
+  await forge.deleteDraft(MR_3931, "103");
+  assert.deepEqual(run.calls.at(-1)?.args, ["api", "--hostname", "gitlab.com", "--method", "DELETE", `${DRAFT_NOTES}/103`]);
+
+  for (const id of ["PRRC_kwDOUFGNmM6", "103/publish", "../1", "0", ""]) {
+    await assert.rejects(forge.deleteDraft(MR_3931, id), ForgeError, id);
+    await assert.rejects(forge.updateDraft(MR_3931, id, "text"), ForgeError, id);
+  }
+  assert.equal(run.calls.length, 3, "nothing more ran");
 });
