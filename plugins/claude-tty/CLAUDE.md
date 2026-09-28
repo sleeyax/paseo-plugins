@@ -331,7 +331,7 @@ Icons, `Modal`, `useToast` and `copyText` come from `@getpaseo/plugin/client/rea
 
 `pnpm test` is `node --test "{client,server,shared}/**/*.test.ts"` through Node's type stripping, so no TypeScript that has to be emitted and relative imports keep their `.ts` extension.
 A test that resolves the plugin root walks up from `import.meta.dirname`, so it counts the directory it sits in and no `src/` above it.
-`@getpaseo/client` is on 0.9.1 across the workspace, which is what `@getpaseo/plugin` takes as a peer.
+`@getpaseo/client` is on 0.9.2 across the workspace, which is what `@getpaseo/plugin` takes as a peer.
 
 `server/acp-provider.test.ts` is the one exception to all of that: it runs the adapter's own `tsc` build and then spawns the result, because the bridge it exercises takes a command rather than a module, and a stale `dist/` would otherwise decide the result.
 It points the adapter at a throwaway state directory so the run touches none of yours.
