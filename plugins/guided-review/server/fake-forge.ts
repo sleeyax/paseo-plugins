@@ -13,6 +13,8 @@ import {
   type Forge,
   type ForgeKind,
   type ForgeUser,
+  type ReviewSubmission,
+  type SubmitOutcome,
 } from "./forge/port.ts";
 
 /**
@@ -39,6 +41,14 @@ export type FakeForge = Forge & {
   failFetchHead: Error | null;
   /** How many times the head alone was read. */
   headReads: number;
+  /** The review body the forge keeps, by change request URL, as GitHub keeps it on the pending review. */
+  bodies: Map<string, string>;
+  /** Every submit, with what it was sent. */
+  submissions: { target: DraftTarget; submission: ReviewSubmission }[];
+  /** When set, the next submit answers with it; otherwise a submit lands whole, in one step. */
+  submitOutcome: SubmitOutcome | null;
+  /** The URL of every change request whose pending review was discarded. */
+  discarded: string[];
 };
 
 /** Where the forge says a draft on `anchor` is: a line by the side both forges put it on. */
@@ -67,6 +77,10 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     created: [],
     failFetchHead: null,
     headReads: 0,
+    bodies: new Map(),
+    submissions: [],
+    submitOutcome: null,
+    discarded: [],
     async matchUrl(url) {
       return PARSERS[kind](url);
     },
@@ -129,6 +143,36 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
         ref.url,
         drafts.filter((draft) => draft.id !== draftId),
       );
+    },
+    // GitHub keeps the body on the pending review; GitLab keeps none, so the service does.
+    reviewBody:
+      kind === "github"
+        ? {
+            async read(ref) {
+              return forge.bodies.get(ref.url) ?? "";
+            },
+            async write(target, body) {
+              forge.bodies.set(target.ref.url, body);
+            },
+          }
+        : null,
+    async submitReview(target, submission) {
+      forge.submissions.push(structuredClone({ target, submission }));
+      const outcome = forge.submitOutcome ?? {
+        published: true,
+        steps: [{ id: "submit", label: "Publish the review", status: "done" as const, message: null }],
+      };
+      forge.submitOutcome = null;
+      if (outcome.published) {
+        forge.drafts.delete(target.ref.url);
+        forge.bodies.delete(target.ref.url);
+      }
+      return structuredClone(outcome);
+    },
+    async discardReview(ref) {
+      forge.discarded.push(ref.url);
+      forge.drafts.delete(ref.url);
+      forge.bodies.delete(ref.url);
     },
   };
   return forge;

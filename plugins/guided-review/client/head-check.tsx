@@ -35,12 +35,16 @@ function headCheckKey(reviewId: string | null) {
   return [PLUGIN_ID, "head", reviewId];
 }
 
-export type StaleGuideBannerProps = {
-  reviewId: string;
+/** Seeds the shared head check with an answer read elsewhere, like the Finish review step's. */
+export function useSetHeadCheck(): (reviewId: string, head: HeadCheck) => void {
+  const queryClient = useQueryClient();
+  return (reviewId, head) => queryClient.setQueryData(headCheckKey(reviewId), head);
+}
+
+export type RegenerateOptions = {
+  reviewId: string | null;
   /** The workspace the panel is in; a regenerated guide may end up in another. */
   workspaceId: string;
-  header: ReviewHeader;
-  theme: PluginTheme;
   /** Opens another workspace; absent on hosts without client navigation. */
   openWorkspace?: (workspaceId: string) => void;
   /** Called once a regeneration has moved the review, so the panel reads the guide at the new head. */
@@ -48,12 +52,20 @@ export type StaleGuideBannerProps = {
 };
 
 /**
- * "PR updated since this guide": shown while the forge's head is not the guide's, with Regenerate,
- * which is the only way to a guide at the new head. Draws nothing while the guide is current.
+ * "Regenerate" and the job it starts, followed until it ends. One per panel, so the banner and the
+ * Finish review step's offer to regenerate drive and show the same job.
  */
-export function StaleGuideBanner({ reviewId, workspaceId, header, theme, openWorkspace, onRegenerated }: StaleGuideBannerProps) {
-  const colors = theme.colors;
-  const head = useHeadCheck(reviewId);
+export type RegenerateControl = {
+  run: () => void;
+  /** A regeneration is being asked for, or followed until its guide is ready. */
+  active: boolean;
+  busy: boolean;
+  /** Where the job has got to, while busy. */
+  status: string | null;
+  error: string | null;
+};
+
+export function useRegenerate({ reviewId, workspaceId, openWorkspace, onRegenerated }: RegenerateOptions): RegenerateControl {
   const queryClient = useQueryClient();
   const regenerateGuide = useRpc(contracts.regenerateGuide);
   const getStartProgress = useRpc(contracts.getStartProgress);
@@ -63,7 +75,7 @@ export function StaleGuideBanner({ reviewId, workspaceId, header, theme, openWor
   const [rejection, setRejection] = useState<string | null>(null);
 
   const regenerate = useMutation({
-    mutationFn: () => regenerateGuide({ reviewId }),
+    mutationFn: () => regenerateGuide({ reviewId: reviewId! }),
     onSuccess: (result) => {
       if (result.status === "rejected") setRejection(result.message);
       else {
@@ -74,8 +86,8 @@ export function StaleGuideBanner({ reviewId, workspaceId, header, theme, openWor
   });
   const progress = useQuery({
     queryKey: [PLUGIN_ID, "regenerate-progress", reviewId, runs],
-    queryFn: () => getStartProgress({ reviewId }),
-    enabled: running,
+    queryFn: () => getStartProgress({ reviewId: reviewId! }),
+    enabled: running && reviewId !== null,
     refetchInterval: (query) => (query.state.data && isFinished(query.state.data.phase) ? false : POLL_MS),
   });
   const current = running ? (progress.data ?? null) : null;
@@ -90,15 +102,42 @@ export function StaleGuideBanner({ reviewId, workspaceId, header, theme, openWor
     if (current?.phase === "ready") setRunning(false);
   }, [finished]);
 
-  if (!running && !regenerate.isPending && (head === null || !head.moved)) return null;
-
-  const kind = header.forge === "gitlab" ? "MR" : "PR";
   const busy = regenerate.isPending || (running && !finished);
   const line = current === null ? null : describeProgress(current);
-  const error =
-    rejection ??
-    (regenerate.error ? (regenerate.error instanceof Error ? regenerate.error.message : String(regenerate.error)) : null) ??
-    (line?.tone === "danger" ? line.text : null);
+  return {
+    run: () => {
+      setRejection(null);
+      setRunning(false);
+      regenerate.mutate();
+    },
+    active: running || regenerate.isPending,
+    busy,
+    status: busy && line && line.tone !== "danger" ? line.text : null,
+    error:
+      rejection ??
+      (regenerate.error ? (regenerate.error instanceof Error ? regenerate.error.message : String(regenerate.error)) : null) ??
+      (line?.tone === "danger" ? line.text : null),
+  };
+}
+
+export type StaleGuideBannerProps = {
+  reviewId: string;
+  header: ReviewHeader;
+  theme: PluginTheme;
+  regenerate: RegenerateControl;
+};
+
+/**
+ * "PR updated since this guide": shown while the forge's head is not the guide's, with Regenerate,
+ * which is the only way to a guide at the new head. Draws nothing while the guide is current.
+ */
+export function StaleGuideBanner({ reviewId, header, theme, regenerate }: StaleGuideBannerProps) {
+  const colors = theme.colors;
+  const head = useHeadCheck(reviewId);
+  if (!regenerate.active && (head === null || !head.moved)) return null;
+
+  const kind = header.forge === "gitlab" ? "MR" : "PR";
+  const { busy, status, error } = regenerate;
 
   return (
     <View
@@ -120,9 +159,9 @@ export function StaleGuideBanner({ reviewId, workspaceId, header, theme, openWor
           : null}
         Regenerate writes a guide for the new head; what you marked understood carries over where the code did not change.
       </Line>
-      {busy && line && line.tone !== "danger" ? (
+      {status ? (
         <Line colors={colors} muted>
-          {line.text}
+          {status}
         </Line>
       ) : null}
       {error ? (
@@ -135,11 +174,7 @@ export function StaleGuideBanner({ reviewId, workspaceId, header, theme, openWor
           colors={colors}
           label={busy ? "Regenerating…" : "Regenerate"}
           disabled={busy}
-          onPress={() => {
-            setRejection(null);
-            setRunning(false);
-            regenerate.mutate();
-          }}
+          onPress={regenerate.run}
         />
       </View>
     </View>

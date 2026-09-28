@@ -4,6 +4,7 @@ import { FileDiffSchema } from "./diff.ts";
 import { DraftListSchema, DraftLocationSchema, DraftSchema } from "./drafts.ts";
 import { GuideStateSchema } from "./guide.ts";
 import { GuideProgressSchema } from "./progress.ts";
+import { SubmitResultSchema, VerdictOptionSchema, VerdictSchema } from "./submit.ts";
 
 /** What the panel shows about a change request before any guide exists. */
 export const ReviewHeaderSchema = z.object({
@@ -255,6 +256,49 @@ export const regenerateGuide = defineRpc({
   input: z.object({ reviewId: z.string() }),
   output: StartResultSchema,
 });
+
+/** What the Finish review step opens on; the drafts it lists are `listDrafts`'. */
+export const FinishViewSchema = z.object({
+  /** The review body as it is kept until submit: on the pending review on GitHub, here on GitLab. */
+  body: z.string(),
+  /** Every verdict, on offer or not, from the head as the forge has it now. */
+  verdicts: z.array(VerdictOptionSchema),
+  /** The head check the verdicts were decided by, which the panel's banner then shows too. */
+  head: HeadCheckSchema,
+});
+
+export const getFinish = defineRpc({
+  name: "guided-review.review.finish",
+  input: z.object({ reviewId: z.string() }),
+  output: FinishViewSchema,
+});
+
+/** Keeps the review body until submit, where the forge keeps it or, on a forge that keeps none, here. */
+export const saveReviewBody = defineRpc({
+  name: "guided-review.review.body",
+  input: z.object({ reviewId: z.string(), body: z.string() }),
+  output: z.null(),
+});
+
+/**
+ * Publishes the drafts and the body with the verdict. The head is checked with the forge again first,
+ * and a verdict not on offer then is refused with nothing sent; `headSha` is the head of the guide
+ * the panel showed, and one the review has since been regenerated away from is refused too.
+ */
+export const submitReview = defineRpc({
+  name: "guided-review.review.submit",
+  input: z.object({ reviewId: z.string(), headSha: z.string(), verdict: VerdictSchema, body: z.string() }),
+  output: SubmitResultSchema,
+});
+
+/** Throws away the pending review, its drafts and its body. */
+export const discardReview = defineRpc({
+  name: "guided-review.review.discard",
+  input: z.object({ reviewId: z.string() }),
+  output: z.null(),
+});
+
+export type FinishView = z.output<typeof FinishViewSchema>;
 
 export type HeadCheck = z.output<typeof HeadCheckSchema>;
 
