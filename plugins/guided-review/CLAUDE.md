@@ -37,6 +37,10 @@ Sending to a busy agent interrupts its turn (`PaseoAgentSendOptions` has no `act
 
 The guide is generated as a background job keyed by review and head SHA, and `server/review-store.ts` keeps a record per head SHA from the moment the agent is asked, with its agent ID. A panel read that finds a `generating` record with no job behind it waits on the same agent again, which is how a generation survives a plugin reload. A guide belongs to the workspace it was generated in; a new workspace for the review gets a new guide and agent.
 
+A node names its code in `covers` (`shared/guide.ts`): a path, hunk numbers, or line ranges in the new file (the old one for a removed file). The numbers are the ones `server/guide-prompt.ts` labels each hunk with ("Hunk 2"), from `splitHunks` in `server/diff.ts`, so the prompt and the parser must keep cutting patches the same way.
+`server/diff.ts` parses patches into `shared/diff.ts`'s model and `resolveCode` cuts a file down to what a node covers, which `parseGuide` uses to reject references the diff lacks and the `node-diff` RPC to return a node's hunks, parsed afresh from the snapshot at the guide's head.
+Every line keeps its kind, its old and new numbers, and GitLab's running counters `oldPos`/`newPos` (a `line_code` is `sha1(path)_oldPos_newPos`, and a new file's old counter is 0, as GitLab's parser has it), so a draft can be anchored from the line alone. A partly covered hunk comes back as one entry per unbroken run of lines, with `complete: false` and a header recomputed for the run; its lines still lie inside the forge's hunk, which a GitHub range needs.
+
 The SDK gives a plugin no data directory. `server/paths.ts` derives one in the Paseo home, per daemon, because the workspace IDs it records mean something only to that daemon.
 
 `server/command-runner.ts` keeps the whole of stdout, decoded once, because a truncated JSON document is worse than none; only a runaway command past 256 MiB is cut off, and that is a failure rather than a truncation.
