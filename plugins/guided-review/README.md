@@ -20,6 +20,8 @@ To start a review, open the Command Center, choose **Guided Review: start from a
 
 In that workspace a guide agent, labelled **Guide: <title>**, reads the pull request or merge request and writes the guide, which the panel shows once it is done: the idea behind the change, what you need to know, the decisions the author made with the alternatives they rejected, where to spend your attention, and the change split into concepts. The guide explains; it reports no bugs, risks or style problems and suggests no fixes. While it is being written the panel links the agent, whose chat you can follow. The agent is read-only: it runs in its provider's plan or read-only mode, and the plugin denies every request it makes to edit, write or run a command. Guides are kept per head commit, so reopening the panel shows the stored guide, and archiving the workspace archives the agent.
 
+To dig into a concept, select **Ask about this** on it. The plugin sends the guide agent a prompt naming the concept, with what the guide says about it, and opens the agent's chat, where you carry on the conversation. The agent answers only when it is idle, since a new prompt would cut off the answer it is writing; while it is busy the panel says so, and you ask again once it has finished.
+
 The workspace is a worktree of a local clone. The plugin uses the Paseo project whose `origin` is the repository the pull request or merge request targets; when there is none, it clones the repository once with `gh repo clone` or `glab repo clone` into `$PASEO_HOME/plugin-data/guided-review/clones/` and reuses that clone for every later review of it.
 
 Requires Paseo 0.9 or newer.
@@ -45,6 +47,8 @@ Requires Paseo 0.9 or newer.
 | **The guide agent's answer did not match what was asked for: …** | The agent's guide was not in the expected shape; the problems follow. Select **Try again** in the panel, or pick a stronger model in the **Guide agent** setting. |
 | **The … provider offers no model for the guide agent** or **Could not create the guide agent with …** | Check the **Guide agent** setting against the providers and models Paseo lists for new agents. |
 | **The guide agent did not finish within 30 minutes** | Open the guide agent to see where it got stuck, then select **Try again**. |
+| **The guide agent is busy with another answer** | It is still answering an earlier question. Open its chat to follow it, and ask again once it has finished. |
+| **The guide agent is gone: it was archived or closed** | The guide has no agent left to answer questions; its chat was archived or closed. |
 
 Run `paseo plugin logs guided-review` for more detail.
 

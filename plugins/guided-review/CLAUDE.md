@@ -37,6 +37,8 @@ Sending to a busy agent interrupts its turn (`PaseoAgentSendOptions` has no `act
 
 The guide is generated as a background job keyed by review and head SHA, and `server/review-store.ts` keeps a record per head SHA from the moment the agent is asked, with its agent ID. A panel read that finds a `generating` record with no job behind it waits on the same agent again, which is how a generation survives a plugin reload. A guide belongs to the workspace it was generated in; a new workspace for the review gets a new guide and agent.
 
+"Ask about this" sends only an `AskSubject` (a node ID or a changed file's path) to `ask`, which looks the rest up in the stored guide and snapshot and builds the prompt from an `AskSubjectContext` in `server/ask-prompt.ts`: a node with the code it covers, or a file with its Supporting category, null for Unsorted. `client/ask-action.tsx` holds `AskAction`, the one control every node and entry renders, and `useAskAbout`, which opens the agent's chat once the prompt is sent. `ask` checks `status` before `send` so a busy or gone agent gets its own message rather than the port's error.
+
 The SDK gives a plugin no data directory. `server/paths.ts` derives one in the Paseo home, per daemon, because the workspace IDs it records mean something only to that daemon.
 
 `server/command-runner.ts` keeps the whole of stdout, decoded once, because a truncated JSON document is worse than none; only a runaway command past 256 MiB is cut off, and that is a failure rather than a truncation.
