@@ -1,9 +1,12 @@
+import type { DiffLine } from "../../shared/diff.ts";
+import type { Draft } from "../../shared/drafts.ts";
+
 /**
  * What the review service asks of a forge. Each forge has one adapter implementing it over its CLI
  * (`gh`, `glab`) through a command runner, so a test replays recorded output through a fake runner
  * and the service is tested against a fake of this port.
  *
- * Grows with the tickets that need it: the current user's drafts, submitting and discarding a review.
+ * Grows with the tickets that need it: submitting and discarding a review.
  */
 export interface Forge {
   readonly kind: ForgeKind;
@@ -25,7 +28,48 @@ export interface Forge {
   currentUser(ref: ChangeRequestRef): Promise<ForgeUser>;
   /** Clones the change request's repository into `directory`, which must not exist yet. */
   cloneRepository(ref: ChangeRequestRef, directory: string): Promise<void>;
+
+  /**
+   * The current user's unpublished comments on the change request, whether this plugin or the
+   * forge's web UI started them. Only the reviewer's own: both forges keep drafts private.
+   */
+  listDrafts(ref: ChangeRequestRef): Promise<Draft[]>;
+  /**
+   * Saves a comment as a draft on the forge at once, unpublished: on GitHub a thread on the viewer's
+   * pending review, found or started; on GitLab a draft note. Returns the draft as the forge has it.
+   */
+  createDraft(target: DraftTarget, draft: NewDraft): Promise<Draft>;
+  /** Replaces a draft's text, leaving where it sits as it is. */
+  updateDraft(ref: ChangeRequestRef, draftId: string, body: string): Promise<void>;
+  deleteDraft(ref: ChangeRequestRef, draftId: string): Promise<void>;
 }
+
+/**
+ * The change request a draft is written against, at the head the panel's diff was read at: a
+ * GitHub pending review is started on that commit, and a GitLab position names all three SHAs.
+ */
+export type DraftTarget = Pick<ChangeRequest, "ref" | "baseSha" | "startSha" | "headSha">;
+
+export type NewDraft = { anchor: DraftAnchor; body: string };
+
+/**
+ * A line of a file's diff, with everything either forge anchors a comment on it by: its kind and
+ * numbers for GitHub's side and line, and GitLab's running counters for its `line_code`.
+ */
+export type AnchorLine = Pick<DiffLine, "kind" | "oldLine" | "newLine" | "oldPos" | "newPos">;
+
+/** The file a draft is on; GitLab names both paths of a renamed file. */
+export type AnchorFile = { path: string; previousPath: string | null };
+
+/**
+ * Where a new draft goes, resolved against the diff by the service so an adapter only translates:
+ * a line, a range of one hunk's lines in the diff's order, or the file as a whole. The forge-neutral
+ * form a draft comes back in is `DraftLocation` in `shared/drafts.ts`.
+ */
+export type DraftAnchor =
+  | (AnchorFile & { kind: "line"; line: AnchorLine })
+  | (AnchorFile & { kind: "range"; start: AnchorLine; end: AnchorLine })
+  | (AnchorFile & { kind: "file" });
 
 export type ForgeKind = "github" | "gitlab";
 
