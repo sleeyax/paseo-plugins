@@ -113,7 +113,7 @@ test("a node's hunks from a recorded GitHub PR carry their old and new line numb
   });
   const { service, reviewId } = await reviewing(t, changeRequest, guide);
 
-  const menuKeys = await service.nodeDiff({ reviewId, nodeId: "menu-keys" });
+  const menuKeys = await service.nodeDiff({ reviewId, subject: { kind: "node", nodeId: "menu-keys" } });
   assert.equal(menuKeys.headSha, changeRequest.headSha);
   const [runtime] = menuKeys.files;
   assert.deepEqual(
@@ -137,7 +137,7 @@ test("a node's hunks from a recorded GitHub PR carry their old and new line numb
   ]);
   assert.equal(runtime!.hunks[0]!.lines[4]!.text, 'const CURSOR_DOWN = "\\^[[B";');
 
-  const sdkBump = await service.nodeDiff({ reviewId, nodeId: "sdk-bump" });
+  const sdkBump = await service.nodeDiff({ reviewId, subject: { kind: "node", nodeId: "sdk-bump" } });
   assert.deepEqual(
     sdkBump.files.map((file) => [file.path, file.hunks.map((hunk) => hunk.index)]),
     [
@@ -180,7 +180,7 @@ test("a node can take part of a hunk from a recorded GitLab MR, keeping GitLab's
   });
   const { service, reviewId } = await reviewing(t, changeRequest, guide);
 
-  const internal = await service.nodeDiff({ reviewId, nodeId: "internal-threads" });
+  const internal = await service.nodeDiff({ reviewId, subject: { kind: "node", nodeId: "internal-threads" } });
   assert.deepEqual(
     internal.files.map((file) => file.path),
     ["docs/source/mr/note/create.md", discussions],
@@ -202,7 +202,7 @@ test("a node can take part of a hunk from a recorded GitLab MR, keeping GitLab's
   assert.equal(part!.lines[2]!.text, "func IsInternalDiscussion(discussion *gitlab.Discussion) bool {");
 
   // The rest of the hunk is the other node's, in two parts either side of this one's lines.
-  const resolve = await service.nodeDiff({ reviewId, nodeId: "resolve-discussion" });
+  const resolve = await service.nodeDiff({ reviewId, subject: { kind: "node", nodeId: "resolve-discussion" } });
   const [before, after] = resolve.files[0]!.hunks;
   assert.deepEqual(resolve.files[0]!.hunks.map(headerOf), [
     { index: 1, oldStart: 143, oldLines: 24, newStart: 143, newLines: 42, complete: false },
@@ -234,7 +234,7 @@ test("added, removed, renamed and binary files, and a missing newline at the end
   });
   const { service, reviewId } = await reviewing(t, changeRequest, guide);
 
-  const { files } = await service.nodeDiff({ reviewId, nodeId: "files" });
+  const { files } = await service.nodeDiff({ reviewId, subject: { kind: "node", nodeId: "files" } });
 
   assert.deepEqual(
     files.map(({ path, previousPath, status, withheld, hunkCount }) => ({ path, previousPath, status, withheld, hunkCount })),
@@ -256,8 +256,8 @@ test("asking for a node's hunks before the guide is ready, or for a node it lack
   const url = "https://github.com/acme/uploader/pull/7";
   const { service, agents, reviewId } = await reviewing(t, sampleChangeRequest(url), sampleGuide());
 
-  await assert.rejects(service.nodeDiff({ reviewId, nodeId: "backoff" }), { message: 'The guide has no concept "backoff". Reopen the panel.' });
-  await assert.rejects(service.nodeDiff({ reviewId: "github/github.com/acme/other/1", nodeId: "uploader" }), {
+  await assert.rejects(service.nodeDiff({ reviewId, subject: { kind: "node", nodeId: "backoff" } }), { message: 'The guide has no concept "backoff". Reopen the panel.' });
+  await assert.rejects(service.nodeDiff({ reviewId: "github/github.com/acme/other/1", subject: { kind: "node", nodeId: "uploader" } }), {
     message: "This review is not known here any more. Start it again.",
   });
 
@@ -265,9 +265,42 @@ test("asking for a node's hunks before the guide is ready, or for a node it lack
   agents.answer = () => new Promise<string>((resolve) => (release = resolve));
   await service.generateGuide({ reviewId });
   while (release === undefined) await new Promise((resolve) => setImmediate(resolve));
-  await assert.rejects(service.nodeDiff({ reviewId, nodeId: "uploader" }), { message: "The guide is not ready yet." });
+  await assert.rejects(service.nodeDiff({ reviewId, subject: { kind: "node", nodeId: "uploader" } }), { message: "The guide is not ready yet." });
 
   release(sampleGuideReply());
   await service.settled();
-  assert.equal((await service.nodeDiff({ reviewId, nodeId: "uploader" })).files[0]!.path, "src/upload.ts");
+  assert.equal((await service.nodeDiff({ reviewId, subject: { kind: "node", nodeId: "uploader" } })).files[0]!.path, "src/upload.ts");
+});
+
+test("a Supporting or Unsorted file's hunks are its whole diff, and a path the change lacks says why", async (t) => {
+  const url = "https://github.com/acme/uploader/pull/7";
+  const base = sampleChangeRequest(url);
+  const retryTest = {
+    path: "src/retry.test.ts",
+    previousPath: null,
+    status: "added" as const,
+    additions: 3,
+    deletions: 0,
+    patch: "@@ -0,0 +1,2 @@\n+it(\"retries\");\n+it(\"gives up\");\n@@ -0,0 +10,1 @@\n+it(\"backs off\");",
+  };
+  const doc = { path: "docs/retry.md", previousPath: null, status: "modified" as const, additions: 1, deletions: 1, patch: "@@ -3,1 +3,1 @@\n-old\n+new" };
+  const { service, reviewId } = await reviewing(t, { ...base, files: [...base.files, retryTest, doc] }, { ...sampleGuide(), supporting: [{ path: retryTest.path, category: "test" }] });
+
+  const supporting = await service.nodeDiff({ reviewId, subject: { kind: "file", path: retryTest.path } });
+  assert.equal(supporting.headSha, base.headSha);
+  assert.equal(supporting.files.length, 1);
+  assert.equal(supporting.files[0]!.path, retryTest.path);
+  assert.equal(supporting.files[0]!.hunkCount, 2);
+  assert.deepEqual(supporting.files[0]!.hunks.map(headerOf), [
+    { index: 1, oldStart: 0, oldLines: 0, newStart: 1, newLines: 2, complete: true },
+    { index: 2, oldStart: 0, oldLines: 0, newStart: 10, newLines: 1, complete: true },
+  ]);
+  assert.deepEqual(numbering(supporting.files[0]!.hunks[1]!.lines), ["added - 10 0_10"]);
+
+  const unsorted = await service.nodeDiff({ reviewId, subject: { kind: "file", path: doc.path } });
+  assert.deepEqual(numbering(unsorted.files[0]!.hunks[0]!.lines), ["removed 3 - 3_3", "added - 3 4_3"]);
+
+  await assert.rejects(service.nodeDiff({ reviewId, subject: { kind: "file", path: "src/other.ts" } }), {
+    message: "src/other.ts is not one of the change's files.",
+  });
 });

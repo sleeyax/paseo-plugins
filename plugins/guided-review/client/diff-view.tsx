@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import React from "react";
 import { Platform, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
+import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
 import type { DiffHunk, DiffLine, FileDiff } from "../shared/diff.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { fontSize, leading, radius, spacing, tint } from "./theme.ts";
@@ -30,16 +31,17 @@ export type NodeCodeProps = {
   reviewId: string;
   /** The guide's agent: a regenerated guide is a new agent, whose nodes may cover other code under the same IDs. */
   agentId: string;
-  nodeId: string;
+  /** A node, for the hunks it covers, or a Supporting or Unsorted file, for its whole diff. */
+  subject: GuideSubject;
   theme: PluginTheme;
 };
 
-/** The code a node covers, read from the server once per guide. */
-export function NodeCode({ reviewId, agentId, nodeId, theme }: NodeCodeProps) {
+/** The code a node or a file entry covers, read from the server once per guide. */
+export function NodeCode({ reviewId, agentId, subject, theme }: NodeCodeProps) {
   const getNodeDiff = useRpc(contracts.getNodeDiff);
   const diff = useQuery({
-    queryKey: [PLUGIN_ID, "node-diff", reviewId, agentId, nodeId],
-    queryFn: () => getNodeDiff({ reviewId, nodeId }),
+    queryKey: [PLUGIN_ID, "node-diff", reviewId, agentId, subjectKey(subject)],
+    queryFn: () => getNodeDiff({ reviewId, subject }),
     staleTime: Number.POSITIVE_INFINITY,
   });
   const colors = theme.colors;

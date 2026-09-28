@@ -104,17 +104,20 @@ export const askAbout = defineRpc({
   output: AskResultSchema,
 });
 
-/** The code a guide node covers, ready to draw: its files in reading order, each cut down to the node's hunks. */
+/**
+ * The code a subject covers, ready to draw: a node's files in reading order, each cut down to the
+ * node's hunks, or the whole diff of a changed file, as a Supporting or Unsorted entry shows it.
+ */
 export const NodeDiffSchema = z.object({
   /** The head the guide, and so these hunks, were read at. */
   headSha: z.string(),
   files: z.array(FileDiffSchema),
 });
 
-/** The hunks of one node of the review's current guide; fails while the guide is not ready. */
+/** The hunks of a node, or of a changed file, of the review's current guide; fails while the guide is not ready. */
 export const getNodeDiff = defineRpc({
   name: "guided-review.guide.node-diff",
-  input: z.object({ reviewId: z.string(), nodeId: z.string() }),
+  input: z.object({ reviewId: z.string(), subject: GuideSubjectSchema }),
   output: NodeDiffSchema,
 });
 
