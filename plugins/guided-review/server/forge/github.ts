@@ -131,6 +131,7 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
         baseBranch: pr.baseRefName,
         headBranch: pr.headRefName,
         baseSha: pr.baseRefOid,
+        startSha: pr.baseRefOid,
         headSha: pr.headRefOid,
         additions: pr.additions,
         deletions: pr.deletions,

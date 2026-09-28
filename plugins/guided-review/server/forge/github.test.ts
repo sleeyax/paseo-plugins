@@ -88,11 +88,12 @@ test("reads a pull request's metadata, commits, linked issues and files through 
   assert.equal(pr.state, "merged");
   assert.equal(pr.isDraft, false);
   assert.deepEqual(
-    { baseBranch: pr.baseBranch, headBranch: pr.headBranch, baseSha: pr.baseSha, headSha: pr.headSha },
+    { baseBranch: pr.baseBranch, headBranch: pr.headBranch, baseSha: pr.baseSha, startSha: pr.startSha, headSha: pr.headSha },
     {
       baseBranch: "main",
       headBranch: "chore/paseo-sdk-0.9.2",
       baseSha: "41ff25de85931953ace4daa1a7923e20823514c5",
+      startSha: "41ff25de85931953ace4daa1a7923e20823514c5",
       headSha: "a711a639b04f3bd2bfe514157e0c19880fe33028",
     },
   );
