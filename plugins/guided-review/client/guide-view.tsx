@@ -3,6 +3,7 @@ import React from "react";
 import { Pressable, Text, View } from "react-native";
 import type { Guide, GuideDecision, GuideState, LayeredGuide, LayeredNode } from "../shared/guide.ts";
 import { AskAction, type AskControl } from "./ask-action.tsx";
+import { ProgressContext, ProgressSummary, UnderstoodToggle, type ProgressControl } from "./progress.tsx";
 import { fontSize, leading, radius, spacing } from "./theme.ts";
 
 type Colors = PluginTheme["colors"];
@@ -15,10 +16,12 @@ export type GuideViewProps = {
   retry: { run: () => void; pending: boolean; error: string | null };
   /** "Ask about this" on each node, and on each Supporting and Unsorted entry. */
   ask: AskControl;
+  /** The reviewer's progress and the "understood" toggles; the ready guide draws neither without it. */
+  progress?: ProgressControl;
 };
 
 /** The guide under the header: its generation while it runs, its failure with a retry, or the guide itself. */
-export function GuideView({ state, theme, openAgent, retry, ask }: GuideViewProps) {
+export function GuideView({ state, theme, openAgent, retry, ask, progress }: GuideViewProps) {
   const colors = theme.colors;
   const agentLink =
     state.agentId !== null && openAgent ? (
@@ -54,11 +57,11 @@ export function GuideView({ state, theme, openAgent, retry, ask }: GuideViewProp
       );
     case "ready":
       return (
-        <>
+        <ProgressContext.Provider value={progress ?? null}>
           <Overview guide={state.guide} colors={colors} />
           {agentLink ? <View style={{ alignItems: "flex-start" }}>{agentLink}</View> : null}
           <Tree guide={state.guide} colors={colors} ask={ask} />
-        </>
+        </ProgressContext.Provider>
       );
   }
 }
@@ -70,6 +73,7 @@ function Tree({ guide, colors, ask }: { guide: LayeredGuide; colors: Colors; ask
   for (const node of guide.nodes) (layers[node.layer] ??= []).push(node);
   return (
     <>
+      <ProgressSummary colors={colors} layerTitle={layerTitle} />
       {/* A node's layer is one past a node's it builds on, so no layer is empty. */}
       {layers.map((nodes, layer) => (
         <React.Fragment key={layer}>
@@ -157,16 +161,20 @@ function NodeCard({
 }) {
   return (
     <Card colors={colors} light={node.leaf}>
-      <Text
-        style={{
-          color: node.leaf ? colors.foregroundMuted : colors.foreground,
-          fontSize: fontSize.base,
-          lineHeight: leading(fontSize.base),
-          fontWeight: node.leaf ? "500" : "600",
-        }}
-      >
-        {node.title}
-      </Text>
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing[2] }}>
+        <Text
+          style={{
+            flex: 1,
+            color: node.leaf ? colors.foregroundMuted : colors.foreground,
+            fontSize: fontSize.base,
+            lineHeight: leading(fontSize.base),
+            fontWeight: node.leaf ? "500" : "600",
+          }}
+        >
+          {node.title}
+        </Text>
+        <UnderstoodToggle subject={{ kind: "node", nodeId: node.id }} colors={colors} />
+      </View>
       <Body colors={colors} muted>
         {node.summary}
       </Body>
@@ -195,11 +203,16 @@ function NodeCard({
   );
 }
 
-/** A Supporting or Unsorted file, which the reviewer can ask about on its own. */
+/** A Supporting or Unsorted file, which the reviewer can ask about and mark understood on its own. */
 function FileEntry({ colors, path, note, ask }: { colors: Colors; path: string; note?: string; ask: AskControl }) {
   return (
     <View style={{ gap: spacing[1] }}>
-      <FileLine colors={colors} path={path} note={note} />
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing[2] }}>
+        <View style={{ flex: 1 }}>
+          <FileLine colors={colors} path={path} note={note} />
+        </View>
+        <UnderstoodToggle subject={{ kind: "file", path }} colors={colors} />
+      </View>
       <AskAction subject={{ kind: "file", path }} ask={ask} colors={colors} />
     </View>
   );
