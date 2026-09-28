@@ -150,7 +150,8 @@ export const askAbout = defineRpc({
 
 /**
  * The code a subject covers, ready to draw: a node's files in reading order, each cut down to the
- * node's hunks, or the whole diff of a changed file, as a Supporting or Unsorted entry shows it.
+ * node's hunks, or what no node covers of a changed file, its whole diff or the rest of it, as a
+ * Supporting or Unsorted entry shows it.
  */
 export const NodeDiffSchema = z.object({
   /** The head the guide, and so these hunks, were read at. */

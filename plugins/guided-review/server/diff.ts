@@ -88,69 +88,118 @@ export type ResolvedCode = {
   errors: string[];
 };
 
+/** The lines of a file's diff that covers pick, by hunk index, as indices into each hunk's lines. */
+type Selection = Map<number, Set<number>>;
+
 /**
  * The diff a node's `covers` names, cut down to the hunks and lines it lists. A file named twice is
  * shown once, with everything both entries cover; what does not exist is left out and reported.
  */
 export function resolveCode(changed: readonly ChangedFile[], covers: readonly CoveredCode[]): ResolvedCode {
   const byPath = new Map(changed.map((file) => [file.path, file]));
-  const selected = new Map<string, { diff: FileDiff; whole: Set<number>; lines: Map<number, Set<number>> }>();
+  const selected = new Map<string, { diff: FileDiff; selection: Selection }>();
   const errors: string[] = [];
 
   covers.forEach((cover, coverIndex) => {
-    const at = `covers.${coverIndex}`;
     const file = byPath.get(cover.path);
     if (file === undefined) {
-      errors.push(`${at}.path: "${cover.path}" is not one of the changed files`);
+      errors.push(`covers.${coverIndex}.path: "${cover.path}" is not one of the changed files`);
       return;
     }
     let entry = selected.get(cover.path);
     if (entry === undefined) {
-      entry = { diff: fileDiffOf(file), whole: new Set(), lines: new Map() };
+      entry = { diff: fileDiffOf(file), selection: new Map() };
       selected.set(cover.path, entry);
     }
-    const { diff, whole, lines } = entry;
-
-    if (cover.hunks.length === 0 && cover.lines.length === 0) {
-      for (const hunk of diff.hunks) whole.add(hunk.index);
-      return;
-    }
-    cover.hunks.forEach((index, position) => {
-      if (index >= 1 && index <= diff.hunkCount) whole.add(index);
-      else errors.push(`${at}.hunks.${position}: ${cover.path} has ${describeCount(diff.hunkCount)}, so no hunk ${index}`);
-    });
-    // A removed file has only old line numbers; everywhere else a range is in the new file's.
-    const numberOf = diff.status === "removed" ? (line: DiffLine) => line.oldPos : (line: DiffLine) => line.newLine ?? line.newPos;
-    cover.lines.forEach((range, position) => {
-      if (range.start > range.end) {
-        errors.push(`${at}.lines.${position}: the range ${range.start}–${range.end} ends before it starts`);
-        return;
-      }
-      let found = false;
-      for (const hunk of diff.hunks) {
-        hunk.lines.forEach((line, lineIndex) => {
-          const number = numberOf(line);
-          if (number < range.start || number > range.end) return;
-          found = true;
-          let chosen = lines.get(hunk.index);
-          if (chosen === undefined) lines.set(hunk.index, (chosen = new Set()));
-          chosen.add(lineIndex);
-        });
-      }
-      if (!found) errors.push(`${at}.lines.${position}: lines ${range.start}–${range.end} are not in the diff of ${cover.path}`);
-    });
+    select(entry.diff, cover, entry.selection, (error) => errors.push(`covers.${coverIndex}.${error}`));
   });
 
-  const files = [...selected.values()].map(({ diff, whole, lines }) => ({
+  const files = [...selected.values()].map(({ diff, selection }) => ({
     ...diff,
     hunks: diff.hunks.flatMap((hunk) => {
-      if (whole.has(hunk.index)) return [hunk];
-      const chosen = lines.get(hunk.index);
+      const chosen = selection.get(hunk.index);
       if (chosen === undefined) return [];
       return chosen.size === hunk.lines.length ? [hunk] : runs([...chosen].sort((a, b) => a - b)).map((run) => slice(hunk, run));
     }),
   }));
   return { files, errors };
+}
+
+/**
+ * What of a changed file's diff none of `covers` takes: the file's whole diff when no cover names it,
+ * otherwise each unbroken run of lines left over that holds an added or removed line, cut as
+ * `resolveCode` cuts a node's. Null when a cover names the file and nothing it changes is left,
+ * which is also how a withheld file some cover names reads. What a Supporting or Unsorted entry of a
+ * file some node covers part of shows, so no change in it goes unshown.
+ */
+export function uncoveredCode(file: ChangedFile, covers: readonly CoveredCode[]): FileDiff | null {
+  const diff = fileDiffOf(file);
+  const own = covers.filter((cover) => cover.path === file.path);
+  if (own.length === 0) return diff;
+  const selection: Selection = new Map();
+  for (const cover of own) select(diff, cover, selection, () => {});
+  const hunks = diff.hunks.flatMap((hunk) => {
+    const taken = selection.get(hunk.index);
+    if (taken === undefined) return [hunk];
+    const left = hunk.lines.map((_, index) => index).filter((index) => !taken.has(index));
+    return runs(left)
+      .filter((run) => run.some((index) => hunk.lines[index]!.kind !== "context"))
+      .map((run) => slice(hunk, run));
+  });
+  return hunks.length === 0 ? null : { ...diff, hunks };
+}
+
+/**
+ * The code a Supporting or Unsorted entry of `guide` shows for the changed file `path`: what no node
+ * covers of it. Its whole diff when every change in it is a node's, which only a guide laid out
+ * before partly covered files had entries can hold. Null when the change has no such file.
+ */
+export function entryCode(changed: readonly ChangedFile[], nodes: readonly { covers: readonly CoveredCode[] }[], path: string): FileDiff | null {
+  const file = changed.find((candidate) => candidate.path === path);
+  if (file === undefined) return null;
+  return uncoveredCode(file, nodes.flatMap((node) => node.covers)) ?? fileDiffOf(file);
+}
+
+/**
+ * Adds the lines of `diff` that `cover` names to `selection`: every hunk for a cover with neither
+ * hunks nor lines, else the hunks it lists whole and the lines its ranges take. What the diff lacks
+ * goes to `error` as `field: message`.
+ */
+function select(diff: FileDiff, cover: CoveredCode, selection: Selection, error: (message: string) => void): void {
+  const take = (hunk: DiffHunk, indices: Iterable<number>) => {
+    let chosen = selection.get(hunk.index);
+    if (chosen === undefined) selection.set(hunk.index, (chosen = new Set()));
+    for (const index of indices) chosen.add(index);
+  };
+  const whole = (hunk: DiffHunk) => take(hunk, hunk.lines.keys());
+
+  if (cover.hunks.length === 0 && cover.lines.length === 0) {
+    diff.hunks.forEach(whole);
+    return;
+  }
+  cover.hunks.forEach((index, position) => {
+    const hunk = diff.hunks[index - 1];
+    if (index >= 1 && hunk !== undefined) whole(hunk);
+    else error(`hunks.${position}: ${cover.path} has ${describeCount(diff.hunkCount)}, so no hunk ${index}`);
+  });
+  // A removed file has only old line numbers; everywhere else a range is in the new file's.
+  const numberOf = diff.status === "removed" ? (line: DiffLine) => line.oldPos : (line: DiffLine) => line.newLine ?? line.newPos;
+  cover.lines.forEach((range, position) => {
+    if (range.start > range.end) {
+      error(`lines.${position}: the range ${range.start}–${range.end} ends before it starts`);
+      return;
+    }
+    let found = false;
+    for (const hunk of diff.hunks) {
+      hunk.lines.forEach((line, lineIndex) => {
+        const number = numberOf(line);
+        if (number < range.start || number > range.end) return;
+        found = true;
+        take(hunk, [lineIndex]);
+      });
+    }
+    if (!found) error(`lines.${position}: lines ${range.start}–${range.end} are not in the diff of ${cover.path}`);
+  });
 }
 
 /** Sorted line indices in unbroken runs, so lines a node skips show as a gap between two parts of a hunk. */

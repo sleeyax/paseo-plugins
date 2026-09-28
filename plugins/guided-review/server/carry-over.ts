@@ -1,7 +1,7 @@
 import type { FileDiff } from "../shared/diff.ts";
 import type { LayeredGuide } from "../shared/guide.ts";
 import type { Understood } from "../shared/progress.ts";
-import { fileDiffOf, resolveCode } from "./diff.ts";
+import { entryCode, resolveCode } from "./diff.ts";
 import type { ChangedFile } from "./forge/port.ts";
 
 /** A guide with the changed files it was written from, as the forge gave them at its head. */
@@ -11,7 +11,8 @@ export type GuideAtHead = { guide: LayeredGuide; files: readonly ChangedFile[] }
  * The reviewer's marks in `previous` that still hold in `next`, a guide of the same review at a later
  * head: a node of `next` is understood when the code it covers is exactly the code a node understood
  * in `previous` covers, whatever either node is called, and a Supporting or Unsorted entry of `next`
- * is understood when it was in `previous` and its diff did not change. Marks come back in `next`'s order.
+ * is understood when it was in `previous` and the code it shows, what no node covers of its file,
+ * did not change. Marks come back in `next`'s order.
  *
  * Code is compared by its lines, not by hunk numbers or line numbers: a push that adds a hunk above
  * renumbers the hunks and lines below it without changing what they say.
@@ -31,14 +32,13 @@ export function carryMarks(previous: GuideAtHead & { marks: Understood }, next: 
     .map((node) => node.id);
 
   const markedFiles = new Set(previous.marks.files);
-  const before = new Map(previous.files.map((file) => [file.path, file]));
   const outside = [...next.guide.supporting.map((entry) => entry.path), ...next.guide.unsorted];
   const files = outside.filter((path) => {
-    const was = before.get(path);
-    const now = next.files.find((file) => file.path === path);
-    if (!markedFiles.has(path) || was === undefined || now === undefined) return false;
-    const key = keyOf([fileDiffOf(now)]);
-    return key !== null && key === keyOf([fileDiffOf(was)]);
+    if (!markedFiles.has(path)) return false;
+    const was = entryCode(previous.files, previous.guide.nodes, path);
+    const now = entryCode(next.files, next.guide.nodes, path);
+    const key = now === null ? null : keyOf([now]);
+    return was !== null && key !== null && key === keyOf([was]);
   });
 
   return { nodes, files };

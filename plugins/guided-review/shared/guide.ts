@@ -101,14 +101,16 @@ export const LayeredNodeSchema = GuideNodeSchema.extend({
 
 /**
  * The guide as the service keeps it and the panel shows it: the agent's guide, laid out in layers,
- * with every changed file covered by some node, in Supporting, or in Unsorted.
+ * with every change covered by some node, in Supporting, or in Unsorted. An entry of Supporting or
+ * Unsorted stands for what no node covers of its file: the whole of it, or the rest of a file some
+ * nodes cover part of.
  */
 export const LayeredGuideSchema = GuideSchema.extend({
   /** In the agent's order, which puts every node after the nodes it builds on. */
   nodes: z.array(LayeredNodeSchema),
-  /** The lockfiles and generated files the agent never saw, then the agent's own entries. */
+  /** The lockfiles and generated files the agent never saw, which no node covers, then the agent's own entries. */
   supporting: z.array(SupportingEntrySchema),
-  /** Changed files no node covers and Supporting does not list, in the forge's order. */
+  /** Changed files with changes no node covers that Supporting does not list, in the forge's order. */
   unsorted: z.array(z.string()),
 });
 

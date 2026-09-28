@@ -130,7 +130,7 @@ function Tree({
           <Heading colors={colors}>Unsorted</Heading>
           <Card colors={colors}>
             <Body colors={colors} muted>
-              The guide agent placed these changed files nowhere, so no concept explains them.
+              The guide agent placed these changes nowhere, so no concept explains them. Where a concept covers part of a file, only the rest is here.
             </Body>
             {guide.unsorted.map((file) => (
               <FileEntry key={file} colors={colors} path={file} ask={ask} code={fileCode(file)} />
@@ -242,7 +242,8 @@ function NodeCard({
 
 /**
  * A Supporting or Unsorted file, which the reviewer can ask about and mark understood on its own and
- * read the whole diff of, since tests and wiring get review comments too. A `folded` entry, a
+ * read the diff of, since tests and wiring get review comments too: the whole of it, or the rest of a
+ * file some nodes cover part of. A `folded` entry, a
  * lockfile or a generated file, starts with its diff hidden, as it is long and seldom read.
  */
 function FileEntry({

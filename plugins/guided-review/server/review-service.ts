@@ -16,7 +16,7 @@ import { askPrompt, codeReferencesOf, type AskSubjectContext } from "./ask-promp
 import { carryMarks, followNode, type GuideAtHead } from "./carry-over.ts";
 import type { LinkedDraft } from "../shared/drafts.ts";
 import { composeBody, isParagraphId, paragraphId, splitBody, type BodyParagraph } from "./review-body.ts";
-import { resolveCode } from "./diff.ts";
+import { entryCode, resolveCode } from "./diff.ts";
 import { ForgeError, type BranchChangeRequest, type ChangedFile, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
 import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, GuideAgentError, type GuideAgentPort } from "./guide-agent/port.ts";
 import { jsonSchemaOf, runStructured, withOutputSchema } from "./guide-agent/structured.ts";
@@ -266,11 +266,15 @@ export class ReviewService {
       return { kind: "node", node, code: codeReferencesOf(resolveCode(changeRequest.files, node.covers).files) };
     }
     const file = changeRequest?.files.find((candidate) => candidate.path === subject.path);
-    if (file === undefined) return `${subject.path} is not one of the change's files.`;
-    const supporting = guide.supporting.find((entry) => entry.path === file.path);
-    if (supporting !== undefined) return { kind: "file", file, category: supporting.category };
-    if (guide.unsorted.includes(file.path)) return { kind: "file", file, category: null };
+    if (changeRequest == null || file === undefined) return `${subject.path} is not one of the change's files.`;
     const nodes = guide.nodes.filter((candidate) => coveredPaths(candidate).includes(file.path));
+    const supporting = guide.supporting.find((entry) => entry.path === file.path);
+    const category = supporting !== undefined ? supporting.category : guide.unsorted.includes(file.path) ? null : undefined;
+    if (category !== undefined) {
+      // The entry of a file some nodes cover part of holds the rest of it, which the prompt names.
+      const rest = entryCode(changeRequest.files, guide.nodes, file.path)!;
+      return { kind: "file", file, category, rest: nodes.length === 0 ? null : { ranges: codeReferencesOf([rest])[0]!.ranges, nodes } };
+    }
     if (nodes.length === 0) return `${file.path} is not in the guide any more.`;
     const titles = nodes.map((node) => `"${node.title}"`).join(", ");
     return nodes.length === 1
@@ -280,8 +284,8 @@ export class ReviewService {
 
   /**
    * The hunks a subject of the review's current guide covers, parsed from what the forge said at the
-   * guide's head: a node's, in the order it names its files, or the whole diff of a changed file,
-   * which is what a Supporting or Unsorted entry shows.
+   * guide's head: a node's, in the order it names its files, or what no node covers of a changed
+   * file, which is what a Supporting or Unsorted entry shows: its whole diff, or the rest of it.
    */
   async nodeDiff({ reviewId, subject }: { reviewId: string; subject: GuideSubject }): Promise<NodeDiff> {
     const record = await this.#store.get(reviewId);
@@ -289,19 +293,18 @@ export class ReviewService {
     const { headSha } = record.header;
     const stored = await this.#store.getGuide(record.id, headSha);
     if (stored?.status !== "ready" || stored.guide === null) throw new Error("The guide is not ready yet.");
-    let covers: CoveredCode[];
+    let covers: CoveredCode[] = [];
     if (subject.kind === "node") {
       const node = stored.guide.nodes.find((candidate) => candidate.id === subject.nodeId);
       if (node === undefined) throw new Error(`The guide has no concept "${subject.nodeId}". Reopen the panel.`);
       covers = node.covers;
-    } else {
-      covers = [{ path: subject.path, hunks: [], lines: [] }];
     }
     const changeRequest = await this.#store.snapshot(record.id, headSha);
     if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
-    const resolved = resolveCode(changeRequest.files, covers);
-    if (subject.kind === "file" && resolved.files.length === 0) throw new Error(`${subject.path} is not one of the change's files.`);
-    return { headSha, files: resolved.files };
+    if (subject.kind === "node") return { headSha, files: resolveCode(changeRequest.files, covers).files };
+    const entry = entryCode(changeRequest.files, stored.guide.nodes, subject.path);
+    if (entry === null) throw new Error(`${subject.path} is not one of the change's files.`);
+    return { headSha, files: [entry] };
   }
 
   /**
@@ -998,10 +1001,10 @@ export class ReviewService {
         generation.agentId = agent.id;
         await save({ status: "generating", guide: null, message: null });
       }
-      const parsed = parseGuide(await this.#guideAgents.reply(generation.agentId), changeRequest.files);
+      const reply = await this.#guideAgents.reply(generation.agentId);
+      const parsed = parseGuide(reply, files.sent, files.setAside.map((entry) => entry.path));
       if (!parsed.ok) return save({ status: "failed", guide: null, message: parsed.message });
-      const changed = changeRequest.files.map((file) => file.path);
-      const guide = layOutGuide(parsed.guide, changed, files.setAside);
+      const guide = layOutGuide(parsed.guide, changeRequest.files, files.setAside);
       // Before the guide reads as ready, so its first progress read already has what carried over.
       await this.#carryMarksOver(record, generation.agentId, guide, changeRequest.files);
       await save({ status: "ready", guide, message: null });

@@ -73,15 +73,19 @@ type Host = {
   restart(): ReviewService;
 };
 
-async function withGuide(t: TestContext): Promise<Host> {
+/** A review of `oldHead` with `oldGuide` written for it; a guide agent created at `NEW` writes `nextGuide`. */
+async function withGuide(
+  t: TestContext,
+  { oldHead = atOldHead(), oldGuide = OLD_GUIDE, nextGuide = newGuide() }: { oldHead?: ChangeRequest; oldGuide?: Guide; nextGuide?: Guide } = {},
+): Promise<Host> {
   const data = await mkdtemp(path.join(os.tmpdir(), "guided-review-regenerate-"));
   t.after(() => rm(data, { recursive: true, force: true }));
   const forge = fakeForge();
-  forge.changeRequests.set(URL, atOldHead());
+  forge.changeRequests.set(URL, oldHead);
   const workspaces = fakeWorkspaces();
   workspaces.repositories.set("github.com/acme/uploader", "/home/r/src/uploader");
   const agents = fakeGuideAgents();
-  agents.answer = (agent) => sampleGuideReply(agent.labels[GUIDE_HEAD_LABEL] === NEW ? newGuide() : OLD_GUIDE);
+  agents.answer = (agent) => sampleGuideReply(agent.labels[GUIDE_HEAD_LABEL] === NEW ? nextGuide : oldGuide);
   const create = () => new ReviewService({ forges: [forge], workspaces, guideAgents: agents, dataDirectory: data });
   const service = create();
   await service.start({ url: URL });
@@ -275,6 +279,33 @@ test("marks carry over to nodes covering the same code, however renumbered or re
   // Marks at the new head are the new guide's own from here on.
   const after = await mark(service, { kind: "node", nodeId: "logging" }, NEW);
   assert.deepEqual(after.understood, { nodes: ["upload-loop", "logging"], files: [RETRY_TEST.path] });
+});
+
+test("a mark on the rest of a partly covered file carries over while that rest is the same", async (t) => {
+  const upload = (patch: string): ChangedFile => ({ path: "src/upload.ts", previousPath: null, status: "modified", additions: 2, deletions: 2, patch });
+  const covering = (hunks: number[]): Guide => {
+    const [policy, uploader] = sampleGuide().nodes as [Guide["nodes"][number], Guide["nodes"][number]];
+    return { ...OLD_GUIDE, nodes: [policy, { ...uploader, covers: [{ path: "src/upload.ts", hunks, lines: [] }] }] };
+  };
+  const oldHead = { ...atOldHead(), files: [upload("@@ -1,1 +1,1 @@\n-a\n+b\n@@ -20,1 +20,1 @@\n-y\n+z"), ...atOldHead().files.slice(1)] };
+  // A hunk added above renumbers the rest without changing it.
+  const pushed = upload("@@ -0,0 +1,1 @@\n+log\n@@ -1,1 +2,1 @@\n-a\n+b\n@@ -20,1 +21,1 @@\n-y\n+z");
+  const newHead = { ...oldHead, headSha: NEW, files: [pushed, ...oldHead.files.slice(1)] };
+
+  for (const [nextGuide, carried] of [
+    [covering([1, 2]), [RETRY_TEST.path, "src/upload.ts"]],
+    // The new hunk is left to the entry too, so what it shows changed.
+    [covering([2]), [RETRY_TEST.path]],
+  ] as const) {
+    const { service, forge } = await withGuide(t, { oldHead, oldGuide: covering([1]), nextGuide });
+    await mark(service, { kind: "file", path: "src/upload.ts" });
+    await mark(service, { kind: "file", path: RETRY_TEST.path });
+
+    forge.changeRequests.set(URL, newHead);
+    await regenerate(service);
+
+    assert.deepEqual((await service.guideProgress({ reviewId: REVIEW_ID }))?.understood.files, carried);
+  }
 });
 
 test("only marks made in the guide kept at the old head carry over", async (t) => {
