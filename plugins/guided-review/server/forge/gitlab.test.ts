@@ -803,6 +803,8 @@ test("a GitLab whose version cannot be read is taken for an old one, so the body
     { stdout: fixture("project.json") },
     {},
     {},
+    { stdout: fixture("user.json") },
+    reviewers("reviewed"),
   ]);
 
   const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "comment", body: BODY });
@@ -810,17 +812,24 @@ test("a GitLab whose version cannot be read is taken for an old one, so the body
   assert.deepEqual(sent(run).slice(2), [
     ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${DRAFT_NOTES}/bulk_publish`, { reviewer_state: "reviewed" }],
     ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${MERGE_REQUEST}/notes`, { body: BODY }],
+    ["api", "--hostname", "gitlab.com", "user"],
+    ["api", "--hostname", "gitlab.com", `${MERGE_REQUEST}/reviewers`],
   ]);
-  assert.deepEqual(outcome, { published: true, steps: [done("publish", "Publish your drafts"), done("note", "Post the review body")] });
+  assert.deepEqual(outcome, {
+    published: true,
+    steps: [done("publish", "Publish your drafts"), done("note", "Post the review body"), done("reviewer-state", "Confirm your reviewer state")],
+  });
 });
 
-test("an approval publishes the drafts as reviewed and then approves the head the guide explained", async () => {
+test("an approval publishes the drafts as reviewed, approves the head the guide explained, and confirms the state in the reviewer list", async () => {
   const { forge, run } = forgeReplaying([
     LOGGED_IN,
     version("19.5.0-pre"),
     { stdout: fixture("project.json") },
     {},
     { stdout: JSON.stringify({ id: 533339747, iid: 3931, approved: true, user_has_approved: true }) },
+    { stdout: fixture("user.json") },
+    reviewers("approved"),
   ]);
 
   const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "approve", body: BODY });
@@ -828,20 +837,67 @@ test("an approval publishes the drafts as reviewed and then approves the head th
   assert.deepEqual(sent(run).slice(2), [
     ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${DRAFT_NOTES}/bulk_publish`, { note: BODY, reviewer_state: "reviewed" }],
     ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${MERGE_REQUEST}/approve`, { sha: MR_3931_TARGET.headSha }],
+    ["api", "--hostname", "gitlab.com", "user"],
+    ["api", "--hostname", "gitlab.com", `${MERGE_REQUEST}/reviewers`],
   ]);
-  assert.deepEqual(outcome, { published: true, steps: [done("publish", "Publish your drafts and the review body"), done("approve", "Approve")] });
+  assert.deepEqual(outcome, {
+    published: true,
+    steps: [done("publish", "Publish your drafts and the review body"), done("approve", "Approve"), done("reviewer-state", "Confirm your reviewer state")],
+  });
 });
 
-test("a comment without a body publishes the drafts as reviewed, without asking the version", async () => {
-  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, {}]);
+test("a comment without a body publishes the drafts as reviewed, without asking the version, and says a viewer who is no reviewer has no state", async () => {
+  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, {}, { stdout: fixture("user.json") }, reviewers(null)]);
 
   const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "comment", body: "" });
 
   assert.deepEqual(sent(run), [
     ["api", "--hostname", "gitlab.com", "projects/gitlab-org%2Fcli"],
     ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${DRAFT_NOTES}/bulk_publish`, { reviewer_state: "reviewed" }],
+    ["api", "--hostname", "gitlab.com", "user"],
+    ["api", "--hostname", "gitlab.com", `${MERGE_REQUEST}/reviewers`],
   ]);
-  assert.deepEqual(outcome, { published: true, steps: [done("publish", "Publish your drafts")] });
+  assert.deepEqual(outcome, {
+    published: true,
+    steps: [
+      done("publish", "Publish your drafts"),
+      {
+        id: "reviewer-state",
+        label: "Confirm your reviewer state",
+        status: "done",
+        message: "You are not one of the merge request's reviewers, so GitLab keeps no reviewer state for you.",
+      },
+    ],
+  });
+});
+
+test("an Approve or a Comment whose state did not take, or whose reviewer list cannot be read, is a failed step, and nothing is set in its place", async () => {
+  const cases = [
+    {
+      verdict: "comment" as const,
+      answers: [{ stdout: fixture("user.json") }, reviewers("unreviewed")],
+      message: "GitLab lists you as not reviewed yet, not reviewed. Set your reviewer state on the merge request's page.",
+    },
+    {
+      verdict: "approve" as const,
+      answers: [{ stdout: JSON.stringify({ approved: true }) }, { stdout: fixture("user.json") }, reviewers("requested_changes")],
+      message: "GitLab lists you as requesting changes, not approved. Set your reviewer state on the merge request's page.",
+    },
+    {
+      verdict: "comment" as const,
+      answers: [{ stdout: fixture("user.json") }, { exitCode: 1, stderr: "glab: 404 Not found (HTTP 404)\n" }],
+      message: "Could not read the merge request's reviewers to confirm your state: glab failed: 404 Not found (HTTP 404)",
+    },
+  ];
+  for (const { verdict, answers, message } of cases) {
+    const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, {}, ...answers]);
+
+    const outcome = await forge.submitReview(MR_3931_TARGET, { verdict, body: "" });
+
+    assert.equal(run.calls.length, 3 + answers.length, "no GraphQL call");
+    assert.equal(outcome.published, true);
+    assert.deepEqual(outcome.steps.at(-1), { id: "reviewer-state", label: "Confirm your reviewer state", status: "failed", message });
+  }
 });
 
 test("a request for changes the GraphQL mutation turns down with HTTP 200 and errors is a failed step, after the drafts landed", async () => {
@@ -910,9 +966,12 @@ test("a publish GitLab turns down leaves the drafts pending and tries nothing af
         steps: [
           { id: "publish", label: "Publish your drafts", status: "failed", message: "glab failed: 403 Forbidden (HTTP 403)" },
           { id: "note", label: "Post the review body", status: "skipped", message: notTried },
-          verdict === "approve"
-            ? { id: "approve", label: "Approve", status: "skipped", message: notTried }
-            : { id: "request-changes", label: "Request changes", status: "skipped", message: notTried },
+          ...(verdict === "approve"
+            ? [
+                { id: "approve", label: "Approve", status: "skipped", message: notTried },
+                { id: "reviewer-state", label: "Confirm your reviewer state", status: "skipped", message: notTried },
+              ]
+            : [{ id: "request-changes", label: "Request changes", status: "skipped", message: notTried }]),
         ],
       },
       verdict,
@@ -928,11 +987,13 @@ test("a body that could not be posted leaves the review unpublished, and the app
     {},
     { exitCode: 1, stderr: "glab: 500 Internal Server Error (HTTP 500)\n" },
     { stdout: JSON.stringify({ approved: true }) },
+    { stdout: fixture("user.json") },
+    reviewers("approved"),
   ]);
 
   const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "approve", body: BODY });
 
-  assert.match(String(run.calls.at(-1)?.args.at(-1)), /\/approve$/);
+  assert.match(String(run.calls.at(-3)?.args.at(-1)), /\/approve$/);
   assert.equal(outcome.published, false, "the body is kept for another try");
   assert.deepEqual(
     outcome.steps.map((step) => [step.id, step.status]),
@@ -940,6 +1001,7 @@ test("a body that could not be posted leaves the review unpublished, and the app
       ["publish", "done"],
       ["note", "failed"],
       ["approve", "done"],
+      ["reviewer-state", "done"],
     ],
   );
 });
@@ -950,11 +1012,14 @@ test("an approval GitLab refuses because the MR moved on says to regenerate", as
     { stdout: fixture("project.json") },
     {},
     { exitCode: 1, stderr: "glab: SHA does not match HEAD of source branch: 1a2b3c (HTTP 409)\n" },
+    { stdout: fixture("user.json") },
+    reviewers("reviewed"),
   ]);
 
   const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "approve", body: "" });
 
-  assert.deepEqual(outcome.steps.at(-1), {
+  assert.deepEqual(outcome.steps.at(-1), done("reviewer-state", "Confirm your reviewer state"));
+  assert.deepEqual(outcome.steps.at(-2), {
     id: "approve",
     label: "Approve",
     status: "failed",

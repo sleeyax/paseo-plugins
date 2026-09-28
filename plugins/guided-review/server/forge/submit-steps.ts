@@ -8,11 +8,19 @@ import type { SubmitStep } from "../../shared/submit.ts";
 export class SubmitSteps {
   readonly steps: SubmitStep[] = [];
 
-  /** Runs one step and records how it went: its value, or undefined when it failed. */
-  async run<T>(id: string, label: string, action: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
+  /**
+   * Runs one step and records how it went: its value, or undefined when it failed. `note` turns the
+   * value into what a done step reports beside its label, like what a check found.
+   */
+  async run<T>(
+    id: string,
+    label: string,
+    action: () => Promise<T>,
+    note: (value: T) => string | null = () => null,
+  ): Promise<{ ok: true; value: T } | { ok: false }> {
     try {
       const value = await action();
-      this.steps.push({ id, label, status: "done", message: null });
+      this.steps.push({ id, label, status: "done", message: note(value) });
       return { ok: true, value };
     } catch (error) {
       // Any failure, not only a `ForgeError`: throwing here would lose the steps that already landed.
