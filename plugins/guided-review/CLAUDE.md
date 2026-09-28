@@ -13,6 +13,7 @@ It reaches the outside only through its ports, so its tests replace every one of
 - `server/forge/port.ts` is the Forge port. `server/forge/github.ts` implements it over `gh`, through `server/forge/cli.ts`, which turns a failed call into a `ForgeError` whose message is shown as it is.
 - `server/workspaces/port.ts` is the workspace port. `server/workspaces/paseo.ts` implements it over the SDK.
 - `server/command-runner.ts` is the one seam every `gh`, `glab` and `git` call goes through, and `server/fake-command-runner.ts` replays recorded output through it.
+- `server/guide-agent/port.ts` is the guide agent port, which moves text only: `create` starts the agent on a prompt, `reply` waits for its answer, `run` and `send` prompt it again (for "Suggest wording" and "Ask about this"), `status` says whether it is idle. `server/guide-agent/paseo.ts` implements it over the SDK. Structured output is `server/guide-agent/structured.ts`: `withOutputSchema` puts the JSON Schema in the prompt, `parseReply` finds the JSON in the reply and validates it with zod, and `runStructured` does both for a `{ body }`-style request. `server/guide-output.ts` adds the guide's own checks, which is where layering and coverage go.
 
 A new forge operation goes on the port first, then on each adapter; a new RPC goes in `shared/contracts.ts` and becomes a service method.
 The fakes (`server/fake-*.ts`) sit beside the modules rather than in tests so every test shares them, and nothing in `index.server.ts` imports them, so they never reach the bundle.
@@ -29,6 +30,13 @@ Reading a PR, cloning and `workspaces.create` can all take longer, so `start` re
 A `change_request` workspace is a worktree of an existing clone, and the daemon fetches the PR from that clone's `origin`.
 So the clone is found by asking each git project for `git remote get-url origin` (a project carries no remote), and when none matches the repository is cloned with `gh repo clone` into the data directory, which then becomes a Paseo project of its own the first time a workspace is cut from it.
 
+Paseo passes an output schema only with a new agent's first prompt, and only Codex and OpenCode enforce it, so every structured request carries the schema in its prompt and the reply is parsed here, whatever the provider.
+There is no generic read-only flag either: `readOnlyMode` picks Claude's `plan` or Codex's `read-only` (valid though unadvertised), and the `agent.permission_requested` hook denies a guide agent's edits, writes, commands and mode changes, recognising it by its `guided-review.review` label because the hook's agent carries no labels and an in-memory list would not survive a reload.
+Hooks are best-effort, so `reply` answers whatever is pending itself when `waitForFinish` comes back with `status: "permission"`: in plan mode Claude tends to end by asking to leave it, which is denied with a request to answer as a normal message.
+Sending to a busy agent interrupts its turn (`PaseoAgentSendOptions` has no `activeTurnBehavior`), so `run` and `send` refuse unless the agent is idle.
+
+The guide is generated as a background job keyed by review and head SHA, and `server/review-store.ts` keeps a record per head SHA from the moment the agent is asked, with its agent ID. A panel read that finds a `generating` record with no job behind it waits on the same agent again, which is how a generation survives a plugin reload. A guide belongs to the workspace it was generated in; a new workspace for the review gets a new guide and agent.
+
 The SDK gives a plugin no data directory. `server/paths.ts` derives one in the Paseo home, per daemon, because the workspace IDs it records mean something only to that daemon.
 
 `server/command-runner.ts` keeps the whole of stdout, decoded once, because a truncated JSON document is worse than none; only a runaway command past 256 MiB is cut off, and that is a failure rather than a truncation.
@@ -39,3 +47,4 @@ It takes stdin for `--input -`, which is how GraphQL and JSON bodies are sent: `
 `pnpm test` is `node --test "{client,server,shared}/**/*.test.ts"` through Node's type stripping, so no TypeScript that has to be emitted and relative imports keep their `.ts` extension.
 `server/forge/fixtures/github/` holds real `gh` 2.101 output for sleeyax/paseo-plugins#105, with the user trimmed to its public fields.
 Service tests use a real temp directory for the data directory, and restart the service over it to check what survives on disk.
+The guide agent fake answers with fixture text (`sampleGuideReply`), or with a promise the test resolves to look at the panel mid-generation, so the real parsing runs in every service test. `server/guide-agent/paseo.test.ts` drives the SDK adapter over a stub of the slice of `PaseoApi` it uses.
