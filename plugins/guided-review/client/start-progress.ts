@@ -15,6 +15,8 @@ export function describeProgress(progress: StartProgress): { text: string; tone:
   switch (progress.phase) {
     case "reading":
       return { text: "Reading the PR or MR…", tone: "muted" };
+    case "updating-branch":
+      return { text: `Fast-forwarding the workspace's branch to ${name}…`, tone: "muted" };
     case "cloning":
       return { text: `No Paseo project has ${header?.project ?? "this repository"}, so it is being cloned…`, tone: "muted" };
     case "creating-workspace":

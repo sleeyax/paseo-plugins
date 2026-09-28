@@ -14,6 +14,8 @@ export type ReviewRecord = {
   /** Who the forge CLI was logged in as, which decides the verdicts on offer. */
   viewer: ForgeUser;
   updatedAt: string;
+  /** Why the reviewer's own branch was left alone and the guide lives in a PR workspace instead. */
+  note?: string;
 };
 
 /**
