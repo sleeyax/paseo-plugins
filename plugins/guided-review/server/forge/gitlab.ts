@@ -142,7 +142,7 @@ export type GitLabForgeOptions = {
 
 /**
  * The GitLab adapter, over `glab api`. It addresses a project by its numeric ID, looked up once per
- * path, because some GitLab versions turn down a URL-encoded path on the endpoints later tickets use.
+ * path, because some GitLab versions turn down a URL-encoded path on the draft notes endpoints.
  *
  * `glab` is only ever pointed at a host it is logged in to: given any other, it sends whatever token
  * it has there. So every host is checked with `glab auth status` before its first call.
