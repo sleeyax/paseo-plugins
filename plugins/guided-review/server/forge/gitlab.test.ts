@@ -5,7 +5,7 @@ import test from "node:test";
 import type { LineRef } from "../../shared/drafts.ts";
 import { anchorAt } from "../anchors.ts";
 import { fakeCommandRunner, type ScriptedResult } from "../fake-command-runner.ts";
-import { createGitLabForge, parseMergeRequestUrl } from "./gitlab.ts";
+import { createGitLabForge, parseMergeRequestUrl, REQUEST_CHANGES_MUTATION } from "./gitlab.ts";
 import { ForgeError, type AnchorLine, type ChangeRequestRef, type DraftAnchor, type DraftTarget } from "./port.ts";
 
 /**
@@ -656,4 +656,336 @@ test("deletes a draft note by its ID, and takes nothing but a GitLab ID", async 
     await assert.rejects(forge.updateDraft(MR_3931, id, "text"), ForgeError, id);
   }
   assert.equal(run.calls.length, 3, "nothing more ran");
+});
+
+// Submitting and discarding. Nothing here is recorded, since every call but the reads publishes to or
+// deletes from a real MR: the answers are built by hand from GitLab's REST and GraphQL docs, with
+// `user.json` as the viewer.
+
+const MERGE_REQUEST = "projects/34675721/merge_requests/3931";
+const BODY = "Reads well.\n\nOne question on the discussions lookup.";
+
+/** `GET version` on a GitLab of that version. */
+function version(number: string): ScriptedResult {
+  return { stdout: JSON.stringify({ version: number, revision: "6f3e1c2a", enterprise: true }) };
+}
+
+/** `GET …/reviewers`, with the viewer (`user.json`'s `quack-overflow`) in `viewerState`, or not a reviewer at all. */
+function reviewers(viewerState: string | null): ScriptedResult {
+  const reviewer = (id: number, username: string, state: string) => ({
+    user: { id, username, name: username, state: "active", web_url: `https://gitlab.com/${username}` },
+    state,
+    created_at: "2026-09-28T09:00:00.000Z",
+  });
+  const list = [reviewer(21230898, "ahmed.hemdan", "approved")];
+  if (viewerState !== null) list.push(reviewer(42323707, "quack-overflow", viewerState));
+  return { stdout: JSON.stringify(list) };
+}
+
+/** `mergeRequestRequestChanges`' answer: HTTP 200 whether it worked or not, with its `errors`. */
+function requestedChanges(errors: string[] = []): ScriptedResult {
+  return { stdout: JSON.stringify({ data: { mergeRequestRequestChanges: { errors, mergeRequest: errors.length ? null : { iid: "3931" } } } }) };
+}
+
+const REQUEST_CHANGES_CALL = [
+  "api",
+  "--hostname",
+  "gitlab.com",
+  "graphql",
+  "-f",
+  `query=${REQUEST_CHANGES_MUTATION}`,
+  "-f",
+  "projectPath=gitlab-org/cli",
+  "-f",
+  "iid=3931",
+];
+
+/** Every call after the login check, as its arguments followed, for a write, by the JSON it sent. */
+function sent(run: { calls: { args: readonly string[]; input?: string }[] }): unknown[][] {
+  return run.calls.slice(1).map((call) => (call.input === undefined ? [...call.args] : [...call.args, JSON.parse(call.input)]));
+}
+
+const done = (id: string, label: string) => ({ id, label, status: "done", message: null });
+
+test("a request for changes publishes the drafts with the body and the state, and sets the state through GraphQL when it did not take", async () => {
+  const { forge, run } = forgeReplaying([
+    LOGGED_IN,
+    version("19.5.0-pre"),
+    { stdout: fixture("project.json") },
+    {},
+    { stdout: fixture("user.json") },
+    reviewers("reviewed"),
+    requestedChanges(),
+  ]);
+
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: BODY });
+
+  assert.deepEqual(sent(run), [
+    ["api", "--hostname", "gitlab.com", "version"],
+    ["api", "--hostname", "gitlab.com", "projects/gitlab-org%2Fcli"],
+    ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${DRAFT_NOTES}/bulk_publish`, { note: BODY, reviewer_state: "requested_changes" }],
+    ["api", "--hostname", "gitlab.com", "user"],
+    ["api", "--hostname", "gitlab.com", `${MERGE_REQUEST}/reviewers`],
+    REQUEST_CHANGES_CALL,
+  ]);
+  assert.deepEqual(outcome, {
+    published: true,
+    steps: [done("publish", "Publish your drafts and the review body"), done("request-changes", "Request changes")],
+  });
+});
+
+test("a request for changes GitLab recorded with the publish is not sent again", async () => {
+  const { forge, run } = forgeReplaying([
+    LOGGED_IN,
+    version("19.2.0"),
+    { stdout: fixture("project.json") },
+    {},
+    { stdout: fixture("user.json") },
+    reviewers("requested_changes"),
+  ]);
+
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: BODY });
+
+  assert.equal(run.calls.length, 6, "no GraphQL call");
+  assert.deepEqual(sent(run)[2]?.at(-1), { note: BODY, reviewer_state: "requested_changes" });
+  assert.deepEqual(outcome, {
+    published: true,
+    steps: [done("publish", "Publish your drafts and the review body"), done("request-changes", "Request changes")],
+  });
+});
+
+test("a GitLab older than 19.2, which drops the body and the state on publish, gets the body as an MR note and the state through GraphQL", async () => {
+  const { forge, run } = forgeReplaying([
+    LOGGED_IN,
+    version("18.11.2-ee"),
+    { stdout: fixture("project.json") },
+    {},
+    { stdout: JSON.stringify({ id: 900, body: BODY, system: false }) },
+    { stdout: fixture("user.json") },
+    reviewers(null),
+    requestedChanges(),
+  ]);
+
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: BODY });
+
+  assert.deepEqual(sent(run).slice(2), [
+    // No `note`: were this GitLab to take it after all, the body would go out twice.
+    ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${DRAFT_NOTES}/bulk_publish`, { reviewer_state: "requested_changes" }],
+    ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${MERGE_REQUEST}/notes`, { body: BODY }],
+    ["api", "--hostname", "gitlab.com", "user"],
+    ["api", "--hostname", "gitlab.com", `${MERGE_REQUEST}/reviewers`],
+    REQUEST_CHANGES_CALL,
+  ]);
+  assert.deepEqual(outcome, {
+    published: true,
+    steps: [done("publish", "Publish your drafts"), done("note", "Post the review body"), done("request-changes", "Request changes")],
+  });
+});
+
+test("a GitLab whose version cannot be read is taken for an old one, so the body is posted on its own rather than lost", async () => {
+  const { forge, run } = forgeReplaying([
+    LOGGED_IN,
+    { exitCode: 1, stderr: "glab: 403 Forbidden (HTTP 403)\n" },
+    { stdout: fixture("project.json") },
+    {},
+    {},
+  ]);
+
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "comment", body: BODY });
+
+  assert.deepEqual(sent(run).slice(2), [
+    ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${DRAFT_NOTES}/bulk_publish`, { reviewer_state: "reviewed" }],
+    ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${MERGE_REQUEST}/notes`, { body: BODY }],
+  ]);
+  assert.deepEqual(outcome, { published: true, steps: [done("publish", "Publish your drafts"), done("note", "Post the review body")] });
+});
+
+test("an approval publishes the drafts as reviewed and then approves the head the guide explained", async () => {
+  const { forge, run } = forgeReplaying([
+    LOGGED_IN,
+    version("19.5.0-pre"),
+    { stdout: fixture("project.json") },
+    {},
+    { stdout: JSON.stringify({ id: 533339747, iid: 3931, approved: true, user_has_approved: true }) },
+  ]);
+
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "approve", body: BODY });
+
+  assert.deepEqual(sent(run).slice(2), [
+    ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${DRAFT_NOTES}/bulk_publish`, { note: BODY, reviewer_state: "reviewed" }],
+    ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${MERGE_REQUEST}/approve`, { sha: MR_3931_TARGET.headSha }],
+  ]);
+  assert.deepEqual(outcome, { published: true, steps: [done("publish", "Publish your drafts and the review body"), done("approve", "Approve")] });
+});
+
+test("a comment without a body publishes the drafts as reviewed, without asking the version", async () => {
+  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, {}]);
+
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "comment", body: "" });
+
+  assert.deepEqual(sent(run), [
+    ["api", "--hostname", "gitlab.com", "projects/gitlab-org%2Fcli"],
+    ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${DRAFT_NOTES}/bulk_publish`, { reviewer_state: "reviewed" }],
+  ]);
+  assert.deepEqual(outcome, { published: true, steps: [done("publish", "Publish your drafts")] });
+});
+
+test("a request for changes the GraphQL mutation turns down with HTTP 200 and errors is a failed step, after the drafts landed", async () => {
+  const { forge } = forgeReplaying([
+    LOGGED_IN,
+    version("17.11.3-ee"),
+    { stdout: fixture("project.json") },
+    {},
+    {},
+    { stdout: fixture("user.json") },
+    reviewers(null),
+    requestedChanges(["Reviewer not found"]),
+  ]);
+
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: BODY });
+
+  assert.equal(outcome.published, true);
+  assert.deepEqual(outcome.steps.at(-1), {
+    id: "request-changes",
+    label: "Request changes",
+    status: "failed",
+    message: "GitLab did not record your request for changes: Reviewer not found. Request changes on the merge request's page.",
+  });
+});
+
+test("a request for changes whose reviewer list cannot be read is set through GraphQL all the same", async () => {
+  const { forge, run } = forgeReplaying([
+    LOGGED_IN,
+    { stdout: fixture("project.json") },
+    {},
+    { stdout: fixture("user.json") },
+    { exitCode: 1, stderr: "glab: 404 Not found (HTTP 404)\n" },
+    { stdout: JSON.stringify({ errors: [{ message: "Field 'mergeRequestRequestChanges' doesn't exist on type 'Mutation'" }] }) },
+  ]);
+
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: "" });
+
+  assert.deepEqual(run.calls.at(-1)?.args, REQUEST_CHANGES_CALL);
+  assert.deepEqual(
+    outcome.steps.map((step) => [step.id, step.status]),
+    [
+      ["publish", "done"],
+      ["request-changes", "failed"],
+    ],
+  );
+  assert.match(outcome.steps[1]!.message!, /doesn't exist/);
+});
+
+test("a publish GitLab turns down leaves the drafts pending and tries nothing after it", async () => {
+  for (const verdict of ["approve", "request-changes"] as const) {
+    const { forge, run } = forgeReplaying([
+      LOGGED_IN,
+      version("18.4.0"),
+      { stdout: fixture("project.json") },
+      { exitCode: 1, stderr: "glab: 403 Forbidden (HTTP 403)\n" },
+    ]);
+
+    const outcome = await forge.submitReview(MR_3931_TARGET, { verdict, body: BODY });
+
+    assert.equal(run.calls.length, 4, verdict);
+    const notTried = "Not tried, since your drafts were not published.";
+    assert.deepEqual(
+      outcome,
+      {
+        published: false,
+        steps: [
+          { id: "publish", label: "Publish your drafts", status: "failed", message: "glab failed: 403 Forbidden (HTTP 403)" },
+          { id: "note", label: "Post the review body", status: "skipped", message: notTried },
+          verdict === "approve"
+            ? { id: "approve", label: "Approve", status: "skipped", message: notTried }
+            : { id: "request-changes", label: "Request changes", status: "skipped", message: notTried },
+        ],
+      },
+      verdict,
+    );
+  }
+});
+
+test("a body that could not be posted leaves the review unpublished, and the approval is tried all the same", async () => {
+  const { forge, run } = forgeReplaying([
+    LOGGED_IN,
+    version("18.4.0"),
+    { stdout: fixture("project.json") },
+    {},
+    { exitCode: 1, stderr: "glab: 500 Internal Server Error (HTTP 500)\n" },
+    { stdout: JSON.stringify({ approved: true }) },
+  ]);
+
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "approve", body: BODY });
+
+  assert.match(String(run.calls.at(-1)?.args.at(-1)), /\/approve$/);
+  assert.equal(outcome.published, false, "the body is kept for another try");
+  assert.deepEqual(
+    outcome.steps.map((step) => [step.id, step.status]),
+    [
+      ["publish", "done"],
+      ["note", "failed"],
+      ["approve", "done"],
+    ],
+  );
+});
+
+test("an approval GitLab refuses because the MR moved on says to regenerate", async () => {
+  const { forge } = forgeReplaying([
+    LOGGED_IN,
+    { stdout: fixture("project.json") },
+    {},
+    { exitCode: 1, stderr: "glab: SHA does not match HEAD of source branch: 1a2b3c (HTTP 409)\n" },
+  ]);
+
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "approve", body: "" });
+
+  assert.deepEqual(outcome.steps.at(-1), {
+    id: "approve",
+    label: "Approve",
+    status: "failed",
+    message: "GitLab did not approve, as the MR has commits newer than the guide. Regenerate the guide to approve them.",
+  });
+});
+
+test("discarding deletes every one of the viewer's draft notes, the MR-level ones too", async () => {
+  const { forge, run } = forgeReplaying([
+    LOGGED_IN,
+    { stdout: fixture("project.json") },
+    { stdout: fixture("draft-notes.ndjson") },
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+  ]);
+
+  await forge.discardReview(MR_3931);
+
+  assert.deepEqual(sent(run).slice(1), [
+    ["api", "--hostname", "gitlab.com", `${DRAFT_NOTES}?per_page=100`, "--paginate", "--output", "ndjson"],
+    ...["101", "102", "103", "104", "105", "106"].map((id) => ["api", "--hostname", "gitlab.com", "--method", "DELETE", `${DRAFT_NOTES}/${id}`]),
+  ]);
+});
+
+test("discarding with nothing drafted deletes nothing, and a delete that fails is named once the rest were tried", async () => {
+  const empty = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, { stdout: "" }]);
+  await empty.forge.discardReview(MR_3931);
+  assert.equal(empty.run.calls.length, 3);
+
+  const { forge, run } = forgeReplaying([
+    LOGGED_IN,
+    { stdout: fixture("project.json") },
+    { stdout: draftNotesFixture(3) },
+    {},
+    { exitCode: 1, stderr: "glab: 404 Not found (HTTP 404)\n" },
+    {},
+  ]);
+  await assert.rejects(forge.discardReview(MR_3931), {
+    name: "ForgeError",
+    message:
+      "One of your draft notes could not be deleted: 102 (glab failed: 404 Not found (HTTP 404)). Delete what is left on the merge request's page.",
+  });
+  assert.equal(run.calls.length, 6, "the third was deleted too");
 });
