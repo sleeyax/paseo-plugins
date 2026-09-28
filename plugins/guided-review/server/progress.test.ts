@@ -58,7 +58,7 @@ const NOTHING_UNDERSTOOD = {
 test("a ready guide starts with nothing understood, tallied per layer, Supporting, Unsorted and overall", async (t) => {
   const { service } = await withGuide(t);
 
-  assert.deepEqual(await service.guideProgress({ reviewId: REVIEW_ID }), NOTHING_UNDERSTOOD);
+  assert.deepEqual(await service.readingProgress({ reviewId: REVIEW_ID }), NOTHING_UNDERSTOOD);
 });
 
 test("marking the trunk understood moves the next layer on, and the marks are kept on disk under the head SHA", async (t) => {
@@ -81,7 +81,7 @@ test("marking the trunk understood moves the next layer on, and the marks are ke
     overall: { understood: 1, total: 4 },
     nextLayer: 1,
   });
-  assert.deepEqual(await service.guideProgress({ reviewId: REVIEW_ID }), progress);
+  assert.deepEqual(await service.readingProgress({ reviewId: REVIEW_ID }), progress);
 
   const onDisk = JSON.parse(await readFile(path.join(data, "reviews", ...REVIEW_ID.split("/"), "progress", `${HEAD}.json`), "utf8"));
   assert.deepEqual({ ...onDisk, updatedAt: "" }, { headSha: HEAD, agentId: "agent-1", nodes: ["retry-policy"], files: [], updatedAt: "" });
@@ -134,7 +134,7 @@ test("toggles sent at once all land", async (t) => {
     service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "file", path: "docs/retry.md" }, understood: true }),
   ]);
 
-  assert.deepEqual((await service.guideProgress({ reviewId: REVIEW_ID }))?.understood, {
+  assert.deepEqual((await service.readingProgress({ reviewId: REVIEW_ID }))?.understood, {
     nodes: ["retry-policy", "uploader"],
     files: ["docs/retry.md"],
   });
@@ -148,9 +148,9 @@ test("progress survives a restart, including a mark cleared before it", async (t
 
   const restarted = restart();
 
-  assert.deepEqual((await restarted.guideProgress({ reviewId: REVIEW_ID }))?.understood, { nodes: [], files: ["src/retry.test.ts"] });
+  assert.deepEqual((await restarted.readingProgress({ reviewId: REVIEW_ID }))?.understood, { nodes: [], files: ["src/retry.test.ts"] });
   await restarted.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "node", nodeId: "uploader" }, understood: true });
-  assert.deepEqual((await restart().guideProgress({ reviewId: REVIEW_ID }))?.understood, {
+  assert.deepEqual((await restart().readingProgress({ reviewId: REVIEW_ID }))?.understood, {
     nodes: ["uploader"],
     files: ["src/retry.test.ts"],
   });
@@ -161,14 +161,14 @@ test("a guide generated again at the same head starts with nothing understood", 
   await service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "node", nodeId: "retry-policy" }, understood: true });
 
   await service.generateGuide({ reviewId: REVIEW_ID });
-  assert.equal(await service.guideProgress({ reviewId: REVIEW_ID }), null);
+  assert.equal(await service.readingProgress({ reviewId: REVIEW_ID }), null);
   await assert.rejects(
     service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "node", nodeId: "uploader" }, understood: true }),
     { message: "There is no finished guide to mark progress in." },
   );
   await service.settled();
 
-  assert.deepEqual(await service.guideProgress({ reviewId: REVIEW_ID }), NOTHING_UNDERSTOOD);
+  assert.deepEqual(await service.readingProgress({ reviewId: REVIEW_ID }), NOTHING_UNDERSTOOD);
 });
 
 test("only a node, a Supporting entry or an Unsorted entry of a finished guide can be marked", async (t) => {
@@ -179,7 +179,7 @@ test("only a node, a Supporting entry or an Unsorted entry of a finished guide c
   await service.start({ url: URL });
   while (agents.created.length === 0) await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(await service.guideProgress({ reviewId: REVIEW_ID }), null);
+  assert.equal(await service.readingProgress({ reviewId: REVIEW_ID }), null);
   await assert.rejects(
     service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "node", nodeId: "retry-policy" }, understood: true }),
     { message: "There is no finished guide to mark progress in." },
@@ -205,6 +205,6 @@ test("only a node, a Supporting entry or an Unsorted entry of a finished guide c
     }),
     { message: "This review is not known here any more. Start it again." },
   );
-  assert.equal(await service.guideProgress({ reviewId: "github/github.com/acme/uploader/8" }), null);
-  assert.deepEqual(await service.guideProgress({ reviewId: REVIEW_ID }), NOTHING_UNDERSTOOD);
+  assert.equal(await service.readingProgress({ reviewId: "github/github.com/acme/uploader/8" }), null);
+  assert.deepEqual(await service.readingProgress({ reviewId: REVIEW_ID }), NOTHING_UNDERSTOOD);
 });

@@ -115,7 +115,7 @@ test("while the agent writes, the panel says so and links the agent, and follows
   // The start job ends once the workspace is ready; the guide is a job of its own.
   while (agents.created.length === 0) await tick();
 
-  assert.equal((await service.progress({ reviewId: REVIEW_ID })).phase, "ready");
+  assert.equal((await service.startProgress({ reviewId: REVIEW_ID })).phase, "ready");
   assert.deepEqual(await guideOf(service), { status: "generating", agentId: "agent-1" });
 
   release(sampleGuideReply());
