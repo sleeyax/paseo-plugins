@@ -63,6 +63,7 @@ export function sampleChangeRequest(url: string, overrides: Partial<Omit<ChangeR
     baseBranch: "main",
     headBranch: "retry-uploads",
     baseSha: "a".repeat(40),
+    startSha: "a".repeat(40),
     headSha: "b".repeat(40),
     additions: 42,
     deletions: 7,

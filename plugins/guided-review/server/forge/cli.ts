@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { CommandRunner } from "../command-runner.ts";
+import type { CommandResult, CommandRunner } from "../command-runner.ts";
 import { ForgeError } from "./port.ts";
 
 export type CliOptions = {
@@ -27,10 +27,15 @@ export const DEFAULT_CLI_TIMEOUT_MS = 120_000;
 export type Cli = {
   text(args: readonly string[], options?: CallOptions): Promise<string>;
   json<Schema extends z.ZodType>(schema: Schema, args: readonly string[], options?: CallOptions): Promise<z.output<Schema>>;
+  /** One document per line, each read by `schema`: what `glab api --paginate --output ndjson` prints. */
+  ndjson<Schema extends z.ZodType>(schema: Schema, args: readonly string[], options?: CallOptions): Promise<z.output<Schema>[]>;
+  /** Whether the call exits cleanly, for a probe whose failure is an answer rather than an error. */
+  succeeds(args: readonly string[], options?: CallOptions): Promise<boolean>;
 };
 
 export function createCli(options: CliOptions): Cli {
-  const text = async (args: readonly string[], call: CallOptions = {}) => {
+  /** Runs the call, and fails only when it did not run to an exit code. */
+  const run = async (args: readonly string[], call: CallOptions = {}): Promise<CommandResult> => {
     const binary = await options.binary();
     const result = await options.run({
       file: binary,
@@ -48,37 +53,60 @@ export function createCli(options: CliOptions): Cli {
       }
       throw new ForgeError(`${options.name} did not finish: ${result.spawnError}.`);
     }
+    return result;
+  };
+
+  const text = async (args: readonly string[], call?: CallOptions) => {
+    const result = await run(args, call);
     if (result.exitCode !== 0) {
       throw new ForgeError(`${options.name} failed: ${reason(result.stderr, options.name) ?? `exit code ${result.exitCode}`}`);
     }
     return result.stdout;
   };
 
+  const read = <Schema extends z.ZodType>(schema: Schema, document: string): z.output<Schema> => {
+    let value: unknown;
+    try {
+      value = JSON.parse(document);
+    } catch {
+      throw new ForgeError(`${options.name} answered with something that is not JSON.`);
+    }
+    const parsed = schema.safeParse(value);
+    if (!parsed.success) {
+      throw new ForgeError(`${options.name} answered in a shape this plugin does not know: ${parsed.error.issues[0]?.message ?? "invalid"}.`);
+    }
+    return parsed.data;
+  };
+
   return {
     text,
     async json(schema, args, call) {
+      return read(schema, await text(args, call));
+    },
+    async ndjson(schema, args, call) {
       const stdout = await text(args, call);
-      let value: unknown;
-      try {
-        value = JSON.parse(stdout);
-      } catch {
-        throw new ForgeError(`${options.name} answered with something that is not JSON.`);
-      }
-      const parsed = schema.safeParse(value);
-      if (!parsed.success) {
-        throw new ForgeError(`${options.name} answered in a shape this plugin does not know: ${parsed.error.issues[0]?.message ?? "invalid"}.`);
-      }
-      return parsed.data;
+      return stdout
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .map((line) => read(schema, line));
+    },
+    async succeeds(args, call) {
+      return (await run(args, call)).exitCode === 0;
     },
   };
 }
 
-/** The CLI's own words, without its `gh:` prefix and without whatever it printed after the first line. */
+/**
+ * The CLI's own words, without its `gh:` prefix and without whatever it printed after the first
+ * line. `glab` prints some errors as a box instead, an `ERROR` title over an `X` line it wraps, so
+ * for those the reason is everything under the title.
+ */
 function reason(stderr: string, name: string): string | null {
-  const line = stderr
+  const [line, ...rest] = stderr
     .split("\n")
     .map((entry) => entry.trim())
-    .find((entry) => entry !== "");
+    .filter((entry) => entry !== "");
   if (line === undefined) return null;
+  if (line === "ERROR" && rest.length > 0) return rest.join(" ").replace(/^X /, "");
   return line.startsWith(`${name}: `) ? line.slice(name.length + 2) : line;
 }
