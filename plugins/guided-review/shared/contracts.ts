@@ -187,7 +187,8 @@ export const setUnderstood = defineRpc({
 
 /**
  * The reviewer's drafts on the change request, as the forge has them, including ones started in
- * its web UI. Drafts live only on the forge, so this is read afresh every time.
+ * its web UI. Drafts live only on the forge, so this is read afresh every time. Each comes with the
+ * node of the panel's guide it was written from, which only this plugin knows; null for the rest.
  */
 export const listDrafts = defineRpc({
   name: "guided-review.drafts.list",
