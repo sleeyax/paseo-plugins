@@ -1,7 +1,7 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import React from "react";
 import { Pressable, Text, View } from "react-native";
-import type { Guide, GuideDecision, GuideNode, GuideState } from "../shared/guide.ts";
+import type { Guide, GuideDecision, GuideState, LayeredGuide, LayeredNode } from "../shared/guide.ts";
 import { fontSize, leading, radius, spacing } from "./theme.ts";
 
 type Colors = PluginTheme["colors"];
@@ -54,13 +54,57 @@ export function GuideView({ state, theme, openAgent, retry }: GuideViewProps) {
         <>
           <Overview guide={state.guide} colors={colors} />
           {agentLink ? <View style={{ alignItems: "flex-start" }}>{agentLink}</View> : null}
-          <Heading colors={colors}>Concepts</Heading>
-          {state.guide.nodes.map((node) => (
-            <NodeCard key={node.id} node={node} colors={colors} />
-          ))}
+          <Tree guide={state.guide} colors={colors} />
         </>
       );
   }
+}
+
+/** The nodes by layer, trunk first, then Supporting and Unsorted. */
+function Tree({ guide, colors }: { guide: LayeredGuide; colors: Colors }) {
+  const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
+  const layers: LayeredNode[][] = [];
+  for (const node of guide.nodes) (layers[node.layer] ??= []).push(node);
+  return (
+    <>
+      {/* A node's layer is one past a node's it builds on, so no layer is empty. */}
+      {layers.map((nodes, layer) => (
+        <React.Fragment key={layer}>
+          <Heading colors={colors}>{layerTitle(layer)}</Heading>
+          {nodes.map((node) => (
+            <NodeCard key={node.id} node={node} titles={titles} colors={colors} />
+          ))}
+        </React.Fragment>
+      ))}
+      {guide.supporting.length > 0 ? (
+        <>
+          <Heading colors={colors}>Supporting</Heading>
+          <Card colors={colors} light>
+            {guide.supporting.map((entry) => (
+              <FileLine key={entry.path} colors={colors} path={entry.path} note={entry.category} />
+            ))}
+          </Card>
+        </>
+      ) : null}
+      {guide.unsorted.length > 0 ? (
+        <>
+          <Heading colors={colors}>Unsorted</Heading>
+          <Card colors={colors}>
+            <Body colors={colors} muted>
+              The guide agent placed these changed files nowhere, so no concept explains them.
+            </Body>
+            {guide.unsorted.map((file) => (
+              <FileLine key={file} colors={colors} path={file} />
+            ))}
+          </Card>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function layerTitle(layer: number): string {
+  return layer === 0 ? "Foundations" : `Layer ${layer + 1}`;
 }
 
 function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
@@ -96,18 +140,53 @@ function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
   );
 }
 
-function NodeCard({ node, colors }: { node: GuideNode; colors: Colors }) {
+/** A node; a leaf, which follows what the trunk already explained, is drawn lighter. */
+function NodeCard({ node, titles, colors }: { node: LayeredNode; titles: ReadonlyMap<string, string>; colors: Colors }) {
   return (
-    <Card colors={colors}>
-      <Text style={{ color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base), fontWeight: "600" }}>
+    <Card colors={colors} light={node.leaf}>
+      <Text
+        style={{
+          color: node.leaf ? colors.foregroundMuted : colors.foreground,
+          fontSize: fontSize.base,
+          lineHeight: leading(fontSize.base),
+          fontWeight: node.leaf ? "500" : "600",
+        }}
+      >
         {node.title}
       </Text>
       <Body colors={colors} muted>
         {node.summary}
       </Body>
+      {node.dependencies.length > 0 ? (
+        <>
+          <Label colors={colors}>Builds on</Label>
+          {node.dependencies.map((dependency) => (
+            <Bullet key={dependency.nodeId} colors={colors}>
+              <Text style={{ fontWeight: "600" }}>{titles.get(dependency.nodeId) ?? dependency.nodeId}</Text>: {dependency.reason}
+            </Bullet>
+          ))}
+        </>
+      ) : null}
       <Body colors={colors}>{node.explanation}</Body>
       {node.decisions.length > 0 ? <Decisions decisions={node.decisions} colors={colors} /> : null}
+      {node.files.length > 0 ? (
+        <>
+          <Label colors={colors}>Files</Label>
+          {node.files.map((file) => (
+            <FileLine key={file} colors={colors} path={file} />
+          ))}
+        </>
+      ) : null}
     </Card>
+  );
+}
+
+function FileLine({ colors, path, note }: { colors: Colors; path: string; note?: string }) {
+  return (
+    <Text style={{ color: colors.foreground, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>
+      {path}
+      {note ? <Text style={{ color: colors.foregroundMuted }}> · {note}</Text> : null}
+    </Text>
   );
 }
 
@@ -124,7 +203,8 @@ function Decisions({ decisions, colors }: { decisions: readonly GuideDecision[];
   );
 }
 
-function Card({ colors, children }: { colors: Colors; children: React.ReactNode }) {
+/** A `light` card sits on the panel's own background rather than raised on a card surface. */
+function Card({ colors, light, children }: { colors: Colors; light?: boolean; children: React.ReactNode }) {
   return (
     <View
       style={{
@@ -133,7 +213,7 @@ function Card({ colors, children }: { colors: Colors; children: React.ReactNode 
         borderRadius: radius.lg,
         borderWidth: 1,
         borderColor: colors.border,
-        backgroundColor: colors.surface1,
+        backgroundColor: light ? colors.surface0 : colors.surface1,
       }}
     >
       {children}
