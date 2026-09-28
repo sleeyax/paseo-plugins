@@ -8,7 +8,7 @@ import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
 import type { DiffHunk, DiffLine, FileDiff } from "../shared/diff.ts";
 import { isLine, lastLineOf, lineRefOf, pathOf, type DraftLocation, type LineRef } from "../shared/drafts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
-import { DraftCard, DraftsContext, NewCommentBox, type DraftsControl } from "./drafts.tsx";
+import { CommentNodeContext, DraftCard, DraftsContext, NewCommentBox, type DraftsControl } from "./drafts.tsx";
 import { fontSize, leading, radius, spacing, tint } from "./theme.ts";
 
 type Colors = PluginTheme["colors"];
@@ -54,12 +54,15 @@ export function NodeCode({ reviewId, agentId, subject, theme }: NodeCodeProps) {
   if (diff.isError) {
     return <Muted colors={colors} color={colors.statusDanger}>{diff.error instanceof Error ? diff.error.message : String(diff.error)}</Muted>;
   }
+  // A comment on a node's code is linked to the node; on a Supporting or Unsorted file, to none.
   return (
-    <View style={{ gap: spacing[3], marginTop: spacing[1] }}>
-      {diff.data.files.map((file) => (
-        <FileDiffView key={file.path} file={file} colors={colors} />
-      ))}
-    </View>
+    <CommentNodeContext.Provider value={subject.kind === "node" ? subject.nodeId : null}>
+      <View style={{ gap: spacing[3], marginTop: spacing[1] }}>
+        {diff.data.files.map((file) => (
+          <FileDiffView key={file.path} file={file} colors={colors} />
+        ))}
+      </View>
+    </CommentNodeContext.Provider>
   );
 }
 
