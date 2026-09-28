@@ -39,7 +39,7 @@ async function startAndSettle(service: ReviewService, url: string) {
   const started = await service.start({ url });
   await service.settled();
   assert.equal(started.status, "started");
-  return service.progress({ reviewId: started.status === "started" ? started.reviewId : "" });
+  return service.startProgress({ reviewId: started.status === "started" ? started.reviewId : "" });
 }
 
 const HEADER = {
@@ -226,7 +226,7 @@ test("a review survives a plugin restart, and keeps what the forge said at its h
     header: HEADER,
     guide: { status: "ready", agentId: "agent-1", guide: sampleLayeredGuide() },
   });
-  assert.deepEqual(await restarted.progress({ reviewId: "github/github.com/acme/uploader/7" }), {
+  assert.deepEqual(await restarted.startProgress({ reviewId: "github/github.com/acme/uploader/7" }), {
     phase: "ready",
     header: HEADER,
     workspaceId,
@@ -274,7 +274,7 @@ test("a workspace with no review in it, and a review this daemon never started, 
   const { service } = await withHost(t);
 
   assert.deepEqual(await service.panel({ workspaceId: "wks_ffffffffffffffff" }), { status: "none" });
-  assert.deepEqual(await service.progress({ reviewId: "github/github.com/acme/other/1" }), {
+  assert.deepEqual(await service.startProgress({ reviewId: "github/github.com/acme/other/1" }), {
     phase: "unknown",
     header: null,
     workspaceId: null,

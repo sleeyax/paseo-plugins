@@ -98,7 +98,7 @@ async function regenerate(service: ReviewService): Promise<StartProgress> {
   const started = await service.regenerate({ reviewId: REVIEW_ID });
   assert.equal(started.status, "started");
   await service.settled();
-  return service.progress({ reviewId: REVIEW_ID });
+  return service.startProgress({ reviewId: REVIEW_ID });
 }
 
 function mark(service: ReviewService, subject: GuideSubject, headSha = OLD) {
@@ -273,8 +273,8 @@ test("marks carry over to nodes covering the same code, however renumbered or re
     overall: { understood: 2, total: 5 },
     nextLayer: 0,
   };
-  assert.deepEqual(await service.guideProgress({ reviewId: REVIEW_ID }), carried);
-  assert.deepEqual(await restart().guideProgress({ reviewId: REVIEW_ID }), carried, "the carried marks are on disk");
+  assert.deepEqual(await service.readingProgress({ reviewId: REVIEW_ID }), carried);
+  assert.deepEqual(await restart().readingProgress({ reviewId: REVIEW_ID }), carried, "the carried marks are on disk");
 
   // Marks at the new head are the new guide's own from here on.
   const after = await mark(service, { kind: "node", nodeId: "logging" }, NEW);
@@ -304,7 +304,7 @@ test("a mark on the rest of a partly covered file carries over while that rest i
     forge.changeRequests.set(URL, newHead);
     await regenerate(service);
 
-    assert.deepEqual((await service.guideProgress({ reviewId: REVIEW_ID }))?.understood.files, carried);
+    assert.deepEqual((await service.readingProgress({ reviewId: REVIEW_ID }))?.understood.files, carried);
   }
 });
 
@@ -318,7 +318,7 @@ test("only marks made in the guide kept at the old head carry over", async (t) =
   forge.changeRequests.set(URL, atNewHead());
   await regenerate(service);
 
-  assert.deepEqual((await service.guideProgress({ reviewId: REVIEW_ID }))?.understood, { nodes: [], files: [] });
+  assert.deepEqual((await service.readingProgress({ reviewId: REVIEW_ID }))?.understood, { nodes: [], files: [] });
 });
 
 test("a regenerated guide that failed carries the marks over once Try again writes it", async (t) => {
@@ -335,7 +335,7 @@ test("a regenerated guide that failed carries the marks over once Try again writ
   await service.generateGuide({ reviewId: REVIEW_ID });
   await service.settled();
 
-  assert.deepEqual((await service.guideProgress({ reviewId: REVIEW_ID }))?.understood, { nodes: ["upload-loop"], files: [] });
+  assert.deepEqual((await service.readingProgress({ reviewId: REVIEW_ID }))?.understood, { nodes: ["upload-loop"], files: [] });
 });
 
 test("after Regenerate a comment is anchored in the new head's diff, one from the guide it replaced is refused, and drafts stay", async (t) => {

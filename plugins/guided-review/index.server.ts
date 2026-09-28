@@ -59,7 +59,7 @@ export default function contribute(server: PluginServerContext) {
   });
   server.handle(contracts.getStartProgress, (input, context) => {
     connected(context);
-    return service.progress(input);
+    return service.startProgress(input);
   });
   server.handle(contracts.getPanel, (input, context) => {
     connected(context);
@@ -87,7 +87,7 @@ export default function contribute(server: PluginServerContext) {
   });
   server.handle(contracts.getProgress, (input, context) => {
     connected(context);
-    return service.guideProgress(input);
+    return service.readingProgress(input);
   });
   server.handle(contracts.setUnderstood, (input, context) => {
     connected(context);

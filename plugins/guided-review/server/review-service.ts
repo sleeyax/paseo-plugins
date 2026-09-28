@@ -149,12 +149,13 @@ export class ReviewService {
     return this.#branchView(job);
   }
 
-  async progress({ reviewId }: { reviewId: string }): Promise<StartProgress> {
+  /** Where a start or a Regenerate of the review has got to, as the start surface and the panel follow it. */
+  async startProgress({ reviewId }: { reviewId: string }): Promise<StartProgress> {
     const job = this.#jobs.get(reviewId);
     if (job) return job.progress;
     const record = await this.#store.get(reviewId);
-    if (record === null) return progress("unknown");
-    return { ...progress("ready"), header: record.header, workspaceId: record.workspace.id };
+    if (record === null) return startProgressAt("unknown");
+    return { ...startProgressAt("ready"), header: record.header, workspaceId: record.workspace.id };
   }
 
   async panel({ workspaceId }: { workspaceId: string }): Promise<PanelView> {
@@ -177,8 +178,7 @@ export class ReviewService {
    * generation is running already, which is then the one followed.
    */
   async generateGuide({ reviewId }: { reviewId: string }): Promise<GuideState> {
-    const record = await this.#store.get(reviewId);
-    if (record === null) throw new Error("This review is not known here any more. Start it again.");
+    const record = await this.#record(reviewId);
     const running = this.#generations.get(generationKey(record));
     if (running) return { status: "generating", agentId: running.agentId };
 
@@ -194,11 +194,10 @@ export class ReviewService {
    * as not moved, so a flaky network does not put a banner up.
    */
   async checkHead({ reviewId }: { reviewId: string }): Promise<HeadCheck> {
-    const record = await this.#store.get(reviewId);
-    if (record === null) throw new Error("This review is not known here any more. Start it again.");
+    const record = await this.#record(reviewId);
     const guideHeadSha = record.header.headSha;
     try {
-      const head = await this.#forgeOf(record.ref).fetchHead(record.ref);
+      const head = await this.#forgeFor(record.ref).fetchHead(record.ref);
       return { guideHeadSha, forgeHeadSha: head.headSha, moved: head.headSha !== guideHeadSha, state: head.state, message: null };
     } catch (error) {
       if (!(error instanceof ForgeError)) throw error;
@@ -210,13 +209,17 @@ export class ReviewService {
 
   /**
    * "Regenerate": reads the change request at its current head, brings the guide's workspace there
-   * and generates the guide for that head, as a background job the panel follows through `progress`.
+   * and generates the guide for that head, as a background job the panel follows through `startProgress`.
    * The only way to a guide at a new head: a start with the head moved keeps the guide it has.
    */
   async regenerate({ reviewId }: { reviewId: string }): Promise<StartResult> {
-    const record = await this.#store.get(reviewId);
-    if (record === null) return { status: "rejected", message: "This review is not known here any more. Start it again." };
-    return { status: "started", reviewId: this.#begin(this.#forgeOf(record.ref), record.ref, null, "regenerate") };
+    let record: ReviewRecord;
+    try {
+      record = await this.#record(reviewId);
+    } catch (error) {
+      return { status: "rejected", message: unknownReview(error) };
+    }
+    return { status: "started", reviewId: this.#begin(this.#forgeFor(record.ref), record.ref, null, "regenerate") };
   }
 
   /**
@@ -225,28 +228,28 @@ export class ReviewService {
    * finished guide, since a prompt to a busy one would interrupt it; otherwise says why not.
    */
   async ask({ reviewId, subject }: { reviewId: string; subject: GuideSubject }): Promise<AskResult> {
-    const record = await this.#store.get(reviewId);
-    if (record === null) return notSent(null, "This review is not known here any more. Start it again.");
+    let record: ReviewRecord;
+    try {
+      record = await this.#record(reviewId);
+    } catch (error) {
+      return notSent(null, unknownReview(error));
+    }
     const { headSha } = record.header;
     const running = this.#generations.get(generationKey(record));
     if (running) return notSent(running.agentId, "The guide agent is still writing the guide. Ask once the guide is ready.");
-    const stored = await this.#store.getGuide(record.id, headSha);
-    if (stored === null || stored.workspaceId !== record.workspace.id || stored.status !== "ready" || stored.agentId === null) {
+    const shown = await this.#shownGuide(record);
+    if (shown === null) {
+      // A failed guide still has an agent, whose chat the panel can open.
+      const stored = await this.#store.getGuide(record.id, headSha);
       return notSent(stored?.agentId ?? null, "There is no finished guide to ask about yet.");
     }
-    const agentId = stored.agentId;
+    const { agentId } = shown;
 
-    const context = await this.#askContext(record, stored.guide!, subject);
+    const context = await this.#askContext(record, shown.guide, subject);
     if (typeof context === "string") return notSent(agentId, context);
 
-    switch (await this.#guideAgents.status(agentId)) {
-      case "busy":
-        return notSent(agentId, "The guide agent is busy with another answer. Ask again once it has finished.");
-      case "gone":
-        return notSent(null, "The guide agent is gone: it was archived or closed, so there is no chat to ask in.");
-      case "idle":
-        break;
-    }
+    const unavailable = await this.#unavailable(agentId, "Ask again once it has finished.", "no chat to ask in");
+    if (unavailable !== null) return notSent(unavailable.gone ? null : agentId, unavailable.message);
     try {
       await this.#guideAgents.send(agentId, askPrompt(record.ref, headSha, context));
     } catch (error) {
@@ -289,8 +292,7 @@ export class ReviewService {
    * file, which is what a Supporting or Unsorted entry shows: its whole diff, or the rest of it.
    */
   async nodeDiff({ reviewId, subject }: { reviewId: string; subject: GuideSubject }): Promise<NodeDiff> {
-    const record = await this.#store.get(reviewId);
-    if (record === null) throw new Error("This review is not known here any more. Start it again.");
+    const record = await this.#record(reviewId);
     const { headSha } = record.header;
     const stored = await this.#store.getGuide(record.id, headSha);
     if (stored?.status !== "ready" || stored.guide === null) throw new Error("The guide is not ready yet.");
@@ -312,7 +314,7 @@ export class ReviewService {
    * The reviewer's progress through the guide the panel shows: the one at the review's head, in its
    * workspace. Null while that guide is not ready.
    */
-  async guideProgress({ reviewId }: { reviewId: string }): Promise<GuideProgress | null> {
+  async readingProgress({ reviewId }: { reviewId: string }): Promise<GuideProgress | null> {
     const record = await this.#store.get(reviewId);
     // A guide being generated again replaces the one on disk, and its marks with it.
     if (record === null || this.#generations.has(generationKey(record))) return null;
@@ -341,8 +343,7 @@ export class ReviewService {
   }
 
   async #setUnderstood(reviewId: string, headSha: string, subject: GuideSubject, understood: boolean): Promise<GuideProgress> {
-    const record = await this.#store.get(reviewId);
-    if (record === null) throw new Error("This review is not known here any more. Start it again.");
+    const record = await this.#record(reviewId);
     const stored = this.#generations.has(`${record.id}@${headSha}`) ? null : await this.#store.getGuide(record.id, headSha);
     if (stored === null || !isReady(stored)) throw new Error("There is no finished guide to mark progress in.");
     const { guide } = stored;
@@ -356,15 +357,15 @@ export class ReviewService {
     const marks = marksOf(stored, await this.#store.getProgress(record.id, headSha));
     const [list, value] = subject.kind === "node" ? [marks.nodes, subject.nodeId] : [marks.files, subject.path];
     const next = understood ? [...new Set([...list, value])] : list.filter((entry) => entry !== value);
-    const progress: ProgressRecord = {
+    const saved: ProgressRecord = {
       headSha,
       agentId: stored.agentId,
       nodes: subject.kind === "node" ? next : marks.nodes,
       files: subject.kind === "file" ? next : marks.files,
       updatedAt: this.#now().toISOString(),
     };
-    await this.#store.saveProgress(record.id, progress);
-    return summariseProgress(guide, headSha, progress);
+    await this.#store.saveProgress(record.id, saved);
+    return summariseProgress(guide, headSha, saved);
   }
 
   /**
@@ -558,18 +559,20 @@ export class ReviewService {
     subject: CommentSubject;
     prompt: string;
   }): Promise<Suggestion> {
-    const record = await this.#store.get(reviewId);
-    if (record === null) return notSuggested("This review is not known here any more. Start it again.");
+    let record: ReviewRecord;
+    try {
+      record = await this.#record(reviewId);
+    } catch (error) {
+      return notSuggested(unknownReview(error));
+    }
     const { headSha } = record.header;
     if (drawnAt !== headSha) return notSuggested(regeneratedAway(drawnAt, headSha));
     if (this.#generations.has(generationKey(record))) {
       return notSuggested("The guide agent is still writing the guide. Try again once the guide is ready.");
     }
-    const stored = await this.#store.getGuide(record.id, headSha);
-    if (stored === null || stored.workspaceId !== record.workspace.id || !isReady(stored)) {
-      return notSuggested("There is no finished guide yet, so there is no guide agent to suggest wording.");
-    }
-    const agentId = stored.agentId;
+    const stored = await this.#shownGuide(record);
+    if (stored === null) return notSuggested("There is no finished guide yet, so there is no guide agent to suggest wording.");
+    const { agentId } = stored;
 
     const changeRequest = await this.#store.snapshot(record.id, headSha);
     if (changeRequest === null) return notSuggested("What the forge said at this head is missing. Start the review again.");
@@ -586,16 +589,12 @@ export class ReviewService {
       return notSuggested(errorMessage(error));
     }
 
-    const busy = "The guide agent is busy with another answer. Try again once it has finished.";
-    if ([...this.#suggestions.values()].some((job) => job.agentId === agentId && job.state.status === "running")) return notSuggested(busy);
-    switch (await this.#guideAgents.status(agentId)) {
-      case "busy":
-        return notSuggested(busy);
-      case "gone":
-        return notSuggested("The guide agent is gone: it was archived or closed, so there is no one to suggest wording.");
-      case "idle":
-        break;
+    const again = "Try again once it has finished.";
+    if ([...this.#suggestions.values()].some((job) => job.agentId === agentId && job.state.status === "running")) {
+      return notSuggested(`${BUSY} ${again}`);
     }
+    const unavailable = await this.#unavailable(agentId, again, "no one to suggest wording");
+    if (unavailable !== null) return notSuggested(unavailable.message);
 
     const suggestionId = randomUUID();
     const job: SuggestionJob = { agentId, state: { status: "running", suggestionId }, done: Promise.resolve() };
@@ -620,12 +619,10 @@ export class ReviewService {
     return job.state;
   }
 
+  /** A review this daemon has a record of, with the forge it was read from. */
   async #reviewForge(reviewId: string): Promise<{ record: ReviewRecord; forge: Forge }> {
-    const record = await this.#store.get(reviewId);
-    if (record === null) throw new Error("This review is not known here any more. Start it again.");
-    const forge = this.#forges.find((candidate) => candidate.kind === record.ref.forge);
-    if (forge === undefined) throw new Error(`No forge here reads ${record.ref.url}.`);
-    return { record, forge };
+    const record = await this.#record(reviewId);
+    return { record, forge: this.#forgeFor(record.ref) };
   }
 
   /**
@@ -657,8 +654,7 @@ export class ReviewService {
     const head = await this.checkHead({ reviewId });
     const verdicts = verdictsFor(record, head);
     if (headSha !== record.header.headSha) {
-      const message = `This review is of the guide at ${headSha.slice(0, 7)}, which was regenerated for ${record.header.headSha.slice(0, 7)}. Finish it from the guide at the new head.`;
-      return { status: "refused", message, verdicts };
+      return { status: "refused", message: regeneratedAway(headSha, record.header.headSha, "This review is of", "Finish it from"), verdicts };
     }
     const option = verdicts.find((candidate) => candidate.verdict === verdict);
     if (!option?.allowed) return { status: "refused", message: option?.reason ?? "That verdict is not on offer.", verdicts };
@@ -758,11 +754,36 @@ export class ReviewService {
     }
   }
 
+  /**
+   * The review `reviewId` names. One this daemon has no record of throws an `UnknownReviewError`, which
+   * the RPCs that answer rather than throw turn into their answer through `unknownReview`.
+   */
+  async #record(reviewId: string): Promise<ReviewRecord> {
+    const record = await this.#store.get(reviewId);
+    if (record === null) throw new UnknownReviewError();
+    return record;
+  }
+
   /** The forge a recorded review was read from. */
-  #forgeOf(ref: ChangeRequestRef): Forge {
+  #forgeFor(ref: ChangeRequestRef): Forge {
     const forge = this.#forges.find((candidate) => candidate.kind === ref.forge);
     if (forge === undefined) throw new Error(`No ${ref.forge} forge is set up to read ${ref.url}.`);
     return forge;
+  }
+
+  /**
+   * Why the guide agent cannot take a prompt now, or null when it is idle, since a prompt to a busy
+   * one would interrupt it. `again` says when to try again; `without` what a gone agent leaves none of.
+   */
+  async #unavailable(agentId: string, again: string, without: string): Promise<{ gone: boolean; message: string } | null> {
+    switch (await this.#guideAgents.status(agentId)) {
+      case "busy":
+        return { gone: false, message: `${BUSY} ${again}` };
+      case "gone":
+        return { gone: true, message: `The guide agent is gone: it was archived or closed, so there is ${without}.` };
+      case "idle":
+        return null;
+    }
   }
 
   async #match(url: string): Promise<{ forge: Forge; ref: ChangeRequestRef } | null> {
@@ -784,7 +805,7 @@ export class ReviewService {
     const running = this.#jobs.get(id);
     if (running && !isFinished(running.progress.phase)) return id;
 
-    const job: Job = { progress: progress("reading"), note: null, done: Promise.resolve() };
+    const job: Job = { progress: startProgressAt("reading"), note: null, done: Promise.resolve() };
     this.#jobs.set(id, job);
     job.done = this.#prepare(id, forge, ref, job, own, mode).catch((error: unknown) => {
       const message = errorMessage(error);
@@ -840,7 +861,7 @@ export class ReviewService {
   async #branchRunning(job: BranchJob): Promise<boolean> {
     if (job.state.status === "finding") return true;
     if (job.state.status !== "started") return false;
-    return !isFinished((await this.progress({ reviewId: job.state.reviewId })).phase);
+    return !isFinished((await this.startProgress({ reviewId: job.state.reviewId })).phase);
   }
 
   async #branchView(job: BranchJob): Promise<BranchStart> {
@@ -858,7 +879,7 @@ export class ReviewService {
         };
       case "started": {
         const note = this.#jobs.get(state.reviewId)?.note ?? (await this.#store.get(state.reviewId))?.note ?? null;
-        return { status: "started", reviewId: state.reviewId, progress: await this.progress({ reviewId: state.reviewId }), note };
+        return { status: "started", reviewId: state.reviewId, progress: await this.startProgress({ reviewId: state.reviewId }), note };
       }
     }
   }
@@ -1201,7 +1222,8 @@ function verdictsFor(record: ReviewRecord, head: HeadCheck): VerdictOption[] {
   });
 }
 
-function progress(phase: StartPhase): StartProgress {
+/** A start's progress at `phase`, before anything about the change request is known. */
+function startProgressAt(phase: StartPhase): StartProgress {
   return { phase, header: null, workspaceId: null, message: null };
 }
 
@@ -1217,9 +1239,28 @@ function paragraphDraft(paragraph: BodyParagraph): Draft {
   return { id: paragraph.id, body: paragraph.body, location: { kind: "general" } };
 }
 
-/** Why a comment's lines, read in the guide the panel drew at `drawnAt`, are not taken at the review's `headSha`. */
-function regeneratedAway(drawnAt: string, headSha: string): string {
-  return `This comment is on the guide at ${drawnAt.slice(0, 7)}, which was regenerated for ${headSha.slice(0, 7)}. Comment on the guide at the new head.`;
+/**
+ * Why something read in the guide the panel drew at `drawnAt` is not taken at the review's `headSha`,
+ * whose lines are numbered differently: `what` names it ("This comment is on"), and `redo` says
+ * what to do at the new head.
+ */
+function regeneratedAway(drawnAt: string, headSha: string, what = "This comment is on", redo = "Comment on"): string {
+  return `${what} the guide at ${drawnAt.slice(0, 7)}, which was regenerated for ${headSha.slice(0, 7)}. ${redo} the guide at the new head.`;
+}
+
+const BUSY = "The guide agent is busy with another answer.";
+
+/** A review this daemon has no record of any more. */
+class UnknownReviewError extends Error {
+  constructor() {
+    super("This review is not known here any more. Start it again.");
+  }
+}
+
+/** The message of an `UnknownReviewError`, for an RPC that answers rather than throws; anything else is thrown on. */
+function unknownReview(error: unknown): string {
+  if (error instanceof UnknownReviewError) return error.message;
+  throw error;
 }
 
 function notSuggested(message: string): Suggestion {
