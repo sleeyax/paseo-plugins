@@ -11,7 +11,7 @@ Where a reload is not wanted, the daemon's own compiler answers the same questio
 It reaches the outside only through its ports, so its tests replace every one of them:
 
 - `server/forge/port.ts` is the Forge port. `server/forge/github.ts` implements it over `gh` and `server/forge/gitlab.ts` over `glab`, both through `server/forge/cli.ts`, which turns a failed call into a `ForgeError` whose message is shown as it is.
-- `server/workspaces/port.ts` is the workspace port. `server/workspaces/paseo.ts` implements it over the SDK.
+- `server/workspaces/port.ts` is the workspace port. `server/workspaces/paseo.ts` implements it over the SDK, and `server/workspaces/checkout.ts`, the local checkout module, does the git behind `inspect` and `fastForward`.
 - `server/command-runner.ts` is the one seam every `gh`, `glab` and `git` call goes through, and `server/fake-command-runner.ts` replays recorded output through it.
 - `server/guide-agent/port.ts` is the guide agent port, which moves text only: `create` starts the agent on a prompt, `reply` waits for its answer, `run` and `send` prompt it again (for "Suggest wording" and "Ask about this"), `status` says whether it is idle. `server/guide-agent/paseo.ts` implements it over the SDK. Structured output is `server/guide-agent/structured.ts`: `withOutputSchema` puts the JSON Schema in the prompt, `parseReply` finds the JSON in the reply and validates it with zod, and `runStructured` does both for a `{ body }`-style request. `server/guide-output.ts` adds the guide's own checks, which is where layering and coverage go.
 
@@ -37,6 +37,11 @@ Sending to a busy agent interrupts its turn (`PaseoAgentSendOptions` has no `act
 
 The guide is generated as a background job keyed by review and head SHA, and `server/review-store.ts` keeps a record per head SHA from the moment the agent is asked, with its agent ID. A panel read that finds a `generating` record with no job behind it waits on the same agent again, which is how a generation survives a plugin reload. A guide belongs to the workspace it was generated in; a new workspace for the review gets a new guide and agent.
 
+"Guide this branch's PR/MR" starts from a workspace, not a URL: `startBranch` reads the branch and `origin` with git (Paseo's `gitRuntime` is a cache that may be missing, and the client snapshot has no branch at all), asks each forge's `findByBranch`, and hands the one change request found, or the one chosen, to the same job as a URL, with the workspace as `own`.
+The command item cannot show anything, so it calls the RPC and opens the panel, which follows the start through `getPanel`'s `none.branch` and polls an empty panel now and then for a start made from outside it.
+A workspace the guide is attached to is recorded with its `branch`, which is how a later start, from the URL too, knows to fast-forward it again rather than make a PR workspace; a branch left alone gives the record a `note` the panel shows in one line.
+The fast-forward fetches the change request's own ref (`refs/pull/<n>/head`, `refs/merge-requests/<iid>/head`) into `FETCH_HEAD` only, so fork PRs work and no remote-tracking branch moves; untracked files count as dirty, and a branch ahead of the head counts as diverged, since either way the agent would not read the head.
+
 The SDK gives a plugin no data directory. `server/paths.ts` derives one in the Paseo home, per daemon, because the workspace IDs it records mean something only to that daemon.
 
 `server/command-runner.ts` keeps the whole of stdout, decoded once, because a truncated JSON document is worse than none; only a runaway command past 256 MiB is cut off, and that is a failure rather than a truncation.
@@ -58,7 +63,9 @@ A `glab` wrapper can swap in a bot account's token when it sees either, and a da
 ## Tests
 
 `pnpm test` is `node --test "{client,server,shared}/**/*.test.ts"` through Node's type stripping, so no TypeScript that has to be emitted and relative imports keep their `.ts` extension.
-`server/forge/fixtures/github/` holds real `gh` 2.101 output for sleeyax/paseo-plugins#105, with the user trimmed to its public fields.
-`server/forge/fixtures/gitlab/` holds real `glab` 1.119 output for gitlab-org/cli!3931 on gitlab.com, a merged MR from a fork, recorded with read-only `glab api` calls; the user is the account `glab` happened to be logged in as, trimmed to its public fields.
+`server/forge/fixtures/github/` holds real `gh` 2.101 output for sleeyax/paseo-plugins#105, with the user trimmed to its public fields, and `gh pr list --head` for #107's branch.
+`server/forge/fixtures/gitlab/` holds real `glab` 1.119 output for gitlab-org/cli!3931 on gitlab.com, a merged MR from a fork, recorded with read-only `glab api` calls; the user is the account `glab` happened to be logged in as, trimmed to its public fields. `merge-requests-for-branch.json` is the open-MR listing for !3967's source branch.
+`server/workspaces/checkout.test.ts` runs the local checkout module against real throwaway repositories: a bare `origin` holding the head under `refs/pull/7/head` and a clone standing in for the workspace, with the host's git config kept out through `GIT_CONFIG_GLOBAL=/dev/null`.
+The branch flow's service tests are in `server/review-service-branch.test.ts`, over `fakeWorkspaces().openCheckout` and `openOnBranch` on the forge fake.
 Service tests use a real temp directory for the data directory, and restart the service over it to check what survives on disk.
 The guide agent fake answers with fixture text (`sampleGuideReply`), or with a promise the test resolves to look at the panel mid-generation, so the real parsing runs in every service test. `server/guide-agent/paseo.test.ts` drives the SDK adapter over a stub of the slice of `PaseoApi` it uses.
