@@ -2,11 +2,13 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import React from "react";
 import { Pressable, Text, View } from "react-native";
 import type { Guide, GuideDecision, GuideNode, GuideState } from "../shared/guide.ts";
+import { NodeCode } from "./diff-view.tsx";
 import { fontSize, leading, radius, spacing } from "./theme.ts";
 
 type Colors = PluginTheme["colors"];
 
 export type GuideViewProps = {
+  reviewId: string;
   state: GuideState;
   theme: PluginTheme;
   /** Opens the guide agent's chat; absent on hosts without client navigation. */
@@ -15,7 +17,7 @@ export type GuideViewProps = {
 };
 
 /** The guide under the header: its generation while it runs, its failure with a retry, or the guide itself. */
-export function GuideView({ state, theme, openAgent, retry }: GuideViewProps) {
+export function GuideView({ reviewId, state, theme, openAgent, retry }: GuideViewProps) {
   const colors = theme.colors;
   const agentLink =
     state.agentId !== null && openAgent ? (
@@ -56,7 +58,12 @@ export function GuideView({ state, theme, openAgent, retry }: GuideViewProps) {
           {agentLink ? <View style={{ alignItems: "flex-start" }}>{agentLink}</View> : null}
           <Heading colors={colors}>Concepts</Heading>
           {state.guide.nodes.map((node) => (
-            <NodeCard key={node.id} node={node} colors={colors} />
+            <NodeCard
+              key={node.id}
+              node={node}
+              colors={colors}
+              code={<NodeCode reviewId={reviewId} agentId={state.agentId} nodeId={node.id} theme={theme} />}
+            />
           ))}
         </>
       );
@@ -96,7 +103,8 @@ function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
   );
 }
 
-function NodeCard({ node, colors }: { node: GuideNode; colors: Colors }) {
+/** A node: what it is and how it works, then the code it covers (`code`). */
+function NodeCard({ node, colors, code }: { node: GuideNode; colors: Colors; code: React.ReactNode }) {
   return (
     <Card colors={colors}>
       <Text style={{ color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base), fontWeight: "600" }}>
@@ -107,6 +115,7 @@ function NodeCard({ node, colors }: { node: GuideNode; colors: Colors }) {
       </Body>
       <Body colors={colors}>{node.explanation}</Body>
       {node.decisions.length > 0 ? <Decisions decisions={node.decisions} colors={colors} /> : null}
+      {code}
     </Card>
   );
 }
