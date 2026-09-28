@@ -1,4 +1,4 @@
-import type { Guide } from "../shared/guide.ts";
+import type { Guide, LayeredGuide } from "../shared/guide.ts";
 import { GuideAgentError, type GuideAgentCreateInput, type GuideAgentPort, type GuideAgentStatus } from "./guide-agent/port.ts";
 
 type FakeAgent = GuideAgentCreateInput & {
@@ -37,6 +37,8 @@ export function sampleGuide(): Guide {
         summary: "Decides whether and when a failed upload is tried again.",
         explanation: "A pure function from the attempt number and the failure to a delay, or to giving up.",
         decisions: [{ choice: "Full jitter on the backoff.", rejected: "A fixed delay, which makes clients retry in lockstep." }],
+        files: ["src/retry.ts"],
+        dependencies: [],
       },
       {
         id: "uploader",
@@ -44,8 +46,24 @@ export function sampleGuide(): Guide {
         summary: "The upload loop asks the policy after each failure.",
         explanation: "The loop sleeps for the delay the policy returns and stops when it says to give up.",
         decisions: [],
+        files: ["src/upload.ts"],
+        dependencies: [{ nodeId: "retry-policy", reason: "The loop only does what the policy decides." }],
       },
     ],
+    supporting: [],
+  };
+}
+
+/** `sampleGuide` as the panel shows it: laid out in layers, with every file of `sampleChangeRequest` placed. */
+export function sampleLayeredGuide(): LayeredGuide {
+  const guide = sampleGuide();
+  return {
+    ...guide,
+    nodes: [
+      { ...guide.nodes[0]!, layer: 0, leaf: false },
+      { ...guide.nodes[1]!, layer: 1, leaf: true },
+    ],
+    unsorted: [],
   };
 }
 

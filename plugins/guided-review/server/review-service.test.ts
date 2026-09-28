@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fakeForge, sampleChangeRequest, type FakeForge } from "./fake-forge.ts";
-import { fakeGuideAgents, sampleGuide, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
+import { fakeGuideAgents, sampleGuide, sampleGuideReply, sampleLayeredGuide, type FakeGuideAgents } from "./fake-guide-agents.ts";
 import { fakeWorkspaces, type FakeWorkspaces } from "./fake-workspaces.ts";
 import { ForgeError } from "./forge/port.ts";
 import { ReviewService } from "./review-service.ts";
@@ -75,7 +75,7 @@ test("starting from a PR URL creates a PR workspace on the local clone and shows
     status: "ready",
     reviewId: "github/github.com/acme/uploader/7",
     header: HEADER,
-    guide: { status: "ready", agentId: "agent-1", guide: sampleGuide() },
+    guide: { status: "ready", agentId: "agent-1", guide: sampleLayeredGuide() },
   });
 });
 
@@ -182,7 +182,7 @@ test("starting the same PR again reuses its open workspace, and a new one once t
     status: "ready",
     reviewId: "github/github.com/acme/uploader/7",
     header: HEADER,
-    guide: { status: "ready", agentId: "agent-2", guide: sampleGuide() },
+    guide: { status: "ready", agentId: "agent-2", guide: sampleLayeredGuide() },
   });
 });
 
@@ -206,7 +206,7 @@ test("a review survives a plugin restart, and keeps what the forge said at its h
     status: "ready",
     reviewId: "github/github.com/acme/uploader/7",
     header: HEADER,
-    guide: { status: "ready", agentId: "agent-1", guide: sampleGuide() },
+    guide: { status: "ready", agentId: "agent-1", guide: sampleLayeredGuide() },
   });
   assert.deepEqual(await restarted.progress({ reviewId: "github/github.com/acme/uploader/7" }), {
     phase: "ready",

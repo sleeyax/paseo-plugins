@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fakeForge, sampleChangeRequest, type FakeForge } from "./fake-forge.ts";
-import { fakeGuideAgents, sampleGuide, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
+import { fakeGuideAgents, sampleGuide, sampleGuideReply, sampleLayeredGuide, type FakeGuideAgents } from "./fake-guide-agents.ts";
 import { fakeWorkspaces, type FakeWorkspaces } from "./fake-workspaces.ts";
 import { GuideAgentError } from "./guide-agent/port.ts";
 import { ReviewService } from "./review-service.ts";
@@ -75,7 +75,7 @@ test("a started review has a read-only guide agent in its workspace write the gu
   await service.start({ url: URL });
   await service.settled();
 
-  assert.deepEqual(await guideOf(service), { status: "ready", agentId: "agent-1", guide: sampleGuide() });
+  assert.deepEqual(await guideOf(service), { status: "ready", agentId: "agent-1", guide: sampleLayeredGuide() });
   assert.equal(agents.created.length, 1);
   const [agent] = agents.created;
   assert.deepEqual(agent!.workspace, { id: WORKSPACE_ID, directory: "/home/r/src/uploader-worktrees/pr-7" });
@@ -118,7 +118,7 @@ test("while the agent writes, the panel says so and links the agent, and follows
 
   release(sampleGuideReply());
   await service.settled();
-  assert.deepEqual(await guideOf(service), { status: "ready", agentId: "agent-1", guide: sampleGuide() });
+  assert.deepEqual(await guideOf(service), { status: "ready", agentId: "agent-1", guide: sampleLayeredGuide() });
 });
 
 test("output that does not fit the schema fails the guide with a reason, and a retry asks a new agent", async (t) => {
@@ -140,7 +140,7 @@ test("output that does not fit the schema fails the guide with a reason, and a r
   assert.deepEqual(await service.generateGuide({ reviewId: REVIEW_ID }), { status: "generating", agentId: null });
   await service.settled();
 
-  assert.deepEqual(await guideOf(service), { status: "ready", agentId: "agent-2", guide: sampleGuide() });
+  assert.deepEqual(await guideOf(service), { status: "ready", agentId: "agent-2", guide: sampleLayeredGuide() });
   assert.deepEqual(agents.archived, ["agent-1"]);
 });
 
@@ -148,6 +148,7 @@ test("a guide that points at nodes it does not have, or names two nodes alike, i
   const { service, agents } = await withHost(t);
   const guide = sampleGuide();
   guide.nodes[1]!.id = "retry-policy";
+  guide.nodes[1]!.dependencies = [];
   guide.overview.attention = [{ nodeId: "backoff", reason: "It matters." }];
   agents.answer = () => sampleGuideReply(guide);
 
@@ -214,10 +215,10 @@ test("reopening the panel, after a restart too, reads the stored guide rather th
   await service.settled();
   const restarted = restart();
 
-  assert.deepEqual(await guideOf(restarted), { status: "ready", agentId: "agent-1", guide: sampleGuide() });
+  assert.deepEqual(await guideOf(restarted), { status: "ready", agentId: "agent-1", guide: sampleLayeredGuide() });
   await restarted.settled();
   assert.equal(agents.created.length, 1);
-  assert.deepEqual((await storedGuide(data))?.guide, sampleGuide());
+  assert.deepEqual((await storedGuide(data))?.guide, sampleLayeredGuide());
 });
 
 test("a generation a restart cut off is picked up from its agent, not started over", async (t) => {
@@ -234,7 +235,7 @@ test("a generation a restart cut off is picked up from its agent, not started ov
   assert.deepEqual(await guideOf(restarted), { status: "generating", agentId: "agent-1" });
   await restarted.settled();
 
-  assert.deepEqual(await guideOf(restarted), { status: "ready", agentId: "agent-1", guide: sampleGuide() });
+  assert.deepEqual(await guideOf(restarted), { status: "ready", agentId: "agent-1", guide: sampleLayeredGuide() });
   assert.equal(agents.created.length, 1);
 });
 
@@ -249,7 +250,7 @@ test("archiving the workspace archives its guide agent, and starting again gives
 
   await service.start({ url: URL });
   await service.settled();
-  assert.deepEqual(await guideOf(service, "wks_0000000000000002"), { status: "ready", agentId: "agent-2", guide: sampleGuide() });
+  assert.deepEqual(await guideOf(service, "wks_0000000000000002"), { status: "ready", agentId: "agent-2", guide: sampleLayeredGuide() });
   assert.equal(agents.created[1]!.workspace.id, "wks_0000000000000002");
 });
 
