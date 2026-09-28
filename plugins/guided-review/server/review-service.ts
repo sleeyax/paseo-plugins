@@ -1,14 +1,20 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
+import { GuideSchema, type GuideState } from "../shared/guide.ts";
 import type { ChangeRequest, ChangeRequestRef, Forge } from "./forge/port.ts";
-import { ReviewStore, reviewIdOf, type ReviewRecord } from "./review-store.ts";
+import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, type GuideAgentPort } from "./guide-agent/port.ts";
+import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
+import { parseGuide } from "./guide-output.ts";
+import { guidePrompt } from "./guide-prompt.ts";
+import { ReviewStore, reviewIdOf, type GuideRecord, type ReviewRecord } from "./review-store.ts";
 import type { ReviewWorkspace, WorkspacePort } from "./workspaces/port.ts";
 
 export type ReviewServiceOptions = {
   /** Every forge a URL may belong to; the first to claim it reads it. */
   forges: readonly Forge[];
   workspaces: WorkspacePort;
+  guideAgents: GuideAgentPort;
   /** Where reviews and the clones this plugin makes are kept. */
   dataDirectory: string;
   now?: () => Date;
@@ -19,6 +25,8 @@ export type ReviewServiceOptions = {
 const MAX_WORKSPACE_TITLE = 120;
 
 type Job = { progress: StartProgress; done: Promise<void> };
+/** A guide being generated; `agentId` is set once its agent exists. */
+type Generation = { agentId: string | null; done: Promise<void> };
 
 /**
  * The plugin's top level: every RPC the panel and the start surface call is a method here, and it
@@ -35,10 +43,14 @@ export class ReviewService {
   readonly #now: () => Date;
   readonly #log: (message: string) => void;
   readonly #jobs = new Map<string, Job>();
+  readonly #guideAgents: GuideAgentPort;
+  /** Guide generations running, by review and head SHA. */
+  readonly #generations = new Map<string, Generation>();
 
   constructor(options: ReviewServiceOptions) {
     this.#forges = options.forges;
     this.#workspaces = options.workspaces;
+    this.#guideAgents = options.guideAgents;
     this.#store = new ReviewStore(options.dataDirectory);
     this.#clones = path.join(options.dataDirectory, "clones");
     this.#now = options.now ?? (() => new Date());
@@ -82,12 +94,37 @@ export class ReviewService {
   async panel({ workspaceId }: { workspaceId: string }): Promise<PanelView> {
     const record = await this.#store.findByWorkspace(workspaceId);
     if (record === null) return { status: "none" };
-    return { status: "ready", reviewId: record.id, header: record.header };
+    return { status: "ready", reviewId: record.id, header: record.header, guide: await this.#guideState(record) };
   }
 
-  /** Resolves once no background job is running. */
+  /**
+   * Generates the review's guide again with a new guide agent, archiving the one before it, unless a
+   * generation is running already, which is then the one followed.
+   */
+  async generateGuide({ reviewId }: { reviewId: string }): Promise<GuideState> {
+    const record = await this.#store.get(reviewId);
+    if (record === null) throw new Error("This review is not known here any more. Start it again.");
+    const running = this.#generations.get(generationKey(record));
+    if (running) return { status: "generating", agentId: running.agentId };
+
+    const previous = await this.#store.getGuide(record.id, record.header.headSha);
+    if (previous?.agentId) await this.#guideAgents.archive(previous.agentId);
+    return this.#generate(record, null);
+  }
+
+  /** For the `workspace.archived` hook: a review's workspace ending ends its guide agents. */
+  async workspaceArchived({ workspaceId }: { workspaceId: string }): Promise<void> {
+    const record = await this.#store.findByWorkspace(workspaceId);
+    if (record !== null) await this.#endGuides(record.id, workspaceId);
+  }
+
+  /** Resolves once no background job is running, including the ones a finishing job started. */
   async settled(): Promise<void> {
-    await Promise.all([...this.#jobs.values()].map((job) => job.done));
+    for (;;) {
+      const running = [...this.#jobs.values(), ...this.#generations.values()].map((job) => job.done);
+      await Promise.all(running);
+      if (this.#generations.size === 0) return;
+    }
   }
 
   async #match(url: string): Promise<{ forge: Forge; ref: ChangeRequestRef } | null> {
@@ -106,10 +143,96 @@ export class ReviewService {
     job.progress = { ...job.progress, header };
 
     const workspace = (await this.#reusableWorkspace(id)) ?? (await this.#createWorkspace(forge, changeRequest, job));
+    // The `workspace.archived` hook is not replayed after a restart, so an old workspace's agents are ended here too.
+    const previous = await this.#store.get(id);
+    if (previous !== null && previous.workspace.id !== workspace.id) await this.#endGuides(previous.id, previous.workspace.id);
 
     const record: ReviewRecord = { id, ref, workspace, header, viewer, updatedAt: this.#now().toISOString() };
     await this.#store.save(record, changeRequest);
     job.progress = { ...job.progress, phase: "ready", workspaceId: workspace.id };
+    await this.#guideState(record);
+  }
+
+  /**
+   * The guide of the review's current head, starting its generation when there is none for this
+   * workspace, and picking a generation a plugin restart cut off back up from its agent.
+   */
+  async #guideState(record: ReviewRecord): Promise<GuideState> {
+    const running = this.#generations.get(generationKey(record));
+    if (running) return { status: "generating", agentId: running.agentId };
+
+    const stored = await this.#store.getGuide(record.id, record.header.headSha);
+    if (stored === null || stored.workspaceId !== record.workspace.id) return this.#generate(record, null);
+    switch (stored.status) {
+      case "ready":
+        return { status: "ready", agentId: stored.agentId!, guide: stored.guide! };
+      case "failed":
+        return { status: "failed", agentId: stored.agentId, message: stored.message ?? "Generating the guide failed." };
+      case "generating":
+        // Nothing here is generating it, so a plugin restart cut it off: an agent that exists is
+        // waited for again, and one that never got created is created now.
+        return this.#generate(record, stored.agentId);
+    }
+  }
+
+  /**
+   * Generates the guide as a background job: creates the guide agent on the generation prompt, or
+   * takes `agentId`'s, and keeps its validated answer. Returns the generation's state, which is the
+   * running one's when this head has one: two panels asking at once must not make two agents.
+   */
+  #generate(record: ReviewRecord, agentId: string | null): GuideState {
+    const key = generationKey(record);
+    const running = this.#generations.get(key);
+    if (running) return { status: "generating", agentId: running.agentId };
+
+    const { headSha } = record.header;
+    const generation: Generation = { agentId, done: Promise.resolve() };
+    const save = (update: Pick<GuideRecord, "status" | "guide" | "message">) =>
+      this.#store.saveGuide(record.id, {
+        headSha,
+        workspaceId: record.workspace.id,
+        agentId: generation.agentId,
+        ...update,
+        updatedAt: this.#now().toISOString(),
+      });
+
+    const run = async () => {
+      if (generation.agentId === null) {
+        await save({ status: "generating", guide: null, message: null });
+        const changeRequest = await this.#store.snapshot(record.id, headSha);
+        if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
+        const schema = jsonSchemaOf(GuideSchema);
+        const agent = await this.#guideAgents.create({
+          workspace: record.workspace,
+          title: `Guide: ${record.header.title}`,
+          labels: { [GUIDE_AGENT_LABEL]: record.id, [GUIDE_HEAD_LABEL]: headSha },
+          prompt: withOutputSchema(guidePrompt(changeRequest), schema),
+          outputSchema: schema,
+        });
+        generation.agentId = agent.id;
+        await save({ status: "generating", guide: null, message: null });
+      }
+      const parsed = parseGuide(await this.#guideAgents.reply(generation.agentId));
+      if (parsed.ok) await save({ status: "ready", guide: parsed.guide, message: null });
+      else await save({ status: "failed", guide: null, message: parsed.message });
+    };
+
+    this.#generations.set(key, generation);
+    generation.done = run()
+      .catch(async (error: unknown) => {
+        const message = errorMessage(error);
+        this.#log(`Generating the guide for ${record.header.url} failed: ${message}`);
+        await save({ status: "failed", guide: null, message }).catch(() => {});
+      })
+      .finally(() => this.#generations.delete(key));
+    return { status: "generating", agentId };
+  }
+
+  /** Archives the guide agents that lived in `workspaceId`; the workspace ending ends its guides. */
+  async #endGuides(reviewId: string, workspaceId: string): Promise<void> {
+    for (const guide of await this.#store.guides(reviewId)) {
+      if (guide.workspaceId === workspaceId && guide.agentId !== null) await this.#guideAgents.archive(guide.agentId);
+    }
   }
 
   /** The workspace this review already has, while it is open: a second one would be a second worktree. */
@@ -154,6 +277,10 @@ export class ReviewService {
 
 function progress(phase: StartPhase): StartProgress {
   return { phase, header: null, workspaceId: null, message: null };
+}
+
+function generationKey(record: ReviewRecord): string {
+  return `${record.id}@${record.header.headSha}`;
 }
 
 function isFinished(phase: StartPhase): boolean {

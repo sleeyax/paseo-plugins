@@ -29,7 +29,7 @@ export function withOutputSchema(prompt: string, schema: JsonSchema): string {
 /** Validates a reply against `schema`, with the problems as `path: message` lines when it does not fit. */
 export function parseReply<T>(reply: string, schema: z.ZodType<T>): Parsed<T> {
   const value = extractJson(reply);
-  if (value === undefined) return { ok: false, errors: ["The reply holds no JSON."] };
+  if (value === undefined) return { ok: false, errors: ["the reply holds no JSON"] };
   const result = schema.safeParse(value);
   if (result.success) return { ok: true, value: result.data };
   return {

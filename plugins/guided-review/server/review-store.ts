@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ReviewHeader } from "../shared/contracts.ts";
+import type { Guide } from "../shared/guide.ts";
 import type { ChangeRequest, ChangeRequestRef, ForgeUser } from "./forge/port.ts";
 import type { ReviewWorkspace } from "./workspaces/port.ts";
 
@@ -15,7 +16,25 @@ export type ReviewRecord = {
   updatedAt: string;
 };
 
+/**
+ * A review's guide at one head SHA, and where generating it has got to. Kept from the moment the
+ * guide agent is asked, so a plugin restart mid-generation picks the same agent's answer up again.
+ */
+export type GuideRecord = {
+  headSha: string;
+  /** The workspace the guide agent lives in; a new workspace for the review means a new guide. */
+  workspaceId: string;
+  /** Null until the agent exists. */
+  agentId: string | null;
+  status: "generating" | "ready" | "failed";
+  guide: Guide | null;
+  /** Why generation failed, as a sentence. */
+  message: string | null;
+  updatedAt: string;
+};
+
 const RECORD_FILE = "review.json";
+const GUIDES = "guides";
 
 /**
  * A review's ID is its path under `reviews/`: forge, host, project and number, lower-cased because
@@ -67,6 +86,33 @@ export class ReviewStore {
     (await this.#load()).set(record.id, record);
   }
 
+  /** What the forge said about the review at `headSha`, as `save` kept it. */
+  async snapshot(id: string, headSha: string): Promise<ChangeRequest | null> {
+    return readJson<ChangeRequest>(path.join(this.directoryOf(id), "snapshots", `${headSha}.json`));
+  }
+
+  async getGuide(id: string, headSha: string): Promise<GuideRecord | null> {
+    return readJson<GuideRecord>(path.join(this.directoryOf(id), GUIDES, `${headSha}.json`));
+  }
+
+  async saveGuide(id: string, record: GuideRecord): Promise<void> {
+    await writeJson(path.join(this.directoryOf(id), GUIDES, `${record.headSha}.json`), record);
+  }
+
+  /** Every guide the review has had, one per head SHA. */
+  async guides(id: string): Promise<GuideRecord[]> {
+    let entries: string[];
+    try {
+      entries = await readdir(path.join(this.directoryOf(id), GUIDES));
+    } catch {
+      return [];
+    }
+    const records = await Promise.all(
+      entries.filter((entry) => entry.endsWith(".json")).map((entry) => readJson<GuideRecord>(path.join(this.directoryOf(id), GUIDES, entry))),
+    );
+    return records.filter((record) => record !== null);
+  }
+
   #load(): Promise<Map<string, ReviewRecord>> {
     this.#index ??= this.#scan();
     return this.#index;
@@ -93,6 +139,15 @@ export class ReviewStore {
       }
     }
     return index;
+  }
+}
+
+/** A file this process wrote, or null when it is missing or unreadable, which reads as never written. */
+async function readJson<T>(file: string): Promise<T | null> {
+  try {
+    return JSON.parse(await readFile(file, "utf8")) as T;
+  } catch {
+    return null;
   }
 }
 

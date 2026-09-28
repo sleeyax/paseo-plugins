@@ -1,3 +1,4 @@
+import type { Guide } from "../shared/guide.ts";
 import { GuideAgentError, type GuideAgentCreateInput, type GuideAgentPort, type GuideAgentStatus } from "./guide-agent/port.ts";
 
 type FakeAgent = GuideAgentCreateInput & {
@@ -19,6 +20,39 @@ export type FakeGuideAgents = GuideAgentPort & {
   /** When set, the next creation fails with it. */
   failCreate: Error | null;
 };
+
+/** A guide for `sampleChangeRequest`, as a guide agent would write it. */
+export function sampleGuide(): Guide {
+  return {
+    overview: {
+      idea: "Uploads that fail on a flaky network are retried with exponential backoff instead of failing at once.",
+      needToKnows: ["An upload is retried only when the failure is transient: a timeout or a 5xx."],
+      decisions: [{ choice: "Retry inside the uploader.", rejected: "Retrying in every caller, which would repeat the policy." }],
+      attention: [{ nodeId: "retry-policy", reason: "Every retry decision is made here." }],
+    },
+    nodes: [
+      {
+        id: "retry-policy",
+        title: "Retry policy",
+        summary: "Decides whether and when a failed upload is tried again.",
+        explanation: "A pure function from the attempt number and the failure to a delay, or to giving up.",
+        decisions: [{ choice: "Full jitter on the backoff.", rejected: "A fixed delay, which makes clients retry in lockstep." }],
+      },
+      {
+        id: "uploader",
+        title: "Uploader uses the policy",
+        summary: "The upload loop asks the policy after each failure.",
+        explanation: "The loop sleeps for the delay the policy returns and stops when it says to give up.",
+        decisions: [],
+      },
+    ],
+  };
+}
+
+/** How an agent tends to answer: a sentence, then the JSON in a fence. */
+export function sampleGuideReply(guide: unknown = sampleGuide()): string {
+  return `Here is the guide.\n\n\`\`\`json\n${JSON.stringify(guide, null, 2)}\n\`\`\``;
+}
 
 export function fakeGuideAgents(): FakeGuideAgents {
   const find = (agentId: string) => {
