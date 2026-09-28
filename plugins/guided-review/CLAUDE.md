@@ -74,6 +74,12 @@ The adapter addresses a project by its numeric ID, looked up once per path, beca
 GitLab's REST API gives no line counts, so additions and deletions are counted from the diffs; a diff GitLab withheld as too large counts as none.
 The change request keeps GitLab's `start_sha` as `startSha` beside the base and head SHAs, because a draft note's position names all three.
 
+Each draft is a draft note, its ID GitLab's number, which `draftNoteId` checks before it goes in a path. Writes go through `send`: the JSON body on stdin with `--header 'Content-Type: application/json'`, because `--input -` alone sends no content type and GitLab then reads a form and drops `position`, and bracketed `-f` fields are refused in JSON bodies. `positionOf` builds the position from the anchor alone and `locationOf` reads one back; a range's `line_range` ends carry `line_code`s from the anchor lines' counters, and its top-level lines are its last line's.
+GitLab can store a position other than the one sent, or none, without an error, so `createDraft` compares the answer with what it sent (a range by its ends' line codes) and deletes a draft that does not match.
+A `PUT` sets the position to whatever it is given, none included, so `updateDraft` reads the draft and sends its position back; an MR-level draft's position comes back all null, and that is not sent.
+`listDrafts` leaves out drafts with no file, the MR-level ones. A reply drafted on the web to a published thread has no position of its own, so when there is one the MR's discussions are read and it is listed where its thread's first note is.
+The draft answers under `fixtures/gitlab/` (`draft-notes.ndjson`, `discussions.ndjson`) are built by hand from the API docs on !3931's diff refs, and the adapter tests build each create's answer from the position it expects.
+
 `glab` runs without `PASEO_AGENT_ID` and `GITLAB_BOT_IDENTITY` (`unsetEnv` on the command runner).
 A `glab` wrapper can swap in a bot account's token when it sees either, and a daemon restarted from an agent's terminal inherits `PASEO_AGENT_ID`; the review is the reviewer's own, so it is read and written as them.
 
