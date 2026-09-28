@@ -1,0 +1,192 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test, { type TestContext } from "node:test";
+import type { Guide, GuideNode } from "../shared/guide.ts";
+import { fakeForge, sampleChangeRequest } from "./fake-forge.ts";
+import { fakeGuideAgents, sampleGuide, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
+import { fakeWorkspaces } from "./fake-workspaces.ts";
+import type { ChangedFile } from "./forge/port.ts";
+import { ReviewService } from "./review-service.ts";
+
+/**
+ * How the service lays the agent's guide out for the panel: layers from the dependencies, the edges
+ * it turns down, the files it sets aside before generation, and the files the agent left unplaced.
+ */
+
+const URL = "https://github.com/acme/uploader/pull/7";
+const WORKSPACE_ID = "wks_0000000000000001";
+
+async function withHost(t: TestContext, files?: ChangedFile[]): Promise<{ service: ReviewService; agents: FakeGuideAgents }> {
+  const data = await mkdtemp(path.join(os.tmpdir(), "guided-review-layout-"));
+  t.after(() => rm(data, { recursive: true, force: true }));
+  const forge = fakeForge();
+  forge.changeRequests.set(URL, sampleChangeRequest(URL, files ? { files } : {}));
+  const workspaces = fakeWorkspaces();
+  workspaces.repositories.set("github.com/acme/uploader", "/home/r/src/uploader");
+  const agents = fakeGuideAgents();
+  return { service: new ReviewService({ forges: [forge], workspaces, guideAgents: agents, dataDirectory: data }), agents };
+}
+
+async function generated(service: ReviewService, agents: FakeGuideAgents, guide: Guide) {
+  agents.answer = () => sampleGuideReply(guide);
+  await service.start({ url: URL });
+  await service.settled();
+  const panel = await service.panel({ workspaceId: WORKSPACE_ID });
+  assert.equal(panel.status, "ready");
+  return panel.status === "ready" ? panel.guide : null;
+}
+
+function file(filePath: string): ChangedFile {
+  return { path: filePath, previousPath: null, status: "modified", additions: 1, deletions: 1, patch: "@@ -1,1 +1,1 @@\n-a\n+b" };
+}
+
+function node(id: string, files: string[], dependsOn: string[] = []): GuideNode {
+  return {
+    id,
+    title: `The ${id}`,
+    summary: `What ${id} does.`,
+    explanation: `How ${id} works.`,
+    decisions: [],
+    files,
+    dependencies: dependsOn.map((nodeId) => ({ nodeId, reason: `${id} builds on ${nodeId}.` })),
+  };
+}
+
+function guideOf(nodes: GuideNode[], supporting: Guide["supporting"] = []): Guide {
+  return { ...sampleGuide(), overview: { ...sampleGuide().overview, attention: [{ nodeId: nodes[0]!.id, reason: "It matters." }] }, nodes, supporting };
+}
+
+test("nodes are laid out in layers from their dependencies, capped at three, with leaves marked", async (t) => {
+  const { service, agents } = await withHost(t, ["a", "b", "c", "d", "e", "f"].map((name) => file(`src/${name}.ts`)));
+
+  const guide = await generated(
+    service,
+    agents,
+    guideOf([
+      node("store", ["src/a.ts"]),
+      node("config", ["src/e.ts"]),
+      node("cache", ["src/b.ts"], ["store"]),
+      node("api", ["src/c.ts"], ["cache", "config"]),
+      node("handler", ["src/d.ts"], ["api"]),
+      node("cli", ["src/f.ts"], ["store"]),
+    ]),
+  );
+
+  assert.equal(guide?.status, "ready");
+  if (guide?.status !== "ready") return;
+  assert.deepEqual(
+    guide.guide.nodes.map(({ id, layer, leaf }) => ({ id, layer, leaf })),
+    [
+      { id: "store", layer: 0, leaf: false },
+      { id: "config", layer: 0, leaf: false },
+      { id: "cache", layer: 1, leaf: false },
+      { id: "api", layer: 2, leaf: false },
+      // Deeper than three layers stays in the last one, after the node it builds on.
+      { id: "handler", layer: 2, leaf: true },
+      { id: "cli", layer: 1, leaf: true },
+    ],
+  );
+  assert.deepEqual(guide.guide.nodes[3]!.dependencies, [
+    { nodeId: "cache", reason: "api builds on cache." },
+    { nodeId: "config", reason: "api builds on config." },
+  ]);
+  assert.deepEqual(guide.guide.unsorted, []);
+});
+
+test("a dependency on an unknown node, a later node, or the node itself fails the guide, so no cycle gets through", async (t) => {
+  const { service, agents } = await withHost(t);
+
+  const guide = await generated(
+    service,
+    agents,
+    guideOf([node("policy", ["src/retry.ts"], ["uploader", "policy"]), node("uploader", ["src/upload.ts"], ["policy", "backoff"])]),
+  );
+
+  assert.deepEqual(guide, {
+    status: "failed",
+    agentId: "agent-1",
+    message:
+      "The guide agent's answer did not match what was asked for: " +
+      'nodes.0.dependencies.0.nodeId: "uploader" comes after "policy", and a node builds only on nodes listed before it; ' +
+      'nodes.0.dependencies.1.nodeId: "policy" cannot build on itself; ' +
+      'nodes.1.dependencies.1.nodeId: no node is "backoff".',
+  });
+});
+
+test("lockfiles and generated files are never shown to the agent and go straight into Supporting", async (t) => {
+  const { service, agents } = await withHost(t, [
+    file("src/upload.ts"),
+    file("pnpm-lock.yaml"),
+    file("src/retry.ts"),
+    file("web/dist/app.min.js"),
+    file("api/__generated__/schema.ts"),
+    file("rust/Cargo.lock"),
+    file("proto/upload.pb.go"),
+  ]);
+
+  // The agent names a lockfile anyway: it stays where the paths put it, once.
+  const guide = await generated(service, agents, {
+    ...sampleGuide(),
+    supporting: [{ path: "pnpm-lock.yaml", category: "wiring" }],
+  });
+
+  const prompt = agents.created[0]!.prompt;
+  for (const hidden of ["pnpm-lock.yaml", "app.min.js", "__generated__", "Cargo.lock", "upload.pb.go"]) {
+    assert.ok(!prompt.includes(hidden), `the prompt mentions ${hidden}`);
+  }
+  assert.match(prompt, /- src\/retry\.ts \(modified, \+1 −1\)\n\(5 lockfile or generated files are left out: they are placed already\.\)/);
+
+  assert.equal(guide?.status, "ready");
+  if (guide?.status !== "ready") return;
+  assert.deepEqual(guide.guide.supporting, [
+    { path: "pnpm-lock.yaml", category: "lockfile" },
+    { path: "web/dist/app.min.js", category: "generated" },
+    { path: "api/__generated__/schema.ts", category: "generated" },
+    { path: "rust/Cargo.lock", category: "lockfile" },
+    { path: "proto/upload.pb.go", category: "generated" },
+  ]);
+  assert.deepEqual(guide.guide.unsorted, []);
+});
+
+test("files the agent placed nowhere go to Unsorted without a retry, and each file is placed once", async (t) => {
+  const { service, agents } = await withHost(t, [
+    file("src/upload.ts"),
+    file("src/retry.ts"),
+    file("src/retry.test.ts"),
+    file("README.md"),
+    file("src/index.ts"),
+    file("src/clock.ts"),
+  ]);
+
+  const guide = await generated(
+    service,
+    agents,
+    guideOf(
+      [
+        node("retry-policy", ["./src/retry.ts", "src/clock.ts", "src/missing.ts"]),
+        node("uploader", ["src/upload.ts", "src/clock.ts"], ["retry-policy"]),
+      ],
+      [
+        { path: "src/retry.test.ts", category: "test" },
+        { path: "src/upload.ts", category: "wiring" },
+        { path: "src/retry.test.ts", category: "test" },
+      ],
+    ),
+  );
+
+  assert.equal(guide?.status, "ready");
+  if (guide?.status !== "ready") return;
+  assert.deepEqual(
+    guide.guide.nodes.map(({ id, files }) => ({ id, files })),
+    [
+      { id: "retry-policy", files: ["src/retry.ts", "src/clock.ts"] },
+      { id: "uploader", files: ["src/upload.ts"] },
+    ],
+  );
+  assert.deepEqual(guide.guide.supporting, [{ path: "src/retry.test.ts", category: "test" }]);
+  assert.deepEqual(guide.guide.unsorted, ["README.md", "src/index.ts"]);
+  assert.equal(agents.created.length, 1);
+  assert.deepEqual(agents.created[0]!.sent, []);
+});

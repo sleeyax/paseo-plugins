@@ -7,7 +7,8 @@ import { askPrompt, type AskSubjectContext } from "./ask-prompt.ts";
 import { ForgeError, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
 import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, GuideAgentError, type GuideAgentPort } from "./guide-agent/port.ts";
 import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
-import { parseGuide } from "./guide-output.ts";
+import { setAside } from "./file-classes.ts";
+import { layOutGuide, parseGuide } from "./guide-output.ts";
 import { guidePrompt } from "./guide-prompt.ts";
 import { ReviewStore, reviewIdOf, type GuideRecord, type ReviewRecord } from "./review-store.ts";
 import type { ReviewWorkspace, WorkspacePort } from "./workspaces/port.ts";
@@ -259,24 +260,27 @@ export class ReviewService {
       });
 
     const run = async () => {
+      if (generation.agentId === null) await save({ status: "generating", guide: null, message: null });
+      const changeRequest = await this.#store.snapshot(record.id, headSha);
+      if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
+      // Lockfiles and generated files never reach the agent; they go straight into Supporting.
+      const files = setAside(changeRequest.files);
       if (generation.agentId === null) {
-        await save({ status: "generating", guide: null, message: null });
-        const changeRequest = await this.#store.snapshot(record.id, headSha);
-        if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
         const schema = jsonSchemaOf(GuideSchema);
         const agent = await this.#guideAgents.create({
           workspace: record.workspace,
           title: `Guide: ${record.header.title}`,
           labels: { [GUIDE_AGENT_LABEL]: record.id, [GUIDE_HEAD_LABEL]: headSha },
-          prompt: withOutputSchema(guidePrompt(changeRequest), schema),
+          prompt: withOutputSchema(guidePrompt({ ...changeRequest, files: files.sent }, files.setAside.length), schema),
           outputSchema: schema,
         });
         generation.agentId = agent.id;
         await save({ status: "generating", guide: null, message: null });
       }
       const parsed = parseGuide(await this.#guideAgents.reply(generation.agentId));
-      if (parsed.ok) await save({ status: "ready", guide: parsed.guide, message: null });
-      else await save({ status: "failed", guide: null, message: parsed.message });
+      if (!parsed.ok) return save({ status: "failed", guide: null, message: parsed.message });
+      const changed = changeRequest.files.map((file) => file.path);
+      await save({ status: "ready", guide: layOutGuide(parsed.guide, changed, files.setAside), message: null });
     };
 
     this.#generations.set(key, generation);

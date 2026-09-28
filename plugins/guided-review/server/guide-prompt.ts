@@ -6,8 +6,11 @@ export const MAX_PATCH_CHARS = 40_000;
 /**
  * The prompt the guide agent writes the guide from: the rules, then everything the forge said about
  * the change. The output schema is appended by the caller.
+ *
+ * `changeRequest.files` is what the agent is to place; `setAside` counts the lockfiles and generated
+ * files the caller kept from it, which are only mentioned so the size line does not mislead.
  */
-export function guidePrompt(changeRequest: ChangeRequest): string {
+export function guidePrompt(changeRequest: ChangeRequest, setAside = 0): string {
   const { ref } = changeRequest;
   const sections = [
     `You are the guide agent for a code review. Write a guide to ${ref.url} that explains the change to a reviewer in the order it should be understood.`,
@@ -42,7 +45,12 @@ export function guidePrompt(changeRequest: ChangeRequest): string {
           })
           .join("\n"),
     "## Changed files",
-    changeRequest.files.map(describeFile).join("\n"),
+    [
+      ...changeRequest.files.map(describeFile),
+      ...(setAside > 0
+        ? [`(${setAside} lockfile or generated ${setAside === 1 ? "file is" : "files are"} left out: they are placed already.)`]
+        : []),
+    ].join("\n"),
     "## Diff",
     ...changeRequest.files.map(fileDiff),
   ];
@@ -56,7 +64,10 @@ const RULES = `Rules:
 - Describe why the change exists and how it works, using the description, the commits and the linked issues, not just what the lines say.
 - The overview's idea is two or three sentences. Each need-to-know is one new invariant, contract or concept. Each decision names what the author chose and the alternative they plausibly rejected.
 - Attention names the one or two foundational nodes that matter most, by their id.
-- A node's summary is one line; its explanation is a short paragraph or two.`;
+- A node's summary is one line; its explanation is a short paragraph or two.
+- A node's dependencies name the earlier nodes it builds on, each with the reason it has to be understood first. A node may depend only on nodes listed before it. Foundations depend on nothing; keep the tree to about three layers.
+- Tests, docs and pure wiring (exports, registration, configuration that only connects the rest) go in supporting, not in a node.
+- Place every file under "Changed files" exactly once: in the files of one node, or in supporting. Use the paths exactly as listed.`;
 
 function describeFile(file: ChangedFile): string {
   const renamed = file.previousPath ? ` from ${file.previousPath}` : "";
