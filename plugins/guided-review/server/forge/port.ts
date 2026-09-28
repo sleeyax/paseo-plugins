@@ -24,6 +24,11 @@ export interface Forge {
    */
   findByBranch(repository: RepositoryRef, branch: string): Promise<BranchChangeRequest[] | null>;
   fetchChangeRequest(ref: ChangeRequestRef): Promise<ChangeRequest>;
+  /**
+   * Where the change request's head is now, and its state: one cheap read, for noticing a push
+   * since the guide was written without reading the whole change request again.
+   */
+  fetchHead(ref: ChangeRequestRef): Promise<ChangeRequestHead>;
   /** Who the CLI is logged in as on the change request's host. */
   currentUser(ref: ChangeRequestRef): Promise<ForgeUser>;
   /** Clones the change request's repository into `directory`, which must not exist yet. */
@@ -106,6 +111,15 @@ export function changeRequestHeadRef(ref: ChangeRequestRef): string {
 }
 
 export type ChangeRequestState = "open" | "closed" | "merged";
+
+/**
+ * A change request's head as the forge has it now. `headSha` is the head `fetchChangeRequest` would
+ * read the diff at, so a guide at another head is one a new read would write differently.
+ */
+export type ChangeRequestHead = {
+  headSha: string;
+  state: ChangeRequestState;
+};
 
 export type ForgeUser = {
   login: string;

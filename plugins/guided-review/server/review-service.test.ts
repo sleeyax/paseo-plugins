@@ -190,10 +190,28 @@ test("the header is re-read on every start, so it follows the PR", async (t) => 
   const { service, forge } = await withHost(t);
 
   await startAndSettle(service, URL);
-  forge.changeRequests.set(URL, sampleChangeRequest(URL, { state: "merged", title: "Retry uploads", headSha: "d".repeat(40) }));
+  forge.changeRequests.set(URL, sampleChangeRequest(URL, { state: "merged", title: "Retry uploads", additions: 50 }));
   const progress = await startAndSettle(service, URL);
 
-  assert.deepEqual(progress.header, { ...HEADER, state: "merged", title: "Retry uploads", headSha: "d".repeat(40) });
+  assert.deepEqual(progress.header, { ...HEADER, state: "merged", title: "Retry uploads", additions: 50 });
+});
+
+test("a start after a push keeps the guide at its head, and only the title and state follow the PR", async (t) => {
+  const { service, forge, workspaces, guideAgents } = await withHost(t);
+
+  await startAndSettle(service, URL);
+  forge.changeRequests.set(URL, sampleChangeRequest(URL, { state: "merged", title: "Retry uploads", headSha: "d".repeat(40), additions: 50 }));
+  const progress = await startAndSettle(service, URL);
+
+  assert.deepEqual(progress.header, { ...HEADER, state: "merged", title: "Retry uploads" });
+  assert.equal(guideAgents.created.length, 1, "no guide is generated for the new head");
+  assert.deepEqual(workspaces.fastForwards, [], "the PR workspace is not moved");
+  assert.deepEqual(await service.panel({ workspaceId: progress.workspaceId! }), {
+    status: "ready",
+    reviewId: "github/github.com/acme/uploader/7",
+    header: { ...HEADER, state: "merged", title: "Retry uploads" },
+    guide: { status: "ready", agentId: "agent-1", guide: sampleLayeredGuide() },
+  });
 });
 
 test("a review survives a plugin restart, and keeps what the forge said at its head SHA", async (t) => {
