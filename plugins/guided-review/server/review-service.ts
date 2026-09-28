@@ -4,6 +4,8 @@ import type { AskResult, BranchStart, GuideSubject, NodeDiff, PanelView, ReviewH
 import { coveredPaths, GuideSchema, type CoveredCode, type GuideState, type LayeredGuide } from "../shared/guide.ts";
 import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
 import { numberLabel } from "../shared/reference.ts";
+import type { Draft, DraftList, DraftLocation } from "../shared/drafts.ts";
+import { anchorAt } from "./anchors.ts";
 import { askPrompt, codeReferencesOf, type AskSubjectContext } from "./ask-prompt.ts";
 import { resolveCode } from "./diff.ts";
 import { ForgeError, type BranchChangeRequest, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
@@ -312,6 +314,46 @@ export class ReviewService {
     };
     await this.#store.saveProgress(record.id, progress);
     return summariseProgress(guide, headSha, progress);
+  }
+
+  /** The reviewer's drafts, read from the forge every time: they live there, and may have been started on the web. */
+  async listDrafts({ reviewId }: { reviewId: string }): Promise<DraftList> {
+    const { record, forge } = await this.#reviewForge(reviewId);
+    return { drafts: await forge.listDrafts(record.ref) };
+  }
+
+  /**
+   * Saves a comment on the forge as a draft at once. The location names lines of the diff the panel
+   * drew, at the review's head, so they are looked up in what the forge said at that head.
+   */
+  async createDraft({ reviewId, location, body }: { reviewId: string; location: DraftLocation; body: string }): Promise<Draft> {
+    const { record, forge } = await this.#reviewForge(reviewId);
+    const text = draftText(body);
+    const changeRequest = await this.#store.snapshot(record.id, record.header.headSha);
+    if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
+    const anchor = anchorAt(changeRequest.files, location);
+    const { ref, baseSha, startSha, headSha } = changeRequest;
+    return forge.createDraft({ ref, baseSha, startSha, headSha }, { anchor, body: text });
+  }
+
+  async updateDraft({ reviewId, draftId, body }: { reviewId: string; draftId: string; body: string }): Promise<null> {
+    const { record, forge } = await this.#reviewForge(reviewId);
+    await forge.updateDraft(record.ref, draftId, draftText(body));
+    return null;
+  }
+
+  async deleteDraft({ reviewId, draftId }: { reviewId: string; draftId: string }): Promise<null> {
+    const { record, forge } = await this.#reviewForge(reviewId);
+    await forge.deleteDraft(record.ref, draftId);
+    return null;
+  }
+
+  async #reviewForge(reviewId: string): Promise<{ record: ReviewRecord; forge: Forge }> {
+    const record = await this.#store.get(reviewId);
+    if (record === null) throw new Error("This review is not known here any more. Start it again.");
+    const forge = this.#forges.find((candidate) => candidate.kind === record.ref.forge);
+    if (forge === undefined) throw new Error(`No forge here reads ${record.ref.url}.`);
+    return { record, forge };
   }
 
   /** For the `workspace.archived` hook: a review's workspace ending ends its guide agents. */
@@ -632,6 +674,13 @@ function leftAlone(branch: string, changeRequest: ChangeRequest, outcome: FastFo
 
 function progress(phase: StartPhase): StartProgress {
   return { phase, header: null, workspaceId: null, message: null };
+}
+
+/** A draft's text as it is saved; a blank one is turned down, as both forges would. */
+function draftText(body: string): string {
+  const text = body.trim();
+  if (text === "") throw new Error("Write the comment before saving it.");
+  return text;
 }
 
 function notSent(agentId: string | null, message: string): AskResult {

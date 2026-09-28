@@ -211,8 +211,24 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       // glab picks the protocol and credentials the reviewer set it up with, which `git clone` would not.
       await glab.text(["repo", "clone", `https://${ref.host}/${ref.project}`, directory], { timeoutMs: CLONE_TIMEOUT_MS });
     },
+
+    // Draft notes come with their own ticket; until then the panel says so where the drafts would be.
+    async listDrafts() {
+      throw new ForgeError(DRAFTS_NOT_YET);
+    },
+    async createDraft() {
+      throw new ForgeError(DRAFTS_NOT_YET);
+    },
+    async updateDraft() {
+      throw new ForgeError(DRAFTS_NOT_YET);
+    },
+    async deleteDraft() {
+      throw new ForgeError(DRAFTS_NOT_YET);
+    },
   };
 }
+
+const DRAFTS_NOT_YET = "Drafting comments on a GitLab merge request is not supported yet.";
 
 async function checkLogin(glab: Cli, host: string): Promise<void> {
   if (await glab.succeeds(["auth", "status", "--hostname", host])) return;

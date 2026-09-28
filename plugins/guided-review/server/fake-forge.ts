@@ -2,11 +2,14 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { parsePullRequestUrl } from "./forge/github.ts";
 import { parseMergeRequestUrl } from "./forge/gitlab.ts";
+import { lineRefOf, type Draft, type DraftLocation } from "../shared/drafts.ts";
 import {
   ForgeError,
   type BranchChangeRequest,
   type ChangeRequest,
   type ChangeRequestRef,
+  type DraftAnchor,
+  type DraftTarget,
   type Forge,
   type ForgeKind,
   type ForgeUser,
@@ -28,7 +31,23 @@ export type FakeForge = Forge & {
   clones: { project: string; directory: string }[];
   /** When set, the next fetch fails with it. */
   failFetch: Error | null;
+  /** The reviewer's drafts by change request URL, as the forge lists them; a test adds ones "started on the web". */
+  drafts: Map<string, Draft[]>;
+  /** Every draft created, with what it was sent. */
+  created: { target: DraftTarget; anchor: DraftAnchor; body: string }[];
 };
+
+/** Where the forge says a draft on `anchor` is: a line by the side both forges put it on. */
+export function locationOfAnchor(anchor: DraftAnchor): DraftLocation {
+  switch (anchor.kind) {
+    case "line":
+      return { kind: "line", path: anchor.path, line: lineRefOf(anchor.line) };
+    case "range":
+      return { kind: "range", path: anchor.path, start: lineRefOf(anchor.start), end: lineRefOf(anchor.end) };
+    case "file":
+      return { kind: "file", path: anchor.path };
+  }
+}
 
 export function fakeForge(kind: ForgeKind = "github"): FakeForge {
   const forge: FakeForge = {
@@ -40,6 +59,8 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     viewer: { login: "reviewer", name: "Rita Reviewer" },
     clones: [],
     failFetch: null,
+    drafts: new Map(),
+    created: [],
     async matchUrl(url) {
       return PARSERS[kind](url);
     },
@@ -69,6 +90,28 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     async cloneRepository(ref, directory) {
       forge.clones.push({ project: ref.project, directory });
       await mkdir(path.join(directory, ".git"), { recursive: true });
+    },
+    async listDrafts(ref) {
+      return structuredClone(forge.drafts.get(ref.url) ?? []);
+    },
+    async createDraft(target, { anchor, body }) {
+      forge.created.push(structuredClone({ target, anchor, body }));
+      const draft: Draft = { id: `draft-${forge.created.length}`, body, location: locationOfAnchor(anchor) };
+      forge.drafts.set(target.ref.url, [...(forge.drafts.get(target.ref.url) ?? []), draft]);
+      return structuredClone(draft);
+    },
+    async updateDraft(ref, draftId, body) {
+      const draft = forge.drafts.get(ref.url)?.find((candidate) => candidate.id === draftId);
+      if (!draft) throw new ForgeError("gh failed: Could not resolve to a node with the global id.");
+      draft.body = body;
+    },
+    async deleteDraft(ref, draftId) {
+      const drafts = forge.drafts.get(ref.url) ?? [];
+      if (!drafts.some((draft) => draft.id === draftId)) throw new ForgeError("gh failed: Could not resolve to a node with the global id.");
+      forge.drafts.set(
+        ref.url,
+        drafts.filter((draft) => draft.id !== draftId),
+      );
     },
   };
   return forge;

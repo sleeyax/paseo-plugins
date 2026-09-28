@@ -1,13 +1,17 @@
 import { z } from "zod";
 import type { CommandRunner } from "../command-runner.ts";
 import { createCli } from "./cli.ts";
+import type { Draft, DraftLocation } from "../../shared/drafts.ts";
 import {
   ForgeError,
+  type AnchorLine,
   type BranchChangeRequest,
   type ChangedFileStatus,
   type ChangeRequest,
   type ChangeRequestRef,
   type ChangeRequestState,
+  type DraftAnchor,
+  type DraftTarget,
   type Forge,
   type ForgeUser,
 } from "./port.ts";
@@ -108,6 +112,125 @@ const BranchPullRequestsResponse = z.array(
   }),
 );
 
+/**
+ * A pending review is visible only to its author and GitHub allows one per user and PR, so the
+ * first pending review is the viewer's own, whether this plugin or github.com started it.
+ */
+export const PENDING_REVIEW_QUERY = `query GuidedReviewPendingReview($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      id
+      reviews(states: PENDING, first: 1) { nodes { id viewerDidAuthor } }
+    }
+  }
+}`;
+
+/** No `event`, so the review stays pending: nothing is published until it is submitted. */
+export const START_REVIEW_MUTATION = `mutation GuidedReviewStartReview($pullRequestId: ID!, $commitOID: GitObjectID!) {
+  addPullRequestReview(input: { pullRequestId: $pullRequestId, commitOID: $commitOID }) {
+    pullRequestReview { id }
+  }
+}`;
+
+/** What a draft's location is read from: a comment carries no side, only its thread does. */
+const THREAD_FIELDS = "path line originalLine startLine originalStartLine diffSide startDiffSide subjectType";
+
+export const ADD_THREAD_MUTATION = `mutation GuidedReviewAddThread($input: AddPullRequestReviewThreadInput!) {
+  addPullRequestReviewThread(input: $input) {
+    thread { ${THREAD_FIELDS} comments(first: 1) { nodes { id body } } }
+  }
+}`;
+
+export const UPDATE_COMMENT_MUTATION = `mutation GuidedReviewUpdateDraft($id: ID!, $body: String!) {
+  updatePullRequestReviewComment(input: { pullRequestReviewCommentId: $id, body: $body }) {
+    pullRequestReviewComment { id }
+  }
+}`;
+
+export const DELETE_COMMENT_MUTATION = `mutation GuidedReviewDeleteDraft($id: ID!) {
+  deletePullRequestReviewComment(input: { id: $id }) {
+    pullRequestReviewComment { id }
+  }
+}`;
+
+/** Threads are paged through; a thread's pending comments are the viewer's drafts in it, replies included. */
+const MAX_THREADS = 100;
+const MAX_THREAD_COMMENTS = 100;
+
+export const DRAFTS_QUERY = `query GuidedReviewDrafts($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviews(states: PENDING, first: 1) { nodes { id viewerDidAuthor } }
+      reviewThreads(first: ${MAX_THREADS}, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { ${THREAD_FIELDS} comments(first: ${MAX_THREAD_COMMENTS}) { nodes { id body pullRequestReview { id } } } }
+      }
+    }
+  }
+}`;
+
+const PendingReviews = z.object({ nodes: z.array(z.object({ id: z.string(), viewerDidAuthor: z.boolean() })) });
+
+const PendingReviewResponse = z.object({
+  data: z.object({
+    repository: z.object({ pullRequest: z.object({ id: z.string(), reviews: PendingReviews }).nullable() }).nullable(),
+  }),
+});
+
+const DiffSide = z.enum(["LEFT", "RIGHT"]);
+
+const Thread = z.object({
+  path: z.string(),
+  line: z.number().nullable(),
+  originalLine: z.number().nullable(),
+  startLine: z.number().nullable(),
+  originalStartLine: z.number().nullable(),
+  diffSide: DiffSide,
+  startDiffSide: DiffSide.nullable(),
+  subjectType: z.enum(["LINE", "FILE"]).nullish(),
+});
+
+const StartReviewResponse = z.object({
+  data: z.object({ addPullRequestReview: z.object({ pullRequestReview: z.object({ id: z.string() }) }) }),
+});
+
+const AddThreadResponse = z.object({
+  data: z.object({
+    addPullRequestReviewThread: z.object({
+      thread: Thread.extend({ comments: z.object({ nodes: z.array(z.object({ id: z.string(), body: z.string() })) }) }).nullable(),
+    }),
+  }),
+});
+
+const DraftsResponse = z.object({
+  data: z.object({
+    repository: z
+      .object({
+        pullRequest: z
+          .object({
+            reviews: PendingReviews,
+            reviewThreads: z.object({
+              pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+              nodes: z.array(
+                Thread.extend({
+                  comments: z.object({
+                    nodes: z.array(
+                      z.object({ id: z.string(), body: z.string(), pullRequestReview: z.object({ id: z.string() }).nullable() }),
+                    ),
+                  }),
+                }),
+              ),
+            }),
+          })
+          .nullable(),
+      })
+      .nullable(),
+  }),
+});
+
+/** Any mutation whose answer is only read for its errors, which `gh` turns into a failed exit. */
+const MutationResponse = z.object({ data: z.unknown() });
+
 export type GitHubForgeOptions = {
   run: CommandRunner;
   /** The `gh` executable from the settings. */
@@ -116,6 +239,44 @@ export type GitHubForgeOptions = {
 
 export function createGitHubForge(options: GitHubForgeOptions): Forge {
   const gh = createCli({ run: options.run, binary: options.gh, name: "gh", env: GH_ENV });
+
+  /** A GraphQL request, its variables in a JSON body on stdin so none is retyped. */
+  const graphql = <Schema extends z.ZodType>(ref: ChangeRequestRef, schema: Schema, query: string, variables: Record<string, unknown>) =>
+    gh.json(schema, ["api", "graphql", "--hostname", ref.host, "--input", "-"], { input: JSON.stringify({ query, variables }) });
+
+  const pullRequestVariables = (ref: ChangeRequestRef) => {
+    const [owner, name] = ref.project.split("/") as [string, string];
+    return { owner, name, number: ref.number };
+  };
+
+  /**
+   * The viewer's pending review, started on `target`'s head when there is none. Two drafts saved at
+   * once would otherwise both find none and start two, and GitHub turns the second down.
+   */
+  const creating = new Map<string, Promise<unknown>>();
+  const oneAtATime = <T>(ref: ChangeRequestRef, run: () => Promise<T>): Promise<T> => {
+    const next = (creating.get(ref.url) ?? Promise.resolve()).catch(() => {}).then(run);
+    creating.set(ref.url, next);
+    const forget = () => {
+      if (creating.get(ref.url) === next) creating.delete(ref.url);
+    };
+    next.then(forget, forget);
+    return next;
+  };
+
+  const pendingReview = async (target: DraftTarget): Promise<string> => {
+    const { ref } = target;
+    const response = await graphql(ref, PendingReviewResponse, PENDING_REVIEW_QUERY, pullRequestVariables(ref));
+    const pr = response.data.repository?.pullRequest;
+    if (!pr) throw new ForgeError(`${ref.project} has no pull request #${ref.number}.`);
+    const own = pr.reviews.nodes.find((review) => review.viewerDidAuthor);
+    if (own) return own.id;
+    const started = await graphql(ref, StartReviewResponse, START_REVIEW_MUTATION, {
+      pullRequestId: pr.id,
+      commitOID: target.headSha,
+    });
+    return started.data.addPullRequestReview.pullRequestReview.id;
+  };
 
   return {
     kind: "github",
@@ -208,7 +369,90 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
       // gh picks the protocol and credentials the reviewer set it up with, which `git clone` would not.
       await gh.text(["repo", "clone", `${ref.host}/${ref.project}`, directory], { timeoutMs: CLONE_TIMEOUT_MS });
     },
+
+    async listDrafts(ref) {
+      const drafts: Draft[] = [];
+      let after: string | null = null;
+      for (;;) {
+        const response: z.output<typeof DraftsResponse> = await graphql(ref, DraftsResponse, DRAFTS_QUERY, {
+          ...pullRequestVariables(ref),
+          after,
+        });
+        const pr = response.data.repository?.pullRequest;
+        if (!pr) throw new ForgeError(`${ref.project} has no pull request #${ref.number}.`);
+        const review = pr.reviews.nodes.find((candidate) => candidate.viewerDidAuthor);
+        if (!review) return [];
+        for (const thread of pr.reviewThreads.nodes) {
+          for (const comment of thread.comments.nodes) {
+            if (comment.pullRequestReview?.id === review.id) drafts.push({ id: comment.id, body: comment.body, location: locationOf(thread) });
+          }
+        }
+        const { hasNextPage, endCursor } = pr.reviewThreads.pageInfo;
+        if (!hasNextPage || endCursor === null) return drafts;
+        after = endCursor;
+      }
+    },
+
+    async createDraft(target, { anchor, body }) {
+      return oneAtATime(target.ref, async () => {
+        const pullRequestReviewId = await pendingReview(target);
+        const input = { pullRequestReviewId, path: anchor.path, body, ...threadAnchor(anchor) };
+        const response = await graphql(target.ref, AddThreadResponse, ADD_THREAD_MUTATION, { input });
+        const thread = response.data.addPullRequestReviewThread.thread;
+        const comment = thread?.comments.nodes[0];
+        if (!thread || !comment) throw new ForgeError("GitHub did not add the comment to your pending review.");
+        return { id: comment.id, body: comment.body, location: locationOf(thread) };
+      });
+    },
+
+    async updateDraft(ref, draftId, body) {
+      await graphql(ref, MutationResponse, UPDATE_COMMENT_MUTATION, { id: draftId, body });
+    },
+
+    async deleteDraft(ref, draftId) {
+      await graphql(ref, MutationResponse, DELETE_COMMENT_MUTATION, { id: draftId });
+    },
   };
+}
+
+type GitHubSide = z.output<typeof DiffSide>;
+
+/**
+ * Where a thread goes, in `AddPullRequestReviewThreadInput`'s fields: a removed line on the LEFT
+ * side by its old number, any other line on the RIGHT by its new one; a range's first line in
+ * `startLine`/`startSide` and its last in `line`/`side`; a file as subject type FILE with no line.
+ */
+function threadAnchor(anchor: DraftAnchor): Record<string, string | number> {
+  const point = (line: AnchorLine): { line: number; side: GitHubSide } =>
+    line.kind === "removed" ? { line: line.oldLine!, side: "LEFT" } : { line: line.newLine!, side: "RIGHT" };
+  switch (anchor.kind) {
+    case "line":
+      return { subjectType: "LINE", ...point(anchor.line) };
+    case "range": {
+      const start = point(anchor.start);
+      return { subjectType: "LINE", startLine: start.line, startSide: start.side, ...point(anchor.end) };
+    }
+    case "file":
+      return { subjectType: "FILE" };
+  }
+}
+
+/** A thread's place as a `DraftLocation`; an outdated thread, which has no current line, by its original one. */
+function locationOf(thread: z.output<typeof Thread>): DraftLocation {
+  const { path } = thread;
+  const current = thread.line !== null;
+  const endLine = current ? thread.line : thread.originalLine;
+  const startLine = current ? thread.startLine : thread.originalStartLine;
+  if (thread.subjectType === "FILE" || endLine === null) return { kind: "file", path };
+  const end = { side: sideOf(thread.diffSide), line: endLine };
+  if (startLine === null) return { kind: "line", path, line: end };
+  const start = { side: sideOf(thread.startDiffSide ?? thread.diffSide), line: startLine };
+  if (start.side === end.side && start.line === end.line) return { kind: "line", path, line: end };
+  return { kind: "range", path, start, end };
+}
+
+function sideOf(side: GitHubSide): "old" | "new" {
+  return side === "LEFT" ? "old" : "new";
 }
 
 const STATES: Record<"OPEN" | "CLOSED" | "MERGED", ChangeRequestState> = {
