@@ -32,6 +32,8 @@ When new commits are pushed after the guide was written, the panel shows **PR up
 
 To comment on the code, tap a line in any diff in the panel, drag across lines to comment on a range (on a touch screen, rest your finger on the first line before dragging, since a plain swipe scrolls), or select **Comment on file** in a file's header. A range stays within one hunk, as the forges require. Saving puts the comment on the forge at once as a draft: on GitHub, a thread on your pending review, which is the one you already started on github.com if there is one. Nothing is published until you submit the review. Your drafts show under the lines they are on and in **Your drafts** above the guide, including the ones you started on the web, and you edit and delete them there; select **Refresh** to pick up drafts added on the web since the panel opened. **Regenerate** leaves your drafts on the forge as they are, and new comments go on the lines of the regenerated guide. GitLab drafts are not supported yet.
 
+When you are done, select **Finish review** below your drafts. It shows the review body, which is your pending review's own body on GitHub (so one started on github.com is there too), and every draft with where it sits, and offers **Approve**, **Request changes** and **Comment**. **Save body** keeps an edited body without submitting; a submit sends the body as it is in the box. On your own pull request, and on a closed or merged one, only **Comment** is offered, though you can still write drafts. When commits were pushed since the guide was written, **Approve** and **Request changes** are held back, so a verdict only ever applies to code the guide explained, with **Regenerate the guide** beside them; the plugin asks the forge again the moment you submit, and holds them back too while it cannot. After a submit the panel lists each step the forge took and whether it landed, so a partial failure tells you what is left to do on the forge. **Discard review** deletes your pending review, its drafts and its body, after you confirm. Submitting a GitLab review is not supported yet.
+
 The workspace is a worktree of a local clone. The plugin uses the Paseo project whose `origin` is the repository the pull request or merge request targets; when there is none, it clones the repository once with `gh repo clone` or `glab repo clone` into `$PASEO_HOME/plugin-data/guided-review/clones/` and reuses that clone for every later review of it.
 
 Requires Paseo 0.9 or newer.
@@ -66,6 +68,8 @@ Requires Paseo 0.9 or newer.
 | **… is not in the diff, so a comment cannot be anchored there** | Forges take line comments only on lines the diff shows. Comment on a line in a hunk, or on the whole file. |
 | **A comment on several lines has to stay within one hunk of the diff** | Drag within one hunk, or leave one comment per hunk. |
 | **gh failed: … could not be resolved** when saving a draft | GitHub could not place the comment, usually because the pull request has moved on since the guide was written. Comment on the whole file instead. |
+| **Could not check … for new commits: …** under the verdicts | The forge could not be asked where the head is, so **Approve** and **Request changes** are held back until it can; **Comment** still works. Close and reopen **Finish review** to ask again. |
+| **Only part of your review went through** | The steps marked **Failed** did not land, and the ones after them were not tried. Finish those on the forge's web page. |
 
 Run `paseo plugin logs guided-review` for more detail.
 
