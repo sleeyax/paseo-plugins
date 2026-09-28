@@ -29,6 +29,29 @@ export const GuideOverviewSchema = z.object({
     .describe("Where to spend your attention: the one or two foundational nodes that matter most."),
 });
 
+/**
+ * Code a node covers in one file: the whole file's diff, some of its hunks, or line ranges within
+ * them. Hunks are numbered from 1 per file, the way the generation prompt labels them.
+ */
+export const CoveredCodeSchema = z.object({
+  path: z.string().min(1).describe("A changed file's path, exactly as the list of changed files gives it."),
+  hunks: z
+    .array(z.number().int().min(1))
+    .default([])
+    .describe("The numbers of the file's hunks this node covers, as the diff labels them. Leave `hunks` and `lines` empty to cover the whole file."),
+  lines: z
+    .array(
+      z.object({
+        start: z.number().int().min(1).describe("The first line of the range."),
+        end: z.number().int().min(1).describe("The last line of the range, inclusive."),
+      }),
+    )
+    .default([])
+    .describe(
+      "Line ranges this node covers, for when one hunk holds more than one concept: line numbers in the new version of the file, or in the old version for a removed file. A removed line belongs with the new line after it.",
+    ),
+});
+
 export const GuideNodeSchema = z.object({
   id: z.string().min(1).describe("A short slug, unique within the guide, such as `retry-policy`."),
   title: z.string().min(1).describe("The concept's name, a few words."),
@@ -57,4 +80,5 @@ export const GuideStateSchema = z.discriminatedUnion("status", [
 export type Guide = z.output<typeof GuideSchema>;
 export type GuideNode = z.output<typeof GuideNodeSchema>;
 export type GuideDecision = z.output<typeof DecisionSchema>;
+export type CoveredCode = z.output<typeof CoveredCodeSchema>;
 export type GuideState = z.output<typeof GuideStateSchema>;
