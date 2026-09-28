@@ -9,6 +9,8 @@ export type CommandRequest = {
   input?: string;
   /** Laid over the daemon's environment, so a caller names only what it changes. */
   env?: Record<string, string>;
+  /** Taken out of the daemon's environment, for a variable whose mere presence changes what a tool does. */
+  unsetEnv?: readonly string[];
   timeoutMs: number;
 };
 
@@ -49,7 +51,7 @@ export const runCommand: CommandRunner = (request) =>
     try {
       child = spawn(request.file, [...request.args], {
         cwd: request.cwd,
-        env: { ...process.env, ...request.env },
+        env: environment(request),
         stdio: [request.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       });
     } catch (error) {
@@ -92,6 +94,12 @@ export const runCommand: CommandRunner = (request) =>
       child.stdin!.end(request.input);
     }
   });
+
+function environment(request: CommandRequest): NodeJS.ProcessEnv {
+  const env = { ...process.env, ...request.env };
+  for (const name of request.unsetEnv ?? []) delete env[name];
+  return env;
+}
 
 function keepTail(text: string): string {
   return text.length <= MAX_STDERR ? text : text.slice(text.length - MAX_STDERR);
