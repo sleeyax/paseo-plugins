@@ -9,6 +9,7 @@ import * as contracts from "../shared/contracts.ts";
 import type { ReviewHeader } from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { numberLabel } from "../shared/reference.ts";
+import { useAskAbout } from "./ask-action.tsx";
 import { GuideView } from "./guide-view.tsx";
 import { fontSize, leading, MAX_CONTENT_WIDTH, radius, spacing } from "./theme.ts";
 
@@ -29,6 +30,8 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
     onSettled: () => void panel.refetch(),
   });
   const colors = theme.colors;
+  const openAgent = navigation ? (agentId: string) => navigation.openAgent({ agentId }) : undefined;
+  const ask = useAskAbout(panel.data?.status === "ready" ? panel.data.reviewId : null, openAgent);
 
   let body: React.ReactNode;
   if (panel.isPending) {
@@ -50,7 +53,8 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
         <GuideView
           state={panel.data.guide}
           theme={theme}
-          {...(navigation ? { openAgent: (agentId: string) => navigation.openAgent({ agentId }) } : {})}
+          {...(openAgent ? { openAgent } : {})}
+          ask={ask}
           retry={{
             run: () => retry.mutate(reviewId),
             pending: retry.isPending,
