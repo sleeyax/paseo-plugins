@@ -16,6 +16,11 @@ export type ReviewRecord = {
   updatedAt: string;
   /** Why the reviewer's own branch was left alone and the guide lives in a PR workspace instead. */
   note?: string;
+  /**
+   * The head of the guide the review had before its head moved to `header.headSha`, whose marks
+   * carry over to the guide at this head once it is written. Absent until the head first moves.
+   */
+  previousHeadSha?: string;
 };
 
 /**
@@ -104,6 +109,12 @@ export class ReviewStore {
     const directory = this.directoryOf(record.id);
     await writeJson(path.join(directory, "snapshots", `${changeRequest.headSha}.json`), changeRequest);
     await writeJson(path.join(directory, RECORD_FILE), record);
+    (await this.#load()).set(record.id, record);
+  }
+
+  /** Records the review again, at a head `save` already kept what the forge said at. */
+  async update(record: ReviewRecord): Promise<void> {
+    await writeJson(path.join(this.directoryOf(record.id), RECORD_FILE), record);
     (await this.#load()).set(record.id, record);
   }
 

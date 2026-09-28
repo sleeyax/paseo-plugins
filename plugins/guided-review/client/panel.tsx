@@ -13,6 +13,7 @@ import { useAskAbout } from "./ask-action.tsx";
 import { BranchStartView, isBranchRunning } from "./branch-start.tsx";
 import { DraftsContext, DraftsSection, useDrafts } from "./drafts.tsx";
 import { GuideView } from "./guide-view.tsx";
+import { StaleGuideBanner } from "./head-check.tsx";
 import { useProgress } from "./progress.tsx";
 import { fontSize, leading, MAX_CONTENT_WIDTH, radius, spacing } from "./theme.ts";
 
@@ -67,6 +68,14 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
     body = (
       <View style={{ gap: spacing[3] }}>
         <Header header={panel.data.header} theme={theme} />
+        <StaleGuideBanner
+          reviewId={reviewId}
+          workspaceId={workspaceId}
+          header={panel.data.header}
+          theme={theme}
+          {...(navigation ? { openWorkspace: (id: string) => navigation.openWorkspace({ workspaceId: id }) } : {})}
+          onRegenerated={() => void panel.refetch()}
+        />
         {panel.data.note ? <Note color={colors.statusWarning}>{panel.data.note}</Note> : null}
         {drafts ? <DraftsSection control={drafts} colors={colors} /> : null}
         <GuideView
