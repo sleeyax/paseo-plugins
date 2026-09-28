@@ -454,7 +454,7 @@ test("the anchor lines above are the diff's own, with GitLab's running counters"
   assert.deepEqual(at({ side: "old", line: 148 }), REMOVED_148);
 });
 
-test("lists the viewer's draft notes by the project's numeric ID, a reply where its thread is, and not the MR-level ones", async () => {
+test("lists the viewer's draft notes by the project's numeric ID, a reply where its thread is, and an MR-level one as general", async () => {
   const { forge, run } = forgeReplaying([
     LOGGED_IN,
     { stdout: fixture("project.json") },
@@ -482,6 +482,8 @@ test("lists the viewer's draft notes by the project's numeric ID, a reply where 
     },
     { id: "103", body: "Was this message used anywhere else?", location: { kind: "line", path: GO_PATH, line: { side: "old", line: 148 } } },
     { id: "104", body: "The docs could mention the flag earlier.", location: { kind: "file", path: MD_PATH } },
+    // Its position comes back all null: a thread on the merge request as a whole once published.
+    { id: "105", body: "Overall this looks good.", location: { kind: "general" } },
     { id: "106", body: "Agreed, and the same goes for replies.", location: { kind: "line", path: MD_PATH, line: { side: "new", line: 25 } } },
   ]);
 });
@@ -489,7 +491,7 @@ test("lists the viewer's draft notes by the project's numeric ID, a reply where 
 test("without a reply among the drafts the MR's discussions are not read", async () => {
   const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, { stdout: draftNotesFixture(5) }]);
 
-  assert.deepEqual((await forge.listDrafts(MR_3931)).map((draft) => draft.id), ["101", "102", "103", "104"]);
+  assert.deepEqual((await forge.listDrafts(MR_3931)).map((draft) => draft.id), ["101", "102", "103", "104", "105"]);
   assert.equal(run.calls.length, 3);
 });
 
@@ -586,6 +588,18 @@ test("a draft GitLab kept somewhere other than where it was put is deleted again
   ]);
   await assert.rejects(forge.createDraft(MR_3931_TARGET, { anchor: { kind: "range", ...GO, start: CONTEXT_145, end: ADDED_147 }, body: "Why?" }), ForgeError);
   assert.deepEqual(run.calls.at(-1)?.args.at(-1), `${DRAFT_NOTES}/203`);
+});
+
+test("a general draft is an MR-level draft note, sent with no position at all", async () => {
+  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, draftNote(205, "About the pager: why a second lookup?", null)]);
+
+  const draft = await forge.createDraft(MR_3931_TARGET, { anchor: { kind: "general" }, body: "About the pager: why a second lookup?" });
+
+  const call = run.calls.at(-1)!;
+  assert.deepEqual(call.args, ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, DRAFT_NOTES]);
+  assert.deepEqual(JSON.parse(call.input!), { note: "About the pager: why a second lookup?" });
+  assert.deepEqual(draft, { id: "205", body: "About the pager: why a second lookup?", location: { kind: "general" } });
+  assert.equal(run.calls.length, 3, "nothing is taken back");
 });
 
 function positionOfRange(): Record<string, unknown> {

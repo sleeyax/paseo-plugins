@@ -1,7 +1,7 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { FileDiffSchema } from "./diff.ts";
-import { DraftListSchema, DraftLocationSchema, DraftSchema } from "./drafts.ts";
+import { DraftListSchema, DraftLocationSchema, LinkedDraftSchema } from "./drafts.ts";
 import { GuideStateSchema } from "./guide.ts";
 import { GuideProgressSchema } from "./progress.ts";
 import { SubmitResultSchema, VerdictOptionSchema, VerdictSchema } from "./submit.ts";
@@ -187,7 +187,8 @@ export const setUnderstood = defineRpc({
 
 /**
  * The reviewer's drafts on the change request, as the forge has them, including ones started in
- * its web UI. Drafts live only on the forge, so this is read afresh every time.
+ * its web UI. Drafts live only on the forge, so this is read afresh every time. Each comes with the
+ * node of the panel's guide it was written from, which only this plugin knows; null for the rest.
  */
 export const listDrafts = defineRpc({
   name: "guided-review.drafts.list",
@@ -202,8 +203,18 @@ export const listDrafts = defineRpc({
  */
 export const createDraft = defineRpc({
   name: "guided-review.drafts.create",
-  input: z.object({ reviewId: z.string(), headSha: z.string(), location: DraftLocationSchema, body: z.string() }),
-  output: DraftSchema,
+  input: z.object({
+    reviewId: z.string(),
+    headSha: z.string(),
+    location: DraftLocationSchema,
+    body: z.string(),
+    /**
+     * The node of the guide at `headSha` the comment was written from: a node's own comment, or one
+     * on code drawn in a node. Kept here, keyed by the draft's ID, and never posted.
+     */
+    nodeId: z.string().nullable().optional(),
+  }),
+  output: LinkedDraftSchema,
 });
 
 export const updateDraft = defineRpc({
@@ -303,10 +314,14 @@ export type FinishView = z.output<typeof FinishViewSchema>;
 export type HeadCheck = z.output<typeof HeadCheckSchema>;
 
 /**
- * What a comment box is for, as "Suggest wording" names it: a comment on code at a draft location.
- * The server looks the lines and the guide's nodes up itself, as for "Ask about this".
+ * What a comment box is for, as "Suggest wording" names it: a comment on code at a draft location,
+ * or a node's comment, on the change as a whole. The server looks the lines and the guide's nodes up
+ * itself, as for "Ask about this".
  */
-export const CommentSubjectSchema = z.discriminatedUnion("kind", [z.object({ kind: z.literal("code"), location: DraftLocationSchema })]);
+export const CommentSubjectSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("code"), location: DraftLocationSchema }),
+  z.object({ kind: z.literal("node"), nodeId: z.string() }),
+]);
 
 /**
  * Where a "Suggest wording" request has got to. `ready` carries the text for the box, which nothing

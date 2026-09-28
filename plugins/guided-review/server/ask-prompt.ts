@@ -73,7 +73,8 @@ const ANSWER_RULES = `Answer as a normal message; the reviewer reads it in this 
 - Do not change anything. Read files in your working directory, the repository at the change's head commit, where the diff alone does not explain something.
 - Do not answer with JSON.`;
 
-function nodeContext(node: GuideNode, code: readonly CodeReference[]): string {
+/** What the guide says about `node`, and the code it covers, for a prompt that names the node. */
+export function nodeContext(node: GuideNode, code: readonly CodeReference[]): string {
   const lines = [`What the guide says about it:`, `- Summary: ${node.summary}`, `- Explanation: ${oneParagraph(node.explanation)}`];
   for (const decision of node.decisions) lines.push(`- Decision: ${decision.choice} Rather than: ${decision.rejected}`);
   if (code.length > 0) {

@@ -50,6 +50,9 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
   const drafts = useDrafts(
     panel.data?.status === "ready" ? panel.data.reviewId : null,
     panel.data?.status === "ready" ? panel.data.header.headSha : null,
+    panel.data?.status === "ready" && panel.data.guide.status === "ready"
+      ? { agentId: panel.data.guide.agentId, nodes: panel.data.guide.guide.nodes }
+      : null,
   );
   const regenerate = useRegenerate({
     reviewId: panel.data?.status === "ready" ? panel.data.reviewId : null,

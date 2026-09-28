@@ -13,7 +13,9 @@ import { verdictOptions } from "./submit-rules.ts";
 import type { DraftTarget } from "./forge/port.ts";
 import { anchorAt } from "./anchors.ts";
 import { askPrompt, codeReferencesOf, type AskSubjectContext } from "./ask-prompt.ts";
-import { carryMarks } from "./carry-over.ts";
+import { carryMarks, followNode, type GuideAtHead } from "./carry-over.ts";
+import type { LinkedDraft } from "../shared/drafts.ts";
+import { composeBody, isParagraphId, paragraphId, splitBody, type BodyParagraph } from "./review-body.ts";
 import { resolveCode } from "./diff.ts";
 import { ForgeError, type BranchChangeRequest, type ChangedFile, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
 import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, GuideAgentError, type GuideAgentPort } from "./guide-agent/port.ts";
@@ -22,7 +24,7 @@ import { setAside } from "./file-classes.ts";
 import { layOutGuide, parseGuide } from "./guide-output.ts";
 import { guidePrompt } from "./guide-prompt.ts";
 import { codeWordingContext, WordingSchema, wordingPrompt, type WordingSubjectContext } from "./wording-prompt.ts";
-import { ReviewStore, reviewIdOf, type GuideRecord, type ProgressRecord, type ReviewRecord } from "./review-store.ts";
+import { ReviewStore, reviewIdOf, type DraftLink, type DraftsRecord, type GuideRecord, type ProgressRecord, type ReviewRecord } from "./review-store.ts";
 import type { FastForwardResult, ReviewWorkspace, WorkspaceCheckout, WorkspacePort } from "./workspaces/port.ts";
 
 export type ReviewServiceOptions = {
@@ -84,6 +86,11 @@ export class ReviewService {
   readonly #progressWrites = new Map<string, Promise<unknown>>();
   /** "Suggest wording" requests, by suggestion ID, until the panel has read how they ended. */
   readonly #suggestions = new Map<string, SuggestionJob>();
+  /**
+   * The last change to each review's draft links, and to its body, which the next waits for: a node
+   * comment on GitHub rewrites the body the reviewer's own text shares, and both read it first.
+   */
+  readonly #draftWrites = new Map<string, Promise<unknown>>();
 
   constructor(options: ReviewServiceOptions) {
     this.#forges = options.forges;
@@ -365,10 +372,18 @@ export class ReviewService {
     return summariseProgress(guide, headSha, progress);
   }
 
-  /** The reviewer's drafts, read from the forge every time: they live there, and may have been started on the web. */
+  /**
+   * The reviewer's drafts, read from the forge every time: they live there, and may have been started
+   * on the web. On GitHub the node comments in the pending review's body are drafts too. Each comes
+   * with the node of the guide the panel shows that it was written from, when it was written from one.
+   */
   async listDrafts({ reviewId }: { reviewId: string }): Promise<DraftList> {
     const { record, forge } = await this.#reviewForge(reviewId);
-    return { drafts: await forge.listDrafts(record.ref) };
+    const [drafts, kept] = await Promise.all([forge.listDrafts(record.ref), this.#store.getDrafts(record.id)]);
+    const { paragraphs } = await this.#readBody(record, forge, kept);
+    const nodeOf = await this.#linkFollower(record);
+    const all = [...drafts, ...paragraphs.map(paragraphDraft)];
+    return { drafts: await Promise.all(all.map(async (draft) => ({ ...draft, nodeId: await nodeOf(kept.links[draft.id]) }))) };
   }
 
   /**
@@ -376,28 +391,163 @@ export class ReviewService {
    * drew at `headSha`, which must still be the review's head: Regenerate moves the review to a new
    * head, whose lines are numbered differently, so a comment from a guide it replaced is refused
    * rather than put on whatever line now has its number.
+   *
+   * `nodeId` is the node of that guide the comment was written from, which is kept here by the
+   * draft's ID and never posted. A `general` comment, on the change as a whole, is a node's comment:
+   * an MR-level draft note on GitLab, and on GitHub a paragraph added to the pending review's body.
    */
-  async createDraft({ reviewId, headSha: drawnAt, location, body }: { reviewId: string; headSha: string; location: DraftLocation; body: string }): Promise<Draft> {
+  async createDraft({
+    reviewId,
+    headSha: drawnAt,
+    location,
+    body,
+    nodeId = null,
+  }: {
+    reviewId: string;
+    headSha: string;
+    location: DraftLocation;
+    body: string;
+    nodeId?: string | null | undefined;
+  }): Promise<LinkedDraft> {
     const { record, forge } = await this.#reviewForge(reviewId);
     const text = draftText(body);
     if (drawnAt !== record.header.headSha) throw new Error(regeneratedAway(drawnAt, record.header.headSha));
     const changeRequest = await this.#store.snapshot(record.id, record.header.headSha);
     if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
     const anchor = anchorAt(changeRequest.files, location);
+    const link = nodeId === null ? null : await this.#linkTo(record, nodeId);
     const { ref, baseSha, startSha, headSha } = changeRequest;
-    return forge.createDraft({ ref, baseSha, startSha, headSha }, { anchor, body: text });
+
+    if (anchor.kind === "general" && forge.reviewBody) {
+      const paragraph: BodyParagraph = { id: paragraphId(), body: text };
+      return this.#changingDrafts(record.id, async () => {
+        const kept = await this.#store.getDrafts(record.id);
+        const { own, paragraphs } = await this.#readBody(record, forge, kept);
+        await this.#writeBody(record, forge, own, [...paragraphs, paragraph], link === null ? kept.links : { ...kept.links, [paragraph.id]: link });
+        return { ...paragraphDraft(paragraph), nodeId: link?.nodeId ?? null };
+      });
+    }
+
+    const draft = await forge.createDraft({ ref, baseSha, startSha, headSha }, { anchor, body: text });
+    if (link !== null) {
+      await this.#changingDrafts(record.id, async () => {
+        const kept = await this.#store.getDrafts(record.id);
+        await this.#store.saveDrafts(record.id, { ...kept, links: { ...kept.links, [draft.id]: link } });
+      });
+    }
+    return { ...draft, nodeId: link?.nodeId ?? null };
   }
 
   async updateDraft({ reviewId, draftId, body }: { reviewId: string; draftId: string; body: string }): Promise<null> {
     const { record, forge } = await this.#reviewForge(reviewId);
-    await forge.updateDraft(record.ref, draftId, draftText(body));
+    const text = draftText(body);
+    if (!isParagraphId(draftId)) {
+      await forge.updateDraft(record.ref, draftId, text);
+      return null;
+    }
+    await this.#changingParagraphs(record, forge, draftId, (paragraphs) =>
+      paragraphs.map((paragraph) => (paragraph.id === draftId ? { ...paragraph, body: text } : paragraph)),
+    );
     return null;
   }
 
   async deleteDraft({ reviewId, draftId }: { reviewId: string; draftId: string }): Promise<null> {
     const { record, forge } = await this.#reviewForge(reviewId);
+    if (isParagraphId(draftId)) {
+      await this.#changingParagraphs(record, forge, draftId, (paragraphs) => paragraphs.filter((paragraph) => paragraph.id !== draftId));
+      return null;
+    }
     await forge.deleteDraft(record.ref, draftId);
+    await this.#changingDrafts(record.id, async () => {
+      const kept = await this.#store.getDrafts(record.id);
+      if (!(draftId in kept.links)) return;
+      const { [draftId]: _gone, ...links } = kept.links;
+      await this.#store.saveDrafts(record.id, { ...kept, links });
+    });
     return null;
+  }
+
+  /**
+   * Rewrites the node comments in the GitHub pending review's body, one of which is `draftId`, and
+   * keeps the reviewer's own text as it is. A paragraph no longer in the body whole, edited or
+   * deleted on GitHub, cannot be found to change.
+   */
+  async #changingParagraphs(
+    record: ReviewRecord,
+    forge: Forge,
+    draftId: string,
+    change: (paragraphs: BodyParagraph[]) => BodyParagraph[],
+  ): Promise<void> {
+    if (!forge.reviewBody) throw new Error(`${draftId} is not one of your drafts on ${record.ref.url}.`);
+    await this.#changingDrafts(record.id, async () => {
+      const kept = await this.#store.getDrafts(record.id);
+      const { own, paragraphs } = await this.#readBody(record, forge, kept);
+      if (!paragraphs.some((paragraph) => paragraph.id === draftId)) {
+        throw new Error("This comment is no longer in your pending review's body as it was written; it was edited or removed on GitHub.");
+      }
+      const next = change(paragraphs);
+      const links = Object.fromEntries(Object.entries(kept.links).filter(([id]) => !isParagraphId(id) || next.some((paragraph) => paragraph.id === id)));
+      await this.#writeBody(record, forge, own, next, links);
+    });
+  }
+
+  /** Runs `change` once every earlier change to the review's draft links and body has settled. */
+  async #changingDrafts<T>(reviewId: string, change: () => Promise<T>): Promise<T> {
+    const write = (this.#draftWrites.get(reviewId) ?? Promise.resolve()).catch(() => {}).then(change);
+    this.#draftWrites.set(reviewId, write);
+    try {
+      return await write;
+    } finally {
+      if (this.#draftWrites.get(reviewId) === write) this.#draftWrites.delete(reviewId);
+    }
+  }
+
+  /** A link to the node `nodeId` of the guide the panel shows, which must have it. */
+  async #linkTo(record: ReviewRecord, nodeId: string): Promise<DraftLink> {
+    const current = await this.#shownGuide(record);
+    if (current === null) throw new Error("There is no finished guide to comment on a concept of.");
+    if (!current.guide.nodes.some((node) => node.id === nodeId)) throw new Error("That concept is not in the guide any more.");
+    return { nodeId, headSha: current.headSha, agentId: current.agentId };
+  }
+
+  /**
+   * Follows a draft's link to a node of the guide the panel shows: the node itself when the link was
+   * made in that guide, else the node covering the same code as the one it was made to in the guide
+   * then shown, as marks are carried over. Null without a link, a guide, or such a node.
+   */
+  async #linkFollower(record: ReviewRecord): Promise<(link: DraftLink | undefined) => Promise<string | null>> {
+    const current = await this.#shownGuide(record);
+    const snapshot = current === null ? null : await this.#store.snapshot(record.id, current.headSha);
+    if (current === null || snapshot === null) return async () => null;
+    const now: GuideAtHead = { guide: current.guide, files: snapshot.files };
+    const earlier = new Map<string, Promise<GuideAtHead | null>>();
+    const guideOf = (link: DraftLink) => {
+      const key = `${link.headSha}@${link.agentId}`;
+      if (!earlier.has(key)) {
+        earlier.set(
+          key,
+          Promise.all([this.#store.getGuide(record.id, link.headSha), this.#store.snapshot(record.id, link.headSha)]).then(([guide, at]) =>
+            guide !== null && isReady(guide) && guide.agentId === link.agentId && at !== null ? { guide: guide.guide, files: at.files } : null,
+          ),
+        );
+      }
+      return earlier.get(key)!;
+    };
+    return async (link) => {
+      if (link === undefined) return null;
+      if (link.headSha === current.headSha && link.agentId === current.agentId) {
+        return current.guide.nodes.some((node) => node.id === link.nodeId) ? link.nodeId : null;
+      }
+      const then = await guideOf(link);
+      return then === null ? null : followNode(then, link.nodeId, now);
+    };
+  }
+
+  /** The guide the panel shows: ready at the review's head in its workspace, and not being generated again. */
+  async #shownGuide(record: ReviewRecord): Promise<ReadyGuide | null> {
+    if (this.#generations.has(generationKey(record))) return null;
+    const stored = await this.#store.getGuide(record.id, record.header.headSha);
+    return stored !== null && stored.workspaceId === record.workspace.id && isReady(stored) ? stored : null;
   }
 
   /**
@@ -436,7 +586,13 @@ export class ReviewService {
     if (changeRequest === null) return notSuggested("What the forge said at this head is missing. Start the review again.");
     let context: WordingSubjectContext;
     try {
-      context = codeWordingContext(changeRequest.files, stored.guide.nodes, subject.location);
+      if (subject.kind === "node") {
+        const node = stored.guide.nodes.find((candidate) => candidate.id === subject.nodeId);
+        if (node === undefined) return notSuggested("That concept is not in the guide any more.");
+        context = { kind: "node", node, code: codeReferencesOf(resolveCode(changeRequest.files, node.covers).files) };
+      } else {
+        context = codeWordingContext(changeRequest.files, stored.guide.nodes, subject.location);
+      }
     } catch (error) {
       return notSuggested(errorMessage(error));
     }
@@ -518,7 +674,14 @@ export class ReviewService {
     const option = verdicts.find((candidate) => candidate.verdict === verdict);
     if (!option?.allowed) return { status: "refused", message: option?.reason ?? "That verdict is not on offer.", verdicts };
 
-    const outcome = await forge.submitReview(await this.#reviewTarget(record), { verdict, body: text });
+    // The node comments GitHub keeps in the body go out with it, after the reviewer's own text.
+    const outcome = await this.#changingDrafts(record.id, async () => {
+      const kept = await this.#store.getDrafts(record.id);
+      const paragraphs = kept.paragraphs.length === 0 ? [] : (await this.#readBody(record, forge, kept)).paragraphs;
+      const outcome = await forge.submitReview(await this.#reviewTarget(record), { verdict, body: composeBody(text, paragraphs) });
+      if (outcome.published) await this.#store.saveDrafts(record.id, { links: {}, paragraphs: [] });
+      return outcome;
+    });
     if (outcome.published && forge.reviewBody === null) await this.#store.saveReviewBody(record.id, "");
     for (const step of outcome.steps) {
       if (step.status === "failed") this.#log(`Submitting ${record.ref.url}: "${step.label}" failed: ${step.message}`);
@@ -531,19 +694,53 @@ export class ReviewService {
   /** Throws the pending review away with its drafts and body; the panel asks the reviewer first. */
   async discard({ reviewId }: { reviewId: string }): Promise<null> {
     const { record, forge } = await this.#reviewForge(reviewId);
-    await forge.discardReview(record.ref);
+    await this.#changingDrafts(record.id, async () => {
+      await forge.discardReview(record.ref);
+      await this.#store.saveDrafts(record.id, { links: {}, paragraphs: [] });
+    });
     if (forge.reviewBody === null) await this.#store.saveReviewBody(record.id, "");
     return null;
   }
 
-  /** The review body so far: the forge's, where it keeps one before submit, else the one kept here. */
+  /**
+   * The review body so far, the reviewer's own text: the forge's, where it keeps one before submit,
+   * without the node comments GitHub keeps in it, else the one kept here.
+   */
   async #readReviewBody(record: ReviewRecord, forge: Forge): Promise<string> {
-    return forge.reviewBody ? forge.reviewBody.read(record.ref) : this.#store.getReviewBody(record.id);
+    return (await this.#readBody(record, forge)).own;
   }
 
+  /** Replaces the reviewer's own text of the body, leaving the node comments GitHub keeps after it. */
   async #writeReviewBody(record: ReviewRecord, forge: Forge, body: string): Promise<void> {
-    if (forge.reviewBody) await forge.reviewBody.write(await this.#reviewTarget(record), body);
-    else await this.#store.saveReviewBody(record.id, body);
+    await this.#changingDrafts(record.id, async () => {
+      const kept = await this.#store.getDrafts(record.id);
+      const { paragraphs } = await this.#readBody(record, forge, kept);
+      await this.#writeBody(record, forge, body, paragraphs, kept.links);
+    });
+  }
+
+  /**
+   * The body as the forge keeps it, split into the reviewer's own text and the node comments kept
+   * here that are still in it, or on a forge that keeps none, the own text kept here and no paragraphs.
+   */
+  async #readBody(record: ReviewRecord, forge: Forge, kept?: DraftsRecord): Promise<{ own: string; paragraphs: BodyParagraph[] }> {
+    if (!forge.reviewBody) return { own: await this.#store.getReviewBody(record.id), paragraphs: [] };
+    const [body, drafts] = await Promise.all([forge.reviewBody.read(record.ref), kept ?? this.#store.getDrafts(record.id)]);
+    const { own, found } = splitBody(body, drafts.paragraphs);
+    return { own, paragraphs: found };
+  }
+
+  /**
+   * Writes the body, the forge's first, then what is kept here about it: the paragraphs it now holds
+   * and the draft links. Only ever called inside `#changingDrafts`.
+   */
+  async #writeBody(record: ReviewRecord, forge: Forge, own: string, paragraphs: BodyParagraph[], links: DraftsRecord["links"]): Promise<void> {
+    if (forge.reviewBody) {
+      await forge.reviewBody.write(await this.#reviewTarget(record), composeBody(own, paragraphs));
+      await this.#store.saveDrafts(record.id, { links, paragraphs });
+    } else {
+      await this.#store.saveReviewBody(record.id, own);
+    }
   }
 
   /** The change request at the review's head, which a pending review a write has to start is started on. */
@@ -1024,6 +1221,11 @@ function draftText(body: string): string {
   const text = body.trim();
   if (text === "") throw new Error("Write the comment before saving it.");
   return text;
+}
+
+/** A node comment in GitHub's review body, as the panel lists it beside the forge's drafts. */
+function paragraphDraft(paragraph: BodyParagraph): Draft {
+  return { id: paragraph.id, body: paragraph.body, location: { kind: "general" } };
 }
 
 /** Why a comment's lines, read in the guide the panel drew at `drawnAt`, are not taken at the review's `headSha`. */

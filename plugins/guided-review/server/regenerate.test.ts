@@ -335,6 +335,24 @@ test("after Regenerate a comment is anchored in the new head's diff, one from th
   );
 });
 
+test("after Regenerate a draft's node is the new guide's node with the same code, and none where the code changed", async (t) => {
+  const { service, forge } = await withGuide(t);
+  const general = { kind: "general" } as const;
+  await service.createDraft({ reviewId: REVIEW_ID, headSha: OLD, location: general, body: "About the upload loop: why?", nodeId: "uploader" });
+  await service.createDraft({ reviewId: REVIEW_ID, headSha: OLD, location: general, body: "About the retry handling: why?", nodeId: "retry-policy" });
+
+  forge.changeRequests.set(URL, atNewHead());
+  await regenerate(service);
+
+  assert.deepEqual(
+    (await service.listDrafts({ reviewId: REVIEW_ID })).drafts.map((draft) => [draft.body, draft.nodeId]),
+    [
+      ["About the upload loop: why?", "upload-loop"],
+      ["About the retry handling: why?", null],
+    ],
+  );
+});
+
 test("after Regenerate, wording is suggested from the new head's lines, and a request from the guide it replaced is refused", async (t) => {
   const { service, forge, agents } = await withGuide(t);
   forge.changeRequests.set(URL, atNewHead());
