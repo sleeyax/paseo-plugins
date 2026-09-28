@@ -3,6 +3,7 @@ import path from "node:path";
 import type { ReviewHeader } from "../shared/contracts.ts";
 import type { LayeredGuide } from "../shared/guide.ts";
 import type { ChangeRequest, ChangeRequestRef, ForgeUser } from "./forge/port.ts";
+import type { BodyParagraph } from "./review-body.ts";
 import type { ReviewWorkspace } from "./workspaces/port.ts";
 
 /** One change request under review, and the workspace its guide lives in. */
@@ -58,10 +59,25 @@ export type ProgressRecord = {
   updatedAt: string;
 };
 
+/**
+ * Where a draft the panel wrote came from: the node `nodeId` of the guide at `headSha` its agent
+ * `agentId` wrote. Node IDs mean something only within their guide, so a link to an earlier guide
+ * is followed to the node of the current one that covers the same code, as marks are carried over.
+ */
+export type DraftLink = { nodeId: string; headSha: string; agentId: string };
+
+/**
+ * What the plugin keeps about the reviewer's drafts, which themselves live on the forge: the node
+ * each was written from, by the forge's draft ID (or a paragraph's minted one), and on GitHub the
+ * node comments in the pending review's body. None of it is ever posted.
+ */
+export type DraftsRecord = { links: Record<string, DraftLink>; paragraphs: BodyParagraph[] };
+
 const RECORD_FILE = "review.json";
 const GUIDES = "guides";
 const PROGRESS = "progress";
 const REVIEW_BODY_FILE = "review-body.json";
+const DRAFTS_FILE = "drafts.json";
 
 /**
  * A review's ID is its path under `reviews/`: forge, host, project and number, lower-cased because
@@ -151,6 +167,16 @@ export class ReviewStore {
 
   async saveReviewBody(id: string, body: string): Promise<void> {
     await writeJson(path.join(this.directoryOf(id), REVIEW_BODY_FILE), { body });
+  }
+
+  /** The links and paragraphs kept for the review's drafts; none when nothing was ever kept. */
+  async getDrafts(id: string): Promise<DraftsRecord> {
+    const record = await readJson<Partial<DraftsRecord>>(path.join(this.directoryOf(id), DRAFTS_FILE));
+    return { links: record?.links ?? {}, paragraphs: record?.paragraphs ?? [] };
+  }
+
+  async saveDrafts(id: string, record: DraftsRecord): Promise<void> {
+    await writeJson(path.join(this.directoryOf(id), DRAFTS_FILE), record);
   }
 
   /** Every guide the review has had, one per head SHA. */
