@@ -258,3 +258,35 @@ test("on an MR the reasons say MR", async (t) => {
 
   assert.equal(finish.verdicts[0]?.reason, "This is your own MR, so your review can only comment.");
 });
+
+test("on a merged MR, or one pushed to since the guide, only Comment goes out, with the body kept here", async (t) => {
+  for (const change of [{ state: "merged" as const }, { headSha: PUSHED }]) {
+    const { service, forge, reviewId, url, changeRequest } = await withReview(t, { kind: "gitlab" });
+    forge.changeRequests.set(url, { ...changeRequest, ...change });
+    await service.saveReviewBody({ reviewId, body: "After the fact." });
+
+    const refused = await service.submit({ reviewId, headSha: HEAD, verdict: "request-changes", body: "After the fact." });
+    assert.equal(refused.status, "refused");
+    assert.equal(forge.submissions.length, 0, "nothing was sent");
+
+    const commented = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "After the fact." });
+    assert.equal(commented.status, "submitted");
+    assert.deepEqual(forge.submissions[0]?.submission, { verdict: "comment", body: "After the fact." });
+  }
+});
+
+test("a GitLab submit that published the drafts but not the body keeps the body for another try", async (t) => {
+  const { service, forge, reviewId } = await withReview(t, { kind: "gitlab" });
+  forge.submitOutcome = {
+    published: false,
+    steps: [
+      { id: "publish", label: "Publish your drafts", status: "done", message: null },
+      { id: "note", label: "Post the review body", status: "failed", message: "glab failed: 500 Internal Server Error (HTTP 500)" },
+    ],
+  };
+
+  const result = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "One question." });
+
+  assert.equal(result.status, "partial");
+  assert.equal((await service.finish({ reviewId })).body, "One question.");
+});
