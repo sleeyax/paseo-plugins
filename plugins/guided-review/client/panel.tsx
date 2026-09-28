@@ -10,6 +10,7 @@ import type { ReviewHeader } from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { useAskAbout } from "./ask-action.tsx";
+import { DraftsContext, DraftsSection, useDrafts } from "./drafts.tsx";
 import { GuideView } from "./guide-view.tsx";
 import { fontSize, leading, MAX_CONTENT_WIDTH, radius, spacing } from "./theme.ts";
 
@@ -32,6 +33,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
   const colors = theme.colors;
   const openAgent = navigation ? (agentId: string) => navigation.openAgent({ agentId }) : undefined;
   const ask = useAskAbout(panel.data?.status === "ready" ? panel.data.reviewId : null, openAgent);
+  const drafts = useDrafts(panel.data?.status === "ready" ? panel.data.reviewId : null);
 
   let body: React.ReactNode;
   if (panel.isPending) {
@@ -50,6 +52,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
     body = (
       <View style={{ gap: spacing[3] }}>
         <Header header={panel.data.header} theme={theme} />
+        {drafts ? <DraftsSection control={drafts} colors={colors} /> : null}
         <GuideView
           reviewId={reviewId}
           state={panel.data.guide}
@@ -76,7 +79,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
         padding: layout.compact ? spacing[3] : spacing[4],
       }}
     >
-      {body}
+      <DraftsContext.Provider value={drafts}>{body}</DraftsContext.Provider>
     </ScrollView>
   );
 }
