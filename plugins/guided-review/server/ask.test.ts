@@ -131,7 +131,7 @@ test("a guide agent that is gone, a guide still being written, and an unknown su
   assert.deepEqual(await service.ask({ reviewId: REVIEW_ID, subject: { kind: "node", nodeId: "uploader" } }), {
     status: "not-sent",
     agentId: null,
-    message: "The guide agent is gone: it was archived or closed. Generate the guide again to ask about it.",
+    message: "The guide agent is gone: it was archived or closed, so there is no chat to ask in.",
   });
 
   let release!: (reply: string) => void;

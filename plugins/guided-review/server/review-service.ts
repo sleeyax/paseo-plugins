@@ -145,7 +145,7 @@ export class ReviewService {
       case "busy":
         return notSent(agentId, "The guide agent is busy with another answer. Ask again once it has finished.");
       case "gone":
-        return notSent(null, "The guide agent is gone: it was archived or closed. Generate the guide again to ask about it.");
+        return notSent(null, "The guide agent is gone: it was archived or closed, so there is no chat to ask in.");
       case "idle":
         break;
     }
