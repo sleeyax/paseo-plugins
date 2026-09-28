@@ -36,8 +36,26 @@ export type GuideRecord = {
   updatedAt: string;
 };
 
+/**
+ * What the reviewer marked understood in the guide at one head SHA: nodes by ID, since an ID means
+ * something only within its guide, and Supporting and Unsorted entries by path, which mean the same
+ * in any guide of the review. Carrying marks over to a later head compares the two guides' nodes.
+ */
+export type ProgressRecord = {
+  headSha: string;
+  /**
+   * The guide agent whose guide the marks were made in. A guide generated again at the same head
+   * has a new agent and its own node IDs, so marks made in the one before count for nothing there.
+   */
+  agentId: string;
+  nodes: string[];
+  files: string[];
+  updatedAt: string;
+};
+
 const RECORD_FILE = "review.json";
 const GUIDES = "guides";
+const PROGRESS = "progress";
 
 /**
  * A review's ID is its path under `reviews/`: forge, host, project and number, lower-cased because
@@ -100,6 +118,15 @@ export class ReviewStore {
 
   async saveGuide(id: string, record: GuideRecord): Promise<void> {
     await writeJson(path.join(this.directoryOf(id), GUIDES, `${record.headSha}.json`), record);
+  }
+
+  /** The reviewer's marks in the guide at `headSha`, or null when none were ever made. */
+  async getProgress(id: string, headSha: string): Promise<ProgressRecord | null> {
+    return readJson<ProgressRecord>(path.join(this.directoryOf(id), PROGRESS, `${headSha}.json`));
+  }
+
+  async saveProgress(id: string, record: ProgressRecord): Promise<void> {
+    await writeJson(path.join(this.directoryOf(id), PROGRESS, `${record.headSha}.json`), record);
   }
 
   /** Every guide the review has had, one per head SHA. */

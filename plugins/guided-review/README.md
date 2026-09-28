@@ -26,6 +26,8 @@ The concepts are shown in layers, foundations first: each concept names the conc
 
 To dig into a concept, select **Ask about this** on it. The plugin sends the guide agent a prompt naming the concept, with what the guide says about it, and opens the agent's chat, where you carry on the conversation. Each file in Supporting and Unsorted has its own **Ask about this**, which names the file, how it changed and where the guide put it. The agent answers only when it is idle, since a new prompt would cut off the answer it is writing; while it is busy the panel says so, and you ask again once it has finished.
 
+To keep your place in a large review, select **Mark understood** on each concept, and on each file in Supporting and Unsorted, once you have read it; selecting it again takes the mark back. Above the concepts the panel shows how much you have understood overall, in each layer from the foundations up, and in Supporting and Unsorted, and names the next layer to read, so you can see whether the foundations are covered before moving on. Your marks are kept on disk per head commit and survive Paseo restarts. A guide generated again, after **Try again** or in a new workspace, starts with none, since its concepts may be split differently.
+
 The workspace is a worktree of a local clone. The plugin uses the Paseo project whose `origin` is the repository the pull request or merge request targets; when there is none, it clones the repository once with `gh repo clone` or `glab repo clone` into `$PASEO_HOME/plugin-data/guided-review/clones/` and reuses that clone for every later review of it.
 
 Requires Paseo 0.9 or newer.
