@@ -7,9 +7,8 @@ import * as contracts from "../shared/contracts.ts";
 import type { BranchStart } from "../shared/contracts.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { describeProgress, isFinished } from "./start-progress.ts";
-import { fontSize, leading, radius, spacing } from "./theme.ts";
-
-type Colors = PluginTheme["colors"];
+import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
+import { Button } from "./button.tsx";
 
 export type BranchStartViewProps = {
   workspaceId: string;
@@ -180,22 +179,3 @@ function Line({
   );
 }
 
-function Button({ colors, label, disabled, onPress }: { colors: Colors; label: string; disabled?: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      style={({ pressed }) => ({
-        paddingVertical: spacing[1],
-        paddingHorizontal: spacing[3],
-        borderRadius: radius.md,
-        borderWidth: 1,
-        borderColor: colors.border,
-        opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
-      })}
-    >
-      <Text style={{ color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>{label}</Text>
-    </Pressable>
-  );
-}

@@ -9,9 +9,7 @@ import type { DiffHunk, DiffLine, FileDiff } from "../shared/diff.ts";
 import { isLine, lastLineOf, lineRefOf, pathOf, type DraftLocation, type LineRef } from "../shared/drafts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { CommentNodeContext, DraftCard, DraftsContext, NewCommentBox, type DraftsControl } from "./drafts.tsx";
-import { fontSize, leading, radius, spacing, tint } from "./theme.ts";
-
-type Colors = PluginTheme["colors"];
+import { fontSize, leading, radius, spacing, tint, type Colors } from "./theme.ts";
 
 /** The host has no monospace token; this is the stack Paseo's own code views use. */
 export const MONO_FONT =

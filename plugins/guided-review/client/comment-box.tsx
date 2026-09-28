@@ -1,9 +1,7 @@
-import type { PluginTheme } from "@getpaseo/plugin";
 import React, { useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
-import { fontSize, leading, radius, spacing } from "./theme.ts";
-
-type Colors = PluginTheme["colors"];
+import { Text, TextInput, View } from "react-native";
+import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
+import { Button } from "./button.tsx";
 
 /**
  * An extra button in a comment box that rewrites its text, like "Suggest wording": it gets what the
@@ -85,7 +83,7 @@ export function CommentBox({ colors, title, initialBody = "", saveLabel = "Save 
       />
       {error ? <Text style={{ ...small, color: colors.statusDanger }}>{error}</Text> : null}
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing[2] }}>
-        <BoxButton
+        <Button small
           colors={colors}
           primary
           label={running === "save" ? "Saving…" : saveLabel}
@@ -93,7 +91,7 @@ export function CommentBox({ colors, title, initialBody = "", saveLabel = "Save 
           onPress={() => void run("save", () => onSave(body.trim()))}
         />
         {actions.map((action) => (
-          <BoxButton
+          <Button small
             key={action.label}
             colors={colors}
             label={running === action.label ? (action.runningLabel ?? `${action.label}…`) : action.label}
@@ -101,50 +99,9 @@ export function CommentBox({ colors, title, initialBody = "", saveLabel = "Save 
             onPress={() => void run(action.label, async () => setBody(await action.run(body)))}
           />
         ))}
-        <BoxButton colors={colors} label="Cancel" disabled={running === "save"} onPress={onCancel} />
+        <Button small colors={colors} label="Cancel" disabled={running === "save"} onPress={onCancel} />
       </View>
     </View>
   );
 }
 
-export function BoxButton({
-  colors,
-  label,
-  primary,
-  disabled,
-  onPress,
-}: {
-  colors: Colors;
-  label: string;
-  primary?: boolean;
-  disabled?: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      style={({ pressed }) => ({
-        paddingVertical: spacing[1],
-        paddingHorizontal: spacing[3],
-        borderRadius: radius.md,
-        borderWidth: 1,
-        borderColor: primary ? colors.accent : colors.border,
-        backgroundColor: primary ? colors.accent : undefined,
-        opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
-      })}
-    >
-      <Text
-        style={{
-          color: primary ? colors.accentForeground : colors.foreground,
-          fontSize: fontSize.sm,
-          lineHeight: leading(fontSize.sm),
-          fontWeight: primary ? "600" : "400",
-        }}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}

@@ -1,4 +1,3 @@
-import type { PluginTheme } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { createContext, useContext } from "react";
@@ -7,9 +6,7 @@ import * as contracts from "../shared/contracts.ts";
 import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { isUnderstood, type GuideProgress, type Tally } from "../shared/progress.ts";
-import { fontSize, leading, radius, spacing } from "./theme.ts";
-
-type Colors = PluginTheme["colors"];
+import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 
 /**
  * The panel's side of "understood": the reviewer's progress through the guide it shows, and the

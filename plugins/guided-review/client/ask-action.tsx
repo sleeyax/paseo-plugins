@@ -1,11 +1,10 @@
-import type { PluginTheme } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation } from "@tanstack/react-query";
 import React, { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
-import { fontSize, leading, radius, spacing } from "./theme.ts";
+import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 
 /**
  * The panel's "Ask about this", shared by every place that offers it: a node, and an entry of the
@@ -48,7 +47,7 @@ export function useAskAbout(reviewId: string | null, openAgent: ((agentId: strin
   };
 }
 
-export function AskAction({ subject, ask, colors }: { subject: GuideSubject; ask: AskControl; colors: PluginTheme["colors"] }) {
+export function AskAction({ subject, ask, colors }: { subject: GuideSubject; ask: AskControl; colors: Colors }) {
   const key = subjectKey(subject);
   const pending = ask.pendingKey === key;
   const small = { fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) };

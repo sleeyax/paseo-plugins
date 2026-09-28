@@ -24,6 +24,7 @@ It reaches the outside only through its ports, so its tests replace every one of
 
 A new forge operation goes on the port first, then on each adapter; a new RPC goes in `shared/contracts.ts` and becomes a service method.
 The fakes (`server/fake-*.ts`) sit beside the modules rather than in tests so every test shares them, and nothing in `index.server.ts` imports them, so they never reach the bundle.
+On the client, `client/theme.ts` holds Paseo's design scale and the one `Colors` type, and `client/button.tsx` the one `Button` (`primary` for the step's main action, `small` among small text).
 
 ## Constraints that are not obvious
 
