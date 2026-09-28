@@ -4,6 +4,8 @@ import { z } from "zod";
 export const SETTINGS_ID = "settings";
 
 export const DEFAULT_GH_PATH = "gh";
+/** Claude with whichever model its provider calls the default, so a new model needs no settings change. */
+export const DEFAULT_GUIDE_AGENT = "claude";
 
 /**
  * Host settings, owned by the host's store. Every field has a default, so `schema.parse({})` is the
@@ -20,6 +22,11 @@ export const settingsDocument = defineSettings({
      * call says so in a sentence naming this setting.
      */
     ghPath: z.string().default(DEFAULT_GH_PATH),
+    /**
+     * The guide agent's provider, alone for its default model (`claude`) or with a model
+     * (`codex/gpt-5.5`), as Paseo names them. Checked only when a guide agent is created.
+     */
+    guideAgent: z.string().default(DEFAULT_GUIDE_AGENT),
   }),
 });
 
@@ -28,4 +35,11 @@ export function configuredGhPath(raw: unknown): string {
   if (typeof raw !== "string") return DEFAULT_GH_PATH;
   const trimmed = raw.trim();
   return trimmed === "" ? DEFAULT_GH_PATH : trimmed;
+}
+
+/** The guide agent setting once read: blank means the default. */
+export function configuredGuideAgent(raw: unknown): string {
+  if (typeof raw !== "string") return DEFAULT_GUIDE_AGENT;
+  const trimmed = raw.trim();
+  return trimmed === "" ? DEFAULT_GUIDE_AGENT : trimmed;
 }
