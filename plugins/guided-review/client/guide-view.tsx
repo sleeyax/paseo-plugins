@@ -4,6 +4,7 @@ import { Pressable, Text, View } from "react-native";
 import { coveredPaths, type Guide, type GuideDecision, type GuideState, type LayeredGuide, type LayeredNode } from "../shared/guide.ts";
 import { AskAction, type AskControl } from "./ask-action.tsx";
 import { NodeCode } from "./diff-view.tsx";
+import { NodeComments } from "./drafts.tsx";
 import { ProgressContext, ProgressSummary, UnderstoodToggle, type ProgressControl } from "./progress.tsx";
 import { fontSize, leading, radius, spacing } from "./theme.ts";
 
@@ -233,6 +234,7 @@ function NodeCard({
         </>
       ) : null}
       <AskAction subject={{ kind: "node", nodeId: node.id }} ask={ask} colors={colors} />
+      <NodeComments nodeId={node.id} colors={colors} />
       {code}
     </Card>
   );
