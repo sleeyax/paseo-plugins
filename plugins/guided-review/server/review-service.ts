@@ -1,18 +1,18 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import type { AskResult, GuideSubject, NodeDiff, PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
+import type { AskResult, BranchStart, GuideSubject, NodeDiff, PanelView, ReviewHeader, StartPhase, StartProgress, StartResult } from "../shared/contracts.ts";
 import { coveredPaths, GuideSchema, type CoveredCode, type GuideState, type LayeredGuide } from "../shared/guide.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { askPrompt, codeReferencesOf, type AskSubjectContext } from "./ask-prompt.ts";
 import { resolveCode } from "./diff.ts";
-import { ForgeError, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
+import { ForgeError, type BranchChangeRequest, type ChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
 import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, GuideAgentError, type GuideAgentPort } from "./guide-agent/port.ts";
 import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
 import { setAside } from "./file-classes.ts";
 import { layOutGuide, parseGuide } from "./guide-output.ts";
 import { guidePrompt } from "./guide-prompt.ts";
 import { ReviewStore, reviewIdOf, type GuideRecord, type ReviewRecord } from "./review-store.ts";
-import type { ReviewWorkspace, WorkspacePort } from "./workspaces/port.ts";
+import type { FastForwardResult, ReviewWorkspace, WorkspaceCheckout, WorkspacePort } from "./workspaces/port.ts";
 
 export type ReviewServiceOptions = {
   /** Every forge a URL may belong to; the first to claim it reads it. */
@@ -28,7 +28,17 @@ export type ReviewServiceOptions = {
 /** Paseo cuts a workspace title off well before this; a PR title can be anything. */
 const MAX_WORKSPACE_TITLE = 120;
 
-type Job = { progress: StartProgress; done: Promise<void> };
+/** `note` says why the reviewer's own branch was left alone, once it has been. */
+type Job = { progress: StartProgress; note: string | null; done: Promise<void> };
+/** Guiding a workspace's branch, from finding its change request to the review's own job. */
+type BranchJob = { state: BranchState; done: Promise<void> };
+type BranchState =
+  | { status: "finding" }
+  | { status: "none" | "failed"; message: string }
+  | { status: "choose"; checkout: LocalCheckout; forge: Forge; candidates: BranchChangeRequest[] }
+  | { status: "started"; reviewId: string };
+/** A workspace on a branch, with the repository its `origin` names. */
+type LocalCheckout = WorkspaceCheckout & { branch: string; repository: NonNullable<WorkspaceCheckout["repository"]> };
 /** A guide being generated; `agentId` is set once its agent exists. */
 type Generation = { agentId: string | null; done: Promise<void> };
 
@@ -50,6 +60,8 @@ export class ReviewService {
   readonly #guideAgents: GuideAgentPort;
   /** Guide generations running, by review and head SHA. */
   readonly #generations = new Map<string, Generation>();
+  /** The latest branch guiding asked for in each workspace, by workspace ID. */
+  readonly #branchStarts = new Map<string, BranchJob>();
 
   constructor(options: ReviewServiceOptions) {
     this.#forges = options.forges;
@@ -79,19 +91,32 @@ export class ReviewService {
       return { status: "rejected", message: `That is not ${hints}.` };
     }
 
-    const { forge, ref } = match;
-    const id = reviewIdOf(ref);
-    const running = this.#jobs.get(id);
-    if (running && !isFinished(running.progress.phase)) return { status: "started", reviewId: id };
+    return { status: "started", reviewId: this.#begin(match.forge, match.ref, null) };
+  }
 
-    const job: Job = { progress: progress("reading"), done: Promise.resolve() };
-    this.#jobs.set(id, job);
-    job.done = this.#prepare(id, forge, ref, job).catch((error: unknown) => {
-      const message = errorMessage(error);
-      this.#log(`Starting a review of ${ref.url} failed: ${message}`);
-      job.progress = { ...job.progress, phase: "failed", message };
-    });
-    return { status: "started", reviewId: id };
+  /**
+   * Guides the open change request the workspace's branch is the source of, in the background: finds
+   * it, has the reviewer choose when there are several, then starts its review with the workspace
+   * as the one to attach to. `url` is that choice. A branch guiding still running is followed.
+   */
+  async startBranch({ workspaceId, url }: { workspaceId: string; url: string | null }): Promise<BranchStart> {
+    const current = this.#branchStarts.get(workspaceId);
+    if (current && (await this.#branchRunning(current))) return this.#branchView(current);
+
+    const job: BranchJob = { state: { status: "finding" }, done: Promise.resolve() };
+    const chosen = current?.state.status === "choose" ? current.state : null;
+    const candidate = chosen?.candidates.find((entry) => entry.ref.url === url);
+    this.#branchStarts.set(workspaceId, job);
+    if (chosen && candidate) {
+      job.state = { status: "started", reviewId: this.#begin(chosen.forge, candidate.ref, ownWorkspace(chosen.checkout)) };
+    } else {
+      job.done = this.#findBranch(workspaceId, job).catch((error: unknown) => {
+        const message = errorMessage(error);
+        this.#log(`Finding the PR or MR of ${workspaceId}'s branch failed: ${message}`);
+        job.state = { status: "failed", message };
+      });
+    }
+    return this.#branchView(job);
   }
 
   async progress({ reviewId }: { reviewId: string }): Promise<StartProgress> {
@@ -104,8 +129,17 @@ export class ReviewService {
 
   async panel({ workspaceId }: { workspaceId: string }): Promise<PanelView> {
     const record = await this.#store.findByWorkspace(workspaceId);
-    if (record === null) return { status: "none" };
-    return { status: "ready", reviewId: record.id, header: record.header, guide: await this.#guideState(record) };
+    if (record === null) {
+      const branch = this.#branchStarts.get(workspaceId);
+      return branch ? { status: "none", branch: await this.#branchView(branch) } : { status: "none" };
+    }
+    return {
+      status: "ready",
+      reviewId: record.id,
+      header: record.header,
+      guide: await this.#guideState(record),
+      ...(record.note ? { note: record.note } : {}),
+    };
   }
 
   /**
@@ -218,9 +252,10 @@ export class ReviewService {
   /** Resolves once no background job is running, including the ones a finishing job started. */
   async settled(): Promise<void> {
     for (;;) {
-      const running = [...this.#jobs.values(), ...this.#generations.values()].map((job) => job.done);
+      const running = [...this.#branchStarts.values(), ...this.#jobs.values(), ...this.#generations.values()].map((job) => job.done);
       await Promise.all(running);
-      if (this.#generations.size === 0) return;
+      const now = [...this.#branchStarts.values(), ...this.#jobs.values()].map((job) => job.done);
+      if (this.#generations.size === 0 && now.every((done) => running.includes(done))) return;
     }
   }
 
@@ -232,19 +267,116 @@ export class ReviewService {
     return null;
   }
 
-  async #prepare(id: string, forge: Forge, ref: ChangeRequestRef, job: Job): Promise<void> {
+  /**
+   * Starts reading the change request and giving it a workspace as a background job, and returns the
+   * review's ID; a job already running for it is the one followed. `own` is the reviewer's workspace
+   * on the change request's branch, to fast-forward and attach to rather than make a PR workspace.
+   */
+  #begin(forge: Forge, ref: ChangeRequestRef, own: ReviewWorkspace | null): string {
+    const id = reviewIdOf(ref);
+    const running = this.#jobs.get(id);
+    if (running && !isFinished(running.progress.phase)) return id;
+
+    const job: Job = { progress: progress("reading"), note: null, done: Promise.resolve() };
+    this.#jobs.set(id, job);
+    job.done = this.#prepare(id, forge, ref, job, own).catch((error: unknown) => {
+      const message = errorMessage(error);
+      this.#log(`Starting a review of ${ref.url} failed: ${message}`);
+      job.progress = { ...job.progress, phase: "failed", message };
+    });
+    return id;
+  }
+
+  /** Finds the change request the workspace's branch is the source of, and starts it when there is one. */
+  async #findBranch(workspaceId: string, job: BranchJob): Promise<void> {
+    const checkout = await this.#workspaces.inspect(workspaceId);
+    if (checkout === null) {
+      job.state = { status: "failed", message: "This workspace is not open any more." };
+      return;
+    }
+    const { branch, repository } = checkout;
+    if (branch === null) {
+      job.state = { status: "none", message: "This workspace is not on a branch, so no PR or MR comes from it." };
+      return;
+    }
+    if (repository === null) {
+      job.state = { status: "none", message: "This workspace's repository has no origin on GitHub or GitLab to find a PR or MR on." };
+      return;
+    }
+
+    for (const forge of this.#forges) {
+      let found: BranchChangeRequest[] | null;
+      try {
+        found = await forge.findByBranch(repository, branch);
+      } catch (error) {
+        if (!(error instanceof ForgeError)) throw error;
+        job.state = { status: "failed", message: error.message };
+        return;
+      }
+      if (found === null) continue;
+
+      const local: LocalCheckout = { ...checkout, branch, repository };
+      if (found.length === 0) {
+        const kind = forge.kind === "gitlab" ? "merge request" : "pull request";
+        job.state = { status: "none", message: `No open ${kind} in ${repository.project} comes from ${branch}.` };
+      } else if (found.length === 1) {
+        job.state = { status: "started", reviewId: this.#begin(forge, found[0]!.ref, ownWorkspace(local)) };
+      } else {
+        job.state = { status: "choose", checkout: local, forge, candidates: found };
+      }
+      return;
+    }
+    job.state = { status: "none", message: `${repository.host} is neither GitHub nor a GitLab glab is logged in to.` };
+  }
+
+  /** Whether the branch guiding is still under way: finding its change request, or preparing its review. */
+  async #branchRunning(job: BranchJob): Promise<boolean> {
+    if (job.state.status === "finding") return true;
+    if (job.state.status !== "started") return false;
+    return !isFinished((await this.progress({ reviewId: job.state.reviewId })).phase);
+  }
+
+  async #branchView(job: BranchJob): Promise<BranchStart> {
+    const { state } = job;
+    switch (state.status) {
+      case "finding":
+      case "none":
+      case "failed":
+        return state;
+      case "choose":
+        return {
+          status: "choose",
+          branch: state.checkout.branch,
+          candidates: state.candidates.map(({ ref, title, author }) => ({ forge: ref.forge, url: ref.url, number: ref.number, title, author })),
+        };
+      case "started": {
+        const note = this.#jobs.get(state.reviewId)?.note ?? (await this.#store.get(state.reviewId))?.note ?? null;
+        return { status: "started", reviewId: state.reviewId, progress: await this.progress({ reviewId: state.reviewId }), note };
+      }
+    }
+  }
+
+  async #prepare(id: string, forge: Forge, ref: ChangeRequestRef, job: Job, own: ReviewWorkspace | null): Promise<void> {
     const [changeRequest, viewer] = await failingAs(`Could not read ${ref.url}`, () =>
       Promise.all([forge.fetchChangeRequest(ref), forge.currentUser(ref)]),
     );
     const header = headerOf(changeRequest);
     job.progress = { ...job.progress, header };
 
-    const workspace = (await this.#reusableWorkspace(id)) ?? (await this.#createWorkspace(forge, changeRequest, job));
+    const workspace = await this.#workspaceFor(id, forge, changeRequest, job, own);
     // The `workspace.archived` hook is not replayed after a restart, so an old workspace's agents are ended here too.
     const previous = await this.#store.get(id);
     if (previous !== null && previous.workspace.id !== workspace.id) await this.#endGuides(previous.id, previous.workspace.id);
 
-    const record: ReviewRecord = { id, ref, workspace, header, viewer, updatedAt: this.#now().toISOString() };
+    const record: ReviewRecord = {
+      id,
+      ref,
+      workspace,
+      header,
+      viewer,
+      updatedAt: this.#now().toISOString(),
+      ...(job.note === null ? {} : { note: job.note }),
+    };
     await this.#store.save(record, changeRequest);
     job.progress = { ...job.progress, phase: "ready", workspaceId: workspace.id };
     await this.#guideState(record);
@@ -335,6 +467,29 @@ export class ReviewService {
     }
   }
 
+  /**
+   * The workspace the review is read in. The reviewer's own workspace on the change request's branch
+   * (`own`, or the one the review was attached to before) when its branch is at the head or can be
+   * fast-forwarded to it; otherwise the PR workspace the review already has, or a new one, with the
+   * reason the branch was left alone kept in `job.note`.
+   */
+  async #workspaceFor(id: string, forge: Forge, changeRequest: ChangeRequest, job: Job, own: ReviewWorkspace | null): Promise<ReviewWorkspace> {
+    const previous = await this.#reusableWorkspace(id);
+    const local = own ?? (previous?.branch === undefined ? null : previous);
+    if (local?.branch !== undefined) {
+      job.progress = { ...job.progress, phase: "updating-branch" };
+      const outcome =
+        changeRequest.headBranch === local.branch
+          ? await this.#workspaces.fastForward({ workspace: local, branch: local.branch, ref: changeRequest.ref, headSha: changeRequest.headSha })
+          : null;
+      if (outcome?.status === "current" || outcome?.status === "fast-forwarded") return local;
+      job.note = leftAlone(local.branch, changeRequest, outcome);
+      if (outcome?.status === "failed") this.#log(`Fast-forwarding ${local.directory} failed: ${outcome.message}`);
+    }
+    const reusable = previous?.branch === undefined ? previous : null;
+    return reusable ?? (await this.#createWorkspace(forge, changeRequest, job));
+  }
+
   /** The workspace this review already has, while it is open: a second one would be a second worktree. */
   async #reusableWorkspace(id: string): Promise<ReviewWorkspace | null> {
     const record = await this.#store.get(id);
@@ -372,6 +527,35 @@ export class ReviewService {
     await mkdir(path.dirname(directory), { recursive: true });
     await failingAs(`Could not clone ${ref.project}`, () => forge.cloneRepository(ref, directory));
     return directory;
+  }
+}
+
+/** A workspace on a branch as the one to attach a guide to, fast-forwarding it first. */
+function ownWorkspace(checkout: LocalCheckout): ReviewWorkspace {
+  return { ...checkout.workspace, branch: checkout.branch };
+}
+
+/**
+ * Why the reviewer's branch was not used, in the one line the panel shows. `outcome` is null when the
+ * change request does not come from that branch after all.
+ */
+function leftAlone(branch: string, changeRequest: ChangeRequest, outcome: FastForwardResult | null): string {
+  const label = numberLabel(changeRequest.ref.forge, changeRequest.ref.number);
+  const instead = "so it was left untouched and the guide is in a PR workspace instead.";
+  switch (outcome?.status) {
+    case undefined:
+      return `${label} comes from ${changeRequest.headBranch}, not ${branch}, ${instead}`;
+    case "dirty":
+      return `${branch} has uncommitted changes, ${instead}`;
+    case "diverged":
+      return `${branch} has commits that are not in ${label}, ${instead}`;
+    case "moved":
+      return `The workspace is no longer on ${branch}, ${instead}`;
+    case "failed":
+      return `${branch} could not be fast-forwarded to ${label} (${outcome.message}), ${instead}`;
+    case "current":
+    case "fast-forwarded":
+      throw new Error(`A ${outcome.status} branch is not left alone.`);
   }
 }
 

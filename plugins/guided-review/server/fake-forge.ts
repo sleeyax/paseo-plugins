@@ -2,7 +2,15 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { parsePullRequestUrl } from "./forge/github.ts";
 import { parseMergeRequestUrl } from "./forge/gitlab.ts";
-import { ForgeError, type ChangeRequest, type ChangeRequestRef, type Forge, type ForgeKind, type ForgeUser } from "./forge/port.ts";
+import {
+  ForgeError,
+  type BranchChangeRequest,
+  type ChangeRequest,
+  type ChangeRequestRef,
+  type Forge,
+  type ForgeKind,
+  type ForgeUser,
+} from "./forge/port.ts";
 
 /**
  * A forge that answers from what the test put in it and records what it was asked. URLs are matched
@@ -11,6 +19,10 @@ import { ForgeError, type ChangeRequest, type ChangeRequestRef, type Forge, type
 export type FakeForge = Forge & {
   /** Change requests by URL; a URL with none reads as a forge error. */
   changeRequests: Map<string, ChangeRequest>;
+  /** Open change requests by `host/project#branch`; a branch with none has none. See `openOnBranch`. */
+  branches: Map<string, BranchChangeRequest[]>;
+  /** When set, the next branch lookup fails with it. */
+  failFindByBranch: Error | null;
   viewer: ForgeUser;
   /** Every repository cloned, and where. */
   clones: { project: string; directory: string }[];
@@ -23,11 +35,23 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     kind,
     urlHint: kind === "github" ? "a GitHub pull request URL" : "a GitLab merge request URL",
     changeRequests: new Map(),
+    branches: new Map(),
+    failFindByBranch: null,
     viewer: { login: "reviewer", name: "Rita Reviewer" },
     clones: [],
     failFetch: null,
     async matchUrl(url) {
       return PARSERS[kind](url);
+    },
+    async findByBranch(repository, branch) {
+      // GitHub's adapter takes github.com only, and GitLab's every other host.
+      if ((repository.host === "github.com") !== (kind === "github")) return null;
+      if (forge.failFindByBranch) {
+        const error = forge.failFindByBranch;
+        forge.failFindByBranch = null;
+        throw error;
+      }
+      return structuredClone(forge.branches.get(`${repository.host}/${repository.project}#${branch}`) ?? []);
     },
     async fetchChangeRequest(ref) {
       if (forge.failFetch) {
@@ -48,6 +72,15 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     },
   };
   return forge;
+}
+
+/** Makes `changeRequest` readable by its URL and findable by its source branch, beside any already there. */
+export function openOnBranch(forge: FakeForge, changeRequest: ChangeRequest): void {
+  const { ref } = changeRequest;
+  forge.changeRequests.set(ref.url, changeRequest);
+  const key = `${ref.host}/${ref.project}#${changeRequest.headBranch}`;
+  const found: BranchChangeRequest = { ref, title: changeRequest.title, author: changeRequest.author.login, headSha: changeRequest.headSha };
+  forge.branches.set(key, [...(forge.branches.get(key) ?? []), found]);
 }
 
 const PARSERS: Record<ForgeKind, (url: string) => ChangeRequestRef | null> = {

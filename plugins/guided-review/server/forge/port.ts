@@ -3,8 +3,7 @@
  * (`gh`, `glab`) through a command runner, so a test replays recorded output through a fake runner
  * and the service is tested against a fake of this port.
  *
- * Grows with the tickets that need it: resolving a branch to its change request, the current user's
- * drafts, submitting and discarding a review.
+ * Grows with the tickets that need it: the current user's drafts, submitting and discarding a review.
  */
 export interface Forge {
   readonly kind: ForgeKind;
@@ -16,6 +15,11 @@ export interface Forge {
    * host `glab` is not logged in to.
    */
   matchUrl(url: string): Promise<ChangeRequestRef | null>;
+  /**
+   * The open change requests in `repository` whose source branch is `branch`, or null when the
+   * repository is not on this forge's host. Throws a `ForgeError` for one that is but cannot be read.
+   */
+  findByBranch(repository: RepositoryRef, branch: string): Promise<BranchChangeRequest[] | null>;
   fetchChangeRequest(ref: ChangeRequestRef): Promise<ChangeRequest>;
   /** Who the CLI is logged in as on the change request's host. */
   currentUser(ref: ChangeRequestRef): Promise<ForgeUser>;
@@ -37,6 +41,25 @@ export type ChangeRequestRef = {
   /** The canonical web URL, whatever suffix the pasted one had. */
   url: string;
 };
+
+/** A repository as its git remote names it: the web host and the project path on it. */
+export type RepositoryRef = { host: string; project: string };
+
+/** An open change request found by its source branch: enough to tell several apart. */
+export type BranchChangeRequest = {
+  ref: ChangeRequestRef;
+  title: string;
+  author: string;
+  headSha: string;
+};
+
+/**
+ * The ref a change request's head can be fetched from in its target repository, fork or not:
+ * GitHub's `refs/pull/<n>/head` and GitLab's `refs/merge-requests/<iid>/head`.
+ */
+export function changeRequestHeadRef(ref: ChangeRequestRef): string {
+  return ref.forge === "github" ? `refs/pull/${ref.number}/head` : `refs/merge-requests/${ref.number}/head`;
+}
 
 export type ChangeRequestState = "open" | "closed" | "merged";
 

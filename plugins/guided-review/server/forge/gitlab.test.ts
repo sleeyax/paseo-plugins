@@ -328,3 +328,45 @@ test("a failure glab prints as a box is told in its words, not its title", async
     ),
   );
 });
+
+test("finds the open merge request whose source branch is a workspace's branch, by the project's numeric ID", async () => {
+  // Recorded for gitlab-org/cli's 7699-follow-up-validate-spec-for-components, which has !3967 open.
+  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, { stdout: fixture("merge-requests-for-branch.json") }]);
+
+  assert.deepEqual(await forge.findByBranch({ host: "gitlab.com", project: "gitlab-org/cli" }, "7699-follow-up-validate-spec-for-components"), [
+    {
+      ref: {
+        forge: "gitlab",
+        host: "gitlab.com",
+        project: "gitlab-org/cli",
+        number: 3967,
+        url: "https://gitlab.com/gitlab-org/cli/-/merge_requests/3967",
+      },
+      title: "chore: spec validation added",
+      author: "donaldcook",
+      headSha: JSON.parse(fixture("merge-requests-for-branch.json"))[0].sha,
+    },
+  ]);
+  assert.deepEqual(run.calls.at(-1)?.args, [
+    "api",
+    "--hostname",
+    "gitlab.com",
+    "projects/34675721/merge_requests?source_branch=7699-follow-up-validate-spec-for-components&state=opened&per_page=20",
+  ]);
+});
+
+test("a branch name is encoded in the merge request query, and github.com is not GitLab's", async () => {
+  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, { stdout: "[]" }]);
+
+  assert.deepEqual(await forge.findByBranch({ host: "gitlab.com", project: "gitlab-org/cli" }, "feat/a&b"), []);
+  assert.equal(await forge.findByBranch({ host: "github.com", project: "gitlab-org/cli" }, "main"), null);
+  assert.equal(run.calls.at(-1)?.args.at(-1), "projects/34675721/merge_requests?source_branch=feat%2Fa%26b&state=opened&per_page=20");
+  assert.equal(run.calls.length, 3);
+});
+
+test("a repository on a host glab is not logged in to is turned down before anything is asked of it", async () => {
+  const { forge, run } = forgeReplaying([NOT_LOGGED_IN]);
+
+  await assert.rejects(forge.findByBranch({ host: "gitlab.example.com", project: "acme/app" }, "main"), ForgeError);
+  assert.equal(run.calls.length, 1, "only the login check ran");
+});
