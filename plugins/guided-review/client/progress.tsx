@@ -1,6 +1,6 @@
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import React, { createContext, useContext } from "react";
+import React, { createContext, useContext, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
@@ -60,6 +60,22 @@ export function useProgress(reviewId: string | null, guideAgentId: string | null
         ? { key: subjectKey(subject), message: mutation.error instanceof Error ? mutation.error.message : String(mutation.error) }
         : null,
   };
+}
+
+/**
+ * Whether the card of `subject` is collapsed to its title row: it starts collapsed when the subject is understood, collapses when the reviewer marks it and expands when they take the mark back.
+ * In between, the reviewer collapses and expands it freely.
+ */
+export function useCollapsed(subject: GuideSubject): [boolean, (collapsed: boolean) => void] {
+  const progress = useContext(ProgressContext)?.progress ?? null;
+  const understood = progress !== null && isUnderstood(progress, subject);
+  const [collapsed, setCollapsed] = useState(understood);
+  const [followed, setFollowed] = useState(understood);
+  if (understood !== followed) {
+    setFollowed(understood);
+    setCollapsed(understood);
+  }
+  return [collapsed, setCollapsed];
 }
 
 /** Marks the subject understood, or takes the mark back. Draws nothing until the progress is known. */
