@@ -19,22 +19,18 @@ export default function contribute(client: PluginClientContext) {
     createStartSurface((workspaceId) => client.openPanel(PANEL_ID, { workspaceId })),
   );
 
+  client.addSidebarItem({
+    id: START_SURFACE_ID,
+    title: PLUGIN_LABEL,
+    icon: PLUGIN_ICON,
+    surface: START_SURFACE_ID,
+  });
+
   client.addSettingsScreen({
     id: SETTINGS_SCREEN_ID,
     title: PLUGIN_LABEL,
     icon: PLUGIN_ICON,
     Component: GuidedReviewSettings,
-  });
-
-  client.addCommandCenterItem({
-    id: `${PLUGIN_ID}-start`,
-    title: `${PLUGIN_LABEL}: start from a PR or MR URL`,
-    icon: PLUGIN_ICON,
-    keywords: ["review", "guide", "pull request", "pr", "github", "merge request", "mr", "gitlab", "url"],
-    context: "global",
-    onSelect({ openSurface }) {
-      openSurface(START_SURFACE_ID);
-    },
   });
 
   client.addCommandCenterItem({
