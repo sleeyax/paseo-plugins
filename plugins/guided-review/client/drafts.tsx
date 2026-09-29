@@ -380,11 +380,29 @@ export function OverviewComments({ colors, selected }: { colors: Colors; selecte
   );
 }
 
-/** The box for a comment on text of `from` that ends in the paragraph or bullet `item`, drawn under it when it is open. */
-export function ItemCommentBox({ from, item, colors }: { from: CommentOrigin; item: string; colors: Colors }) {
+/**
+ * The box for a comment on text of `from` that ends in the paragraph or bullet `item`, drawn under
+ * it when it is open; `boxRef` gets the element around it.
+ */
+export function ItemCommentBox({
+  from,
+  item,
+  colors,
+  boxRef,
+}: {
+  from: CommentOrigin;
+  item: string;
+  colors: Colors;
+  boxRef: (element: unknown) => void;
+}) {
   const control = useContext(DraftsContext);
   const box = control === null ? null : boxAt(control, from, item);
-  return control === null || box === null ? null : <FromBox control={control} box={box} from={from} colors={colors} />;
+  if (control === null || box === null) return null;
+  return (
+    <View ref={boxRef}>
+      <FromBox control={control} box={box} from={from} colors={colors} />
+    </View>
+  );
 }
 
 type NewBox = Extract<OpenBox, { kind: "new" }>;
