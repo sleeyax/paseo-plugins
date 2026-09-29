@@ -106,7 +106,7 @@ function node(nodeId: string) {
 }
 
 function mark(service: ReviewService, subject: GuideSubject, headSha = OLD) {
-  return service.setUnderstood({ reviewId: REVIEW_ID, headSha, subject, understood: true });
+  return service.setUnderstood({ reviewId: REVIEW_ID, headSha, subjects: [subject], understood: true });
 }
 
 test("a guide at the forge's head has not moved", async (t) => {
