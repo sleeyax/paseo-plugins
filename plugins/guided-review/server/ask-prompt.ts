@@ -72,10 +72,15 @@ export function askPrompt(ref: ChangeRequestRef, headSha: string, subject: AskSu
   return [...sections, ANSWER_RULES].join("\n\n");
 }
 
-const ANSWER_RULES = `Answer as a normal message; the reviewer reads it in this chat and will ask follow-up questions here.
-- Explain only. Do not report bugs, security issues, risks or style problems, and do not suggest fixes.
+const ANSWER_RULES = answerRules("Explain only. Do not report bugs, security issues, risks or style problems, and do not suggest fixes.");
+
+/** The rules for an answer the reviewer reads in the agent's chat, with `scope` saying what it may cover. */
+export function answerRules(scope: string): string {
+  return `Answer as a normal message; the reviewer reads it in this chat and will ask follow-up questions here.
+- ${scope}
 - Do not change anything. Read files in your working directory, the repository at the change's head commit, where the diff alone does not explain something.
 - Do not answer with JSON.`;
+}
 
 /** What the guide says about `node`, and the code it covers, for a prompt that names the node. */
 export function nodeContext(node: GuideNode, code: readonly CodeReference[]): string {

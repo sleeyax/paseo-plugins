@@ -337,10 +337,10 @@ export type FinishView = z.output<typeof FinishViewSchema>;
 export type HeadCheck = z.output<typeof HeadCheckSchema>;
 
 /**
- * What a comment box is for, as "Suggest wording" names it: a comment on code at a draft location,
- * or a general one, on the change as a whole, about a node or about a passage of the overview the
- * reviewer highlighted; a node's comment can come from a highlighted passage of it too. The server
- * looks the lines and the guide's nodes up itself, as for "Ask about this".
+ * What a comment box is for, as "Suggest wording" and "Ask agent" name it: a comment on code at a
+ * draft location, or a general one, on the change as a whole, about a node or about a passage of the
+ * overview the reviewer highlighted; a node's comment can come from a highlighted passage of it too.
+ * The server looks the lines and the guide's nodes up itself, as for "Ask about this".
  */
 export const CommentSubjectSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("code"), location: DraftLocationSchema }),
@@ -376,6 +376,18 @@ export const getSuggestion = defineRpc({
   name: "guided-review.drafts.suggestion",
   input: z.object({ suggestionId: z.string() }),
   output: SuggestionSchema,
+});
+
+/**
+ * "Ask agent": sends the guide agent the reviewer's `question` about what a comment box is on, instead
+ * of saving it as a draft, for the reviewer to follow up in its chat, as `askAbout` does. As for
+ * `suggestWording`, `headSha` is the head of the guide the panel drew, and one the review has been
+ * regenerated away from is refused.
+ */
+export const askQuestion = defineRpc({
+  name: "guided-review.guide.question",
+  input: z.object({ reviewId: z.string(), headSha: z.string(), subject: CommentSubjectSchema, question: z.string() }),
+  output: AskResultSchema,
 });
 
 export type ReviewHeader = z.output<typeof ReviewHeaderSchema>;
