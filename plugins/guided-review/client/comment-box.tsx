@@ -27,6 +27,8 @@ export type CommentBoxProps = {
   saveLabel?: string;
   /** Saves the text, trimmed; a failure is shown in the box, which stays open with the text. */
   onSave: (body: string) => Promise<void>;
+  /** "Ask agent": sends the text, trimmed, to the guide agent as a question instead of saving it; a failure is shown as `onSave`'s is. */
+  onAsk?: ((question: string) => Promise<void>) | undefined;
   onCancel: () => void;
   actions?: readonly CommentBoxAction[];
 };
@@ -40,11 +42,12 @@ export function CommentBox({
   initialBody = "",
   saveLabel = "Save draft",
   onSave,
+  onAsk,
   onCancel,
   actions = [],
 }: CommentBoxProps) {
   const [body, setBody] = useState(initialBody);
-  /** What is running: "save", or an action's label. */
+  /** What is running: "save", "ask", or an action's label. */
   const [running, setRunning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const small = { fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) };
@@ -80,7 +83,7 @@ export function CommentBox({
         multiline
         autoFocus={autoFocus}
         editable={running === null}
-        placeholder="Leave a comment"
+        placeholder={onAsk ? "Leave a comment, or ask the guide agent" : "Leave a comment"}
         placeholderTextColor={colors.foregroundMuted}
         accessibilityLabel={title}
         style={{
@@ -105,6 +108,14 @@ export function CommentBox({
           disabled={running !== null || body.trim() === ""}
           onPress={() => void run("save", () => onSave(body.trim()))}
         />
+        {onAsk ? (
+          <Button small
+            colors={colors}
+            label={running === "ask" ? "Asking…" : "Ask agent"}
+            disabled={running !== null || body.trim() === ""}
+            onPress={() => void run("ask", () => onAsk(body.trim()))}
+          />
+        ) : null}
         {actions.map((action) => (
           <Button small
             key={action.label}

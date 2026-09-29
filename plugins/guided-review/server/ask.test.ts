@@ -5,6 +5,8 @@ import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fakeForge, sampleChangeRequest } from "./fake-forge.ts";
 import { fakeGuideAgents, sampleGuide, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
+import type { CommentSubject } from "../shared/contracts.ts";
+import type { DraftLocation } from "../shared/drafts.ts";
 import type { Guide } from "../shared/guide.ts";
 import type { ChangedFile } from "./forge/port.ts";
 import { fakeWorkspaces } from "./fake-workspaces.ts";
@@ -244,4 +246,75 @@ test("a failed guide has nothing to ask about", async (t) => {
     agentId: "agent-1",
     message: "There is no finished guide to ask about yet.",
   });
+});
+
+/** "Ask agent" from a comment box, which sends the reviewer's own question about what the box is on. */
+
+const HEAD = "b".repeat(40);
+
+function question(service: ReviewService, subject: CommentSubject, text: string, headSha = HEAD) {
+  return service.askQuestion({ reviewId: REVIEW_ID, headSha, subject, question: text });
+}
+
+test("a question on code sends the lines, the node they fall in and the question, and nothing to the forge", async (t) => {
+  const { service, agents } = await withGuide(t, { upload: UPLOAD_IN_TWO });
+
+  const location: DraftLocation = { kind: "range", path: "src/upload.ts", start: { side: "new", line: 21 }, end: { side: "new", line: 22 } };
+  assert.deepEqual(await question(service, { kind: "code", location }, "  Why two lines?  "), { status: "sent", agentId: "agent-1" });
+
+  const [prompt, ...rest] = agents.created[0]!.sent;
+  assert.equal(rest.length, 0);
+  assert.equal(
+    prompt,
+    [
+      `The reviewer of ${URL} at bbbbbbbbbbbb has a question for you.`,
+      "It is about lines 21–22 of src/upload.ts. The lines as the diff shows them:\n```diff\n+y1\n+y2\n```",
+      "Your guide does not place this code in any of its nodes.",
+      "Their question:\n```\nWhy two lines?\n```",
+      [
+        "Answer as a normal message; the reviewer reads it in this chat and will ask follow-up questions here.",
+        "- Answer the question they asked. Do not raise bugs, security issues, risks, style problems or fixes they did not ask about.",
+        "- Do not change anything. Read files in your working directory, the repository at the change's head commit, where the diff alone does not explain something.",
+        "- Do not answer with JSON.",
+      ].join("\n"),
+    ].join("\n\n"),
+  );
+});
+
+test("a question on highlighted text of a concept or the overview names it with the passage", async (t) => {
+  const { service, agents } = await withGuide(t);
+
+  assert.equal((await question(service, { kind: "node", nodeId: "retry-policy", quote: "pure function" }, "Pure how?")).status, "sent");
+  assert.equal((await question(service, { kind: "overview", quote: "transient" }, "Which failures are transient?")).status, "sent");
+
+  const [concept, overview] = agents.created[0]!.sent;
+  assert.match(concept!, /\n\nIt is about one concept of the change, the node "retry-policy", "Retry policy" of your guide\.\nWhat the guide says about it:\n/);
+  assert.match(concept!, /\n\nThe reviewer highlighted this passage of your guide to ask about:\n```\npure function\n```\n\nTheir question:\n```\nPure how\?\n```\n\n/);
+  assert.match(overview!, /\n\nIt is about the overview of your guide, which says:\n- Idea: Uploads that fail/);
+  assert.match(overview!, /- Where to spend attention: "Retry policy": Every retry decision is made here\./);
+  assert.match(overview!, /passage of your guide to ask about:\n```\ntransient\n```/);
+});
+
+test("a question with no text, on a guide Regenerate replaced, or on a concept the guide lost is not sent", async (t) => {
+  const { service, agents } = await withGuide(t);
+  const node: CommentSubject = { kind: "node", nodeId: "uploader" };
+
+  assert.deepEqual(await question(service, node, "   "), { status: "not-sent", agentId: "agent-1", message: "Type a question to ask first." });
+  assert.deepEqual(await question(service, { kind: "node", nodeId: "backoff" }, "Why?"), {
+    status: "not-sent",
+    agentId: "agent-1",
+    message: "That concept is not in the guide any more.",
+  });
+  assert.deepEqual(await question(service, node, "Why?", "d".repeat(40)), {
+    status: "not-sent",
+    agentId: null,
+    message: "This question is about the guide at ddddddd, which was regenerated for bbbbbbb. Ask from the guide at the new head.",
+  });
+  agents.created[0]!.status = "busy";
+  assert.deepEqual(await question(service, node, "Why?"), {
+    status: "not-sent",
+    agentId: "agent-1",
+    message: "The guide agent is busy with another answer. Ask again once it has finished.",
+  });
+  assert.deepEqual(agents.created[0]!.sent, []);
 });

@@ -20,6 +20,7 @@ import { coveredPaths, type CoveredCode, type GuideState, type LayeredGuide } fr
 import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
 import type { SubmitResult, Verdict, VerdictOption } from "../shared/submit.ts";
 import { askPrompt, codeReferencesOf, type AskSubjectContext } from "./ask-prompt.ts";
+import { commentSubjectContext, type CommentSubjectContext } from "./comment-subject.ts";
 import { DiffHighlighter, syntaxColors, syntaxThemes } from "./diff-highlight.ts";
 import { entryCode, resolveCode } from "./diff.ts";
 import { errorMessage } from "./error-message.ts";
@@ -30,9 +31,10 @@ import { GuideGenerations, isReady, marksOf } from "./guide-generation.ts";
 import { oneAtATimePer } from "./one-at-a-time.ts";
 import { regeneratedAway, ReviewDrafts } from "./review-drafts.ts";
 import { isFinished, ReviewPreparation, startProgressAt } from "./review-preparation.ts";
+import { questionPrompt } from "./question-prompt.ts";
 import { ReviewStore, type ProgressRecord, type ReviewRecord } from "./review-store.ts";
 import { verdictOptions } from "./submit-rules.ts";
-import { codeWordingContext, WordingSchema, wordingPrompt, type WordingSubjectContext } from "./wording-prompt.ts";
+import { WordingSchema, wordingPrompt } from "./wording-prompt.ts";
 import type { ReviewWorkspace, WorkspaceCheckout, WorkspacePort } from "./workspaces/port.ts";
 
 export type ReviewServiceOptions = {
@@ -219,10 +221,55 @@ export class ReviewService {
 
   /**
    * "Ask about this": sends the guide agent a prompt naming the subject, with what the guide says
-   * about it, for the reviewer to follow up in the agent's chat. Sends only to an idle agent of a
-   * finished guide, since a prompt to a busy one would interrupt it; otherwise says why not.
+   * about it, for the reviewer to follow up in the agent's chat.
    */
   async ask({ reviewId, subject }: { reviewId: string; subject: GuideSubject }): Promise<AskResult> {
+    return this.#sendToGuideAgent(reviewId, null, async (record, guide) => {
+      const context = await this.#askContext(record, guide, subject);
+      return typeof context === "string" ? { refused: context } : { prompt: askPrompt(record.ref, record.header.headSha, context) };
+    });
+  }
+
+  /**
+   * "Ask agent": sends the guide agent the reviewer's `question` about what their comment box is on,
+   * for them to follow up in the agent's chat. As for `suggestWording`, the subject's lines are those
+   * of the guide the panel drew at `headSha`, and one from a guide Regenerate has replaced is refused.
+   */
+  async askQuestion({
+    reviewId,
+    headSha: drawnAt,
+    subject,
+    question,
+  }: {
+    reviewId: string;
+    headSha: string;
+    subject: CommentSubject;
+    question: string;
+  }): Promise<AskResult> {
+    return this.#sendToGuideAgent(reviewId, drawnAt, async (record, guide) => {
+      if (question.trim() === "") return { refused: "Type a question to ask first." };
+      const { headSha } = record.header;
+      const changeRequest = await this.#store.snapshot(record.id, headSha);
+      if (changeRequest === null) return { refused: "What the forge said at this head is missing. Start the review again." };
+      try {
+        return { prompt: questionPrompt(record.ref, headSha, commentSubjectContext(changeRequest.files, guide, subject), question) };
+      } catch (error) {
+        return { refused: errorMessage(error) };
+      }
+    });
+  }
+
+  /**
+   * Sends the prompt `promptFor` writes for the guide the panel shows, or keeps the reason it gives
+   * not to. Sends only to an idle agent of a finished guide, since a prompt to a busy one would
+   * interrupt it; otherwise says why not. `drawnAt`, when set, is the head of the guide the panel drew,
+   * refused once Regenerate has moved the review off it.
+   */
+  async #sendToGuideAgent(
+    reviewId: string,
+    drawnAt: string | null,
+    promptFor: (record: ReviewRecord, guide: LayeredGuide) => Promise<{ prompt: string } | { refused: string }>,
+  ): Promise<AskResult> {
     let record: ReviewRecord;
     try {
       record = await this.#record(reviewId);
@@ -230,6 +277,7 @@ export class ReviewService {
       return notSent(null, unknownReview(error));
     }
     const { headSha } = record.header;
+    if (drawnAt !== null && drawnAt !== headSha) return notSent(null, regeneratedAway(drawnAt, headSha, "This question is about", "Ask from"));
     const running = this.#guides.running(record);
     if (running) return notSent(running.agentId, "The guide agent is still writing the guide. Ask once the guide is ready.");
     const shown = await this.#guides.shown(record);
@@ -240,13 +288,13 @@ export class ReviewService {
     }
     const { agentId } = shown;
 
-    const context = await this.#askContext(record, shown.guide, subject);
-    if (typeof context === "string") return notSent(agentId, context);
+    const written = await promptFor(record, shown.guide);
+    if ("refused" in written) return notSent(agentId, written.refused);
 
     const unavailable = await this.#unavailable(agentId, "Ask again once it has finished.", "no chat to ask in");
     if (unavailable !== null) return notSent(unavailable.gone ? null : agentId, unavailable.message);
     try {
-      await this.#guideAgents.send(agentId, askPrompt(record.ref, headSha, context));
+      await this.#guideAgents.send(agentId, written.prompt);
     } catch (error) {
       // The agent got busy, or went, between the check and the send.
       if (error instanceof GuideAgentError) return notSent(agentId, error.message);
@@ -463,19 +511,9 @@ export class ReviewService {
 
     const changeRequest = await this.#store.snapshot(record.id, headSha);
     if (changeRequest === null) return notSuggested("What the forge said at this head is missing. Start the review again.");
-    let context: WordingSubjectContext;
+    let context: CommentSubjectContext;
     try {
-      if (subject.kind === "node") {
-        const node = shown.guide.nodes.find((candidate) => candidate.id === subject.nodeId);
-        if (node === undefined) return notSuggested("That concept is not in the guide any more.");
-        const code = codeReferencesOf(resolveCode(changeRequest.files, node.covers).files);
-        context = { kind: "node", node, code, quote: subject.quote?.trim() || null };
-      } else if (subject.kind === "overview") {
-        const titles = new Map(shown.guide.nodes.map((node) => [node.id, node.title]));
-        context = { kind: "overview", overview: shown.guide.overview, titles, quote: subject.quote.trim() };
-      } else {
-        context = codeWordingContext(changeRequest.files, shown.guide.nodes, subject.location);
-      }
+      context = commentSubjectContext(changeRequest.files, shown.guide, subject);
     } catch (error) {
       return notSuggested(errorMessage(error));
     }

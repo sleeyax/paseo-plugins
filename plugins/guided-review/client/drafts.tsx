@@ -50,6 +50,12 @@ export type DraftsControl = {
    * reason, as a sentence, when there is none; saves nothing.
    */
   suggestWording: (subject: CommentSubject, typed: string) => Promise<string>;
+  /**
+   * "Ask agent": sends `question` about `subject` to the guide agent, closes the box and opens the
+   * agent's chat. Throws the reason, as a sentence, when nothing was sent. Null on a host that cannot
+   * open the chat, where the answer could not be read.
+   */
+  askQuestion: ((subject: CommentSubject, question: string) => Promise<void>) | null;
   open: OpenBox | null;
   setOpen: (box: OpenBox | null) => void;
 };
@@ -72,13 +78,19 @@ export type DraftsGuide = { agentId: string; nodes: readonly { id: string; title
  * closes a box opened on the old guide. So does a guide written again at the same head, whose
  * nodes the drafts' links are followed to afresh.
  */
-export function useDrafts(reviewId: string | null, headSha: string | null, guide: DraftsGuide | null = null): DraftsControl | null {
+export function useDrafts(
+  reviewId: string | null,
+  headSha: string | null,
+  guide: DraftsGuide | null = null,
+  openAgent?: (agentId: string) => void,
+): DraftsControl | null {
   const listDrafts = useRpc(contracts.listDrafts);
   const createDraft = useRpc(contracts.createDraft);
   const updateDraft = useRpc(contracts.updateDraft);
   const deleteDraft = useRpc(contracts.deleteDraft);
   const suggestWording = useRpc(contracts.suggestWording);
   const getSuggestion = useRpc(contracts.getSuggestion);
+  const askQuestion = useRpc(contracts.askQuestion);
   const queryClient = useQueryClient();
   const drawn = `${headSha}@${guide?.agentId ?? ""}`;
   const queryKey = [PLUGIN_ID, "drafts", reviewId, drawn];
@@ -128,6 +140,15 @@ export function useDrafts(reviewId: string | null, headSha: string | null, guide
       if (suggestion.status === "failed") throw new Error(suggestion.message);
       return suggestion.body;
     },
+    askQuestion:
+      openAgent === undefined
+        ? null
+        : async (subject, question) => {
+            const result = await askQuestion({ reviewId, headSha, subject, question });
+            if (result.status === "not-sent") throw new Error(result.message);
+            setOpen(null);
+            openAgent(result.agentId);
+          },
     open,
     setOpen,
   };
@@ -137,7 +158,8 @@ export function useDrafts(reviewId: string | null, headSha: string | null, guide
  * The box for a new comment at `location`. Every comment box in the panel is opened through this
  * or `DraftCard`, which is where actions for all of them, like "Suggest wording", go. The comment
  * is linked to the node whose code the box is drawn in, or for a general comment to `from`, with
- * the `quote` highlighted there.
+ * the `quote` highlighted there. Only a new comment offers "Ask agent", which asks about the same
+ * subject instead of saving.
  */
 export function NewCommentBox({
   control,
@@ -170,6 +192,7 @@ export function NewCommentBox({
       quote={quote}
       autoFocus={!keepSelection}
       onSave={(body) => control.create(location, body, origin, quote)}
+      onAsk={subject === null || control.askQuestion === null ? undefined : (question) => control.askQuestion!(subject, question)}
       onCancel={() => control.setOpen(null)}
       actions={subject === null ? [] : [suggestWordingAction(control, subject)]}
     />

@@ -1,11 +1,9 @@
 import { z } from "zod";
-import type { DiffLine } from "../shared/diff.ts";
-import { describeLocation, type DraftLocation } from "../shared/drafts.ts";
-import { coveredPaths, type Guide, type GuideNode } from "../shared/guide.ts";
-import { anchorAt } from "./anchors.ts";
-import { parsePatch, resolveCode } from "./diff.ts";
-import type { ChangedFile, ChangeRequestRef } from "./forge/port.ts";
-import { decisionLine, nodeContext, type CodeReference } from "./ask-prompt.ts";
+import { describeLocation } from "../shared/drafts.ts";
+import type { Guide, GuideNode } from "../shared/guide.ts";
+import { nodeContext, type CodeReference } from "./ask-prompt.ts";
+import { diffOf, fenced, nodesContext, overviewLines, type CodeSubjectContext, type CommentSubjectContext } from "./comment-subject.ts";
+import type { ChangeRequestRef } from "./forge/port.ts";
 
 /** What "Suggest wording" asks the guide agent for: the comment's text, which the panel puts in the box. */
 export const WordingSchema = z.object({
@@ -16,62 +14,12 @@ export const WordingSchema = z.object({
 });
 
 /**
- * What the wording prompt says about where the comment goes, resolved from the stored guide and what
- * the forge said at its head. A comment on code names its file, the lines it is on (none for the
- * file as a whole) and the guide's nodes whose covers include any of them, usually one and often none.
- * A general comment, on the change as a whole, names the node and the code it covers, or the overview
- * with the node titles its attention entries point at, and the passage of either the reviewer highlighted.
- */
-export type WordingSubjectContext =
-  | CodeWordingContext
-  | { kind: "node"; node: GuideNode; code: readonly CodeReference[]; quote: string | null }
-  | { kind: "overview"; overview: Guide["overview"]; titles: ReadonlyMap<string, string>; quote: string };
-
-export type CodeWordingContext = {
-  kind: "code";
-  location: DraftLocation;
-  file: ChangedFile;
-  lines: readonly DiffLine[];
-  nodes: readonly GuideNode[];
-};
-
-/**
- * The context of a comment at `location`: its lines, looked up in the diff at the review's head, and
- * the nodes that cover them. Throws, in a sentence for the panel, when a comment cannot go there.
- */
-export function codeWordingContext(files: readonly ChangedFile[], nodes: readonly GuideNode[], location: DraftLocation): CodeWordingContext {
-  if (location.kind === "general") throw new Error("A comment on the change as a whole is about a node or the overview; suggest its wording from there.");
-  const anchor = anchorAt(files, location);
-  const file = files.find((candidate) => candidate.path === location.path)!;
-  if (anchor.kind === "file" || anchor.kind === "general") {
-    return { kind: "code", location, file, lines: [], nodes: nodes.filter((node) => coveredPaths(node).includes(file.path)) };
-  }
-
-  const [first, last] = anchor.kind === "line" ? [anchor.line, anchor.line] : [anchor.start, anchor.end];
-  const same = (a: Pick<DiffLine, "oldLine" | "newLine">, b: Pick<DiffLine, "oldLine" | "newLine">) =>
-    a.oldLine === b.oldLine && a.newLine === b.newLine;
-  let lines: DiffLine[] = [];
-  for (const hunk of parsePatch(file.patch!)) {
-    const start = hunk.lines.findIndex((line) => same(line, first));
-    if (start === -1) continue;
-    lines = hunk.lines.slice(start, hunk.lines.findIndex((line) => same(line, last)) + 1);
-    break;
-  }
-  const covering = nodes.filter((node) =>
-    resolveCode(files, node.covers)
-      .files.filter((diff) => diff.path === file.path)
-      .some((diff) => diff.hunks.some((hunk) => hunk.lines.some((line) => lines.some((anchored) => same(line, anchored))))),
-  );
-  return { kind: "code", location, file, lines, nodes: covering };
-}
-
-/**
  * The prompt sent to the guide agent for "Suggest wording". The agent wrote the guide earlier in the
  * same conversation, and the reviewer may have asked it about the change since, so the prompt names
  * where the comment goes and the part of the guide it falls in, and leaves the rest to that chat.
  * `typed` is whatever is in the comment box: a rough draft, an instruction, or nothing.
  */
-export function wordingPrompt(ref: ChangeRequestRef, headSha: string, subject: WordingSubjectContext, typed: string): string {
+export function wordingPrompt(ref: ChangeRequestRef, headSha: string, subject: CommentSubjectContext, typed: string): string {
   const change = `${ref.url} at ${headSha.slice(0, 12)}`;
   const text = typed.trim();
   return [
@@ -88,7 +36,7 @@ export function wordingPrompt(ref: ChangeRequestRef, headSha: string, subject: W
   ].join("\n\n");
 }
 
-function subjectContext(ref: ChangeRequestRef, subject: WordingSubjectContext): string[] {
+function subjectContext(ref: ChangeRequestRef, subject: CommentSubjectContext): string[] {
   switch (subject.kind) {
     case "code":
       return [codeContext(subject), nodesContext(subject.nodes)];
@@ -99,23 +47,15 @@ function subjectContext(ref: ChangeRequestRef, subject: WordingSubjectContext): 
   }
 }
 
-function codeContext({ location, file, lines }: CodeWordingContext): string {
+function codeContext({ location, file, lines }: CodeSubjectContext): string {
   const renamed = file.previousPath ? `, renamed from ${file.previousPath}` : "";
   if (location.kind === "file") {
     return `It goes on ${file.path} as a whole, not on any line of it. The file was ${file.status}${renamed}, +${file.additions} −${file.deletions}.`;
   }
-  const marker = { added: "+", removed: "-", context: " " } as const;
-  const diff = lines.map((line) => `${marker[line.kind]}${line.text}`).join("\n");
   return [
     `It goes on ${describeLocation(location)} of ${file.path}${renamed}. The ${lines.length === 1 ? "line" : "lines"} as the diff shows ${lines.length === 1 ? "it" : "them"}:`,
-    fenced(diff, "diff"),
+    diffOf(lines),
   ].join("\n");
-}
-
-function nodesContext(nodes: readonly GuideNode[]): string {
-  if (nodes.length === 0) return "Your guide does not place this code in any of its nodes.";
-  const heading = nodes.length === 1 ? "The node of your guide this code falls in:" : "The nodes of your guide this code falls in:";
-  return [heading, ...nodes.map((node) => `- "${node.id}", "${node.title}": ${node.summary}`)].join("\n");
 }
 
 function wordingRules(ref: ChangeRequestRef): string {
@@ -139,14 +79,10 @@ function conceptContext(ref: ChangeRequestRef, node: GuideNode, code: readonly C
 /** A comment on the change as a whole about the overview, which the prompt gives as the guide has it. */
 function overviewContext(ref: ChangeRequestRef, overview: Guide["overview"], titles: ReadonlyMap<string, string>): string {
   const change = ref.forge === "gitlab" ? "merge request" : "pull request";
-  const lines = [
+  return [
     `It goes on the ${change} as a whole, not on any line or file: it is about the overview of your guide, which says:`,
-    `- Idea: ${oneLine(overview.idea)}`,
-  ];
-  for (const item of overview.needToKnows) lines.push(`- Need to know: ${oneLine(item)}`);
-  for (const decision of overview.decisions) lines.push(decisionLine(decision));
-  for (const entry of overview.attention) lines.push(`- Where to spend attention: "${titles.get(entry.nodeId) ?? entry.nodeId}": ${entry.reason}`);
-  return lines.join("\n");
+    ...overviewLines(overview, titles),
+  ].join("\n");
 }
 
 /** The passage of the guide the reviewer highlighted, which only tells the agent what the comment is about. */
@@ -174,15 +110,4 @@ function generalRules(ref: ChangeRequestRef): string {
 - Word only what the reviewer wants to say. Do not add bugs, security issues, risks, style problems or fixes of your own.
 - Write the comment's text only: no greeting, no sign-off and no preamble.
 - Do not change anything. Read files in your working directory, the repository at the change's head commit, where the diff alone does not explain something.`;
-}
-
-function oneLine(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
-
-/** `text` in a Markdown fence long enough that nothing inside closes it. */
-function fenced(text: string, language = ""): string {
-  const longest = Math.max(2, ...[...text.matchAll(/`+/g)].map((run) => run[0].length));
-  const fence = "`".repeat(longest + 1);
-  return `${fence}${language}\n${text}\n${fence}`;
 }
