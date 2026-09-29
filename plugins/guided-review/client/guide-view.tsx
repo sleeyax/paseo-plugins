@@ -228,8 +228,7 @@ function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
 }
 
 /**
- * A node; a leaf, which follows what the trunk already explained, is drawn lighter.
- * Its code (`code`) comes before its comments, which sit at the foot of the card.
+ * A node, whose code (`code`) comes before its comments, which sit at the foot of the card.
  * The reviewer can highlight its text, not its code, or hold it in the phone app, to comment on.
  */
 function NodeCard({
@@ -249,7 +248,7 @@ function NodeCard({
   const { prose, text, selected } = useCardText({ kind: "node", nodeId: node.id });
   const [collapsed, setCollapsed] = useCollapsed({ kind: "node", nodeId: node.id });
   return (
-    <Card colors={colors} light={node.leaf}>
+    <Card colors={colors}>
       <CardTextContext.Provider value={text}>
         <View ref={prose} style={{ gap: spacing[2] }}>
           <View style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing[2] }}>
@@ -258,10 +257,10 @@ function NodeCard({
               selectable={HIGHLIGHTS_TEXT}
               style={{
                 flex: 1,
-                color: node.leaf ? colors.foregroundMuted : colors.foreground,
+                color: colors.foreground,
                 fontSize: fontSize.base,
                 lineHeight: leading(fontSize.base),
-                fontWeight: node.leaf ? "500" : "600",
+                fontWeight: "600",
               }}
             >
               <GuideText text={node.title} colors={colors} />

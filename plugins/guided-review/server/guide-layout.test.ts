@@ -59,7 +59,7 @@ function guideOf(nodes: GuideNode[], supporting: Guide["supporting"] = []): Guid
   return { ...sampleGuide(), overview: { ...sampleGuide().overview, attention: [{ nodeId: nodes[0]!.id, reason: "It matters." }] }, nodes, supporting };
 }
 
-test("nodes are laid out in layers from their dependencies, capped at three, with leaves marked", async (t) => {
+test("nodes are laid out in layers from their dependencies, capped at three", async (t) => {
   const { service, agents } = await withHost(t, ["a", "b", "c", "d", "e", "f"].map((name) => file(`src/${name}.ts`)));
 
   const guide = await generated(
@@ -78,15 +78,15 @@ test("nodes are laid out in layers from their dependencies, capped at three, wit
   assert.equal(guide?.status, "ready");
   if (guide?.status !== "ready") return;
   assert.deepEqual(
-    guide.guide.nodes.map(({ id, layer, leaf }) => ({ id, layer, leaf })),
+    guide.guide.nodes.map(({ id, layer }) => ({ id, layer })),
     [
-      { id: "store", layer: 0, leaf: false },
-      { id: "config", layer: 0, leaf: false },
-      { id: "cache", layer: 1, leaf: false },
-      { id: "api", layer: 2, leaf: false },
+      { id: "store", layer: 0 },
+      { id: "config", layer: 0 },
+      { id: "cache", layer: 1 },
+      { id: "api", layer: 2 },
       // Deeper than three layers stays in the last one, after the node it builds on.
-      { id: "handler", layer: 2, leaf: true },
-      { id: "cli", layer: 1, leaf: true },
+      { id: "handler", layer: 2 },
+      { id: "cli", layer: 1 },
     ],
   );
   assert.deepEqual(guide.guide.nodes[3]!.dependencies, [

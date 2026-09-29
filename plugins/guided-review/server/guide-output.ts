@@ -60,8 +60,7 @@ export function parseGuide(reply: string, sent: readonly ChangedFile[], setAside
 }
 
 /**
- * Lays a valid guide out for the panel: each node's layer from the DAG, whether it is a leaf, and
- * coverage against the forge's `changed` files. A node's code is its `covers`, and several nodes may
+ * Lays a valid guide out for the panel: each node's layer from the DAG, and coverage against the forge's `changed` files. A node's code is its `covers`, and several nodes may
  * cover different hunks of one file, so coverage sorts what no node covers, and nothing in the
  * change goes unshown: the lockfiles and generated files set aside before generation go to
  * Supporting, then every file with a change no node covers, the whole file or only the rest of a
@@ -72,11 +71,9 @@ export function parseGuide(reply: string, sent: readonly ChangedFile[], setAside
  */
 export function layOutGuide(guide: Guide, changed: readonly ChangedFile[], setAside: readonly SupportingEntry[]): LayeredGuide {
   const layers = new Map<string, number>();
-  const builtOn = new Set<string>();
   for (const node of guide.nodes) {
     const below = node.dependencies.map((dependency) => layers.get(dependency.nodeId) ?? 0);
     layers.set(node.id, below.length === 0 ? 0 : Math.min(MAX_LAYERS - 1, Math.max(...below) + 1));
-    for (const dependency of node.dependencies) builtOn.add(dependency.nodeId);
   }
 
   const covers = guide.nodes.flatMap((node) => node.covers);
@@ -84,11 +81,7 @@ export function layOutGuide(guide: Guide, changed: readonly ChangedFile[], setAs
   const unplaced = new Set(changed.filter((file) => !aside.has(file.path) && uncoveredCode(file, covers) !== null).map((file) => file.path));
   const place = (file: string) => unplaced.delete(normalise(file));
 
-  const nodes = guide.nodes.map((node) => ({
-    ...node,
-    layer: layers.get(node.id)!,
-    leaf: node.dependencies.length > 0 && !builtOn.has(node.id),
-  }));
+  const nodes = guide.nodes.map((node) => ({ ...node, layer: layers.get(node.id)! }));
   const supporting = [
     ...setAside,
     ...guide.supporting.map((entry) => ({ ...entry, path: normalise(entry.path) })).filter((entry) => place(entry.path)),
