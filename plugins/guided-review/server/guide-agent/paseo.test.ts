@@ -94,9 +94,19 @@ test("the guide agent is created in the workspace, in plan mode, with the provid
       title: "Guide: Retry uploads",
       labels: { a: "b" },
       prompt: "Explain.",
-      outputSchema: { type: "object" },
     },
   ]);
+});
+
+test("the native output schema goes to Codex and OpenCode, which enforce it, and to no other provider", async () => {
+  for (const [agent, native] of [["codex/gpt-5.5", true], ["opencode/big-model", true], ["claude-tty/opus", false], ["claude", false]] as const) {
+    const { paseo, state } = stubPaseo();
+    const agents = createPaseoGuideAgents({ paseo: () => paseo, agent: async () => ({ agent, effort: "", mode: "" }) });
+
+    await agents.create({ workspace: WORKSPACE, title: "Guide", labels: {}, prompt: "Explain.", outputSchema: { type: "object" } });
+
+    assert.equal("outputSchema" in state.created[0]!, native, agent);
+  }
 });
 
 test("a configured model is used as it is, and a provider that offers no read-only mode runs in its default", async () => {
