@@ -16,7 +16,7 @@ import { GuideView } from "./guide-view.tsx";
 import { FinishReview } from "./finish-review.tsx";
 import { StaleGuideBanner, useRegenerate } from "./head-check.tsx";
 import { useProgress } from "./progress.tsx";
-import { fontSize, leading, MAX_CONTENT_WIDTH, radius, spacing } from "./theme.ts";
+import { fontSize, leading, MAX_PANEL_WIDTH, radius, spacing } from "./theme.ts";
 
 const POLL_MS = 2_000;
 /** An empty panel is asked again now and then, since the Command Center item starts a branch's guide from outside it. */
@@ -107,7 +107,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
       style={{ flex: 1, backgroundColor: colors.surface0 }}
       contentContainerStyle={{
         width: "100%",
-        maxWidth: MAX_CONTENT_WIDTH,
+        maxWidth: MAX_PANEL_WIDTH,
         alignSelf: "center",
         padding: layout.compact ? spacing[3] : spacing[4],
       }}
