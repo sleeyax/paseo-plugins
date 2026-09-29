@@ -95,6 +95,8 @@ export const GuideSchema = z.object({
 export const LayeredNodeSchema = GuideNodeSchema.extend({
   /** 0 for the foundations (the trunk); a node in a later layer builds on nodes in earlier ones. */
   layer: z.number().int().min(0),
+  /** It builds on other nodes and nothing builds on it, which the panel says under its title. */
+  leaf: z.boolean(),
 });
 
 /**
