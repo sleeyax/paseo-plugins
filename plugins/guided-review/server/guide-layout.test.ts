@@ -249,6 +249,35 @@ test("a file whose ranges leave only blank lines uncovered is placed, and one wi
   assert.deepEqual(guide.guide.unsorted, ["src/more.ts"]);
 });
 
+test("a decision keeps its alternative only when the author's words quoted for it are in the change request or the diff", async (t) => {
+  const { service, agents } = await withHost(t, [file("src/a.ts", "@@ -1,1 +1,1 @@\n-a\n+// Polling, not a webhook: the webhook drops events under load.")]);
+  const decision = (quote: string) => ({ choice: "Poll.", alternative: { text: "A webhook, which drops events.", quote } });
+
+  const guide = await generated(service, agents, {
+    ...guideOf([node("a", ["src/a.ts"])]),
+    overview: {
+      ...guideOf([node("a", ["src/a.ts"])]).overview,
+      decisions: [
+        // The commit message, quoted with curly quotes and Markdown the text does not have.
+        decision("“a *fixed* delay would make clients retry in lockstep.”"),
+        // An added line of the diff.
+        decision("the webhook drops events under load"),
+        decision("webhooks are too expensive to run"),
+        // Too short to back anything, though it is in the description.
+        decision("retried with"),
+        { choice: "Retry.", alternative: null },
+      ],
+    },
+  });
+
+  assert.equal(guide?.status, "ready");
+  if (guide?.status !== "ready") return;
+  assert.deepEqual(
+    guide.guide.overview.decisions.map((entry) => entry.alternative !== null),
+    [true, true, false, false, false],
+  );
+});
+
 test("a lockfile a node covers stays in Supporting, where the paths put it, and leaves the node", async (t) => {
   const { service, agents } = await withHost(t, [file("src/upload.ts"), file("src/retry.ts"), file("pnpm-lock.yaml")]);
 

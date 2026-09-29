@@ -1,6 +1,6 @@
-import { GuideSchema, type Guide, type LayeredGuide, type SupportingEntry } from "../shared/guide.ts";
-import { resolveCode, uncoveredCode } from "./diff.ts";
-import type { ChangedFile } from "./forge/port.ts";
+import { GuideSchema, type Guide, type GuideDecision, type LayeredGuide, type SupportingEntry } from "../shared/guide.ts";
+import { fileDiffOf, resolveCode, uncoveredCode } from "./diff.ts";
+import type { ChangeRequest, ChangedFile } from "./forge/port.ts";
 import { describeInvalid, parseReply } from "./guide-agent/structured.ts";
 
 export type GuideParse = { ok: true; guide: Guide } | { ok: false; message: string };
@@ -57,6 +57,40 @@ export function parseGuide(reply: string, sent: readonly ChangedFile[], setAside
     for (const error of resolveCode(sent, node.covers).errors) errors.push(`nodes.${index}.${error}`);
   });
   return errors.length === 0 ? { ok: true, guide } : { ok: false, message: describeInvalid(errors) };
+}
+
+/**
+ * `guide` with the alternative of each decision kept only when its quote is found in the author's own
+ * words in `changeRequest`: its title, description, commit messages, linked issues, and the added lines
+ * of the `sent` files' diffs. Case, curly quotes, Markdown emphasis and whitespace are not compared.
+ */
+export function keepQuotedAlternatives(guide: Guide, changeRequest: ChangeRequest, sent: readonly ChangedFile[]): Guide {
+  const words = comparable(
+    [
+      changeRequest.title,
+      changeRequest.description,
+      ...changeRequest.commits.flatMap((commit) => [commit.headline, commit.body]),
+      ...changeRequest.linkedIssues.flatMap((issue) => [issue.title, issue.body]),
+      ...sent.flatMap((file) => fileDiffOf(file).hunks.flatMap((hunk) => hunk.lines.filter((line) => line.kind === "added").map((line) => line.text))),
+    ].join("\n"),
+  );
+  const keep = (decisions: readonly GuideDecision[]) =>
+    decisions.map((decision) => {
+      const quote = decision.alternative === null ? "" : comparable(decision.alternative.quote).replace(/^["']|["'.]$/g, "");
+      return quote.split(" ").length >= MIN_QUOTE_WORDS && words.includes(quote) ? decision : { ...decision, alternative: null };
+    });
+  return {
+    ...guide,
+    overview: { ...guide.overview, decisions: keep(guide.overview.decisions) },
+    nodes: guide.nodes.map((node) => ({ ...node, decisions: keep(node.decisions) })),
+  };
+}
+
+/** A shorter quote, a name or a word, backs nothing: it is in the author's text whatever the alternative. */
+const MIN_QUOTE_WORDS = 3;
+
+function comparable(text: string): string {
+  return text.toLowerCase().replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/[`*_]/g, "").replace(/\s+/g, " ").trim();
 }
 
 /**

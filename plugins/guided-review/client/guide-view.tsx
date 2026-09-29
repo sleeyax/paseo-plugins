@@ -367,13 +367,20 @@ function FileLine({ colors, path, note }: { colors: Colors; path: string; note?:
 function Decisions({ decisions, colors }: { decisions: readonly GuideDecision[]; colors: Colors }) {
   return (
     <>
-      {decisions.map((decision, index) => (
-        <Bullet key={index} colors={colors} item={{ key: `decision:${index}`, text: `${decision.choice} Rather than: ${decision.rejected}` }}>
-          <GuideText text={decision.choice} colors={colors} />
-          <Text style={{ color: colors.foregroundMuted }}>
-            {" Rather than: "}
-            <GuideText text={decision.rejected} colors={colors} />
-          </Text>
+      {decisions.map(({ choice, alternative }, index) => (
+        <Bullet
+          key={index}
+          colors={colors}
+          item={{ key: `decision:${index}`, text: alternative ? `${choice} Rather than: ${alternative.text}` : choice }}
+        >
+          <GuideText text={choice} colors={colors} />
+          {alternative ? (
+            <Text style={{ color: colors.foregroundMuted }}>
+              {" Rather than: "}
+              <GuideText text={alternative.text} colors={colors} />
+              <Text style={{ fontStyle: "italic" }}> (“{alternative.quote}”)</Text>
+            </Text>
+          ) : null}
         </Bullet>
       ))}
     </>

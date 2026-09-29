@@ -1,5 +1,5 @@
 import type { DiffHunk, FileDiff } from "../shared/diff.ts";
-import type { GuideNode } from "../shared/guide.ts";
+import type { GuideDecision, GuideNode } from "../shared/guide.ts";
 import type { ChangedFile, ChangeRequestRef } from "./forge/port.ts";
 
 /** Lines of a file on the change's head side (the old side for a removed file), first and last inclusive. */
@@ -80,7 +80,7 @@ const ANSWER_RULES = `Answer as a normal message; the reviewer reads it in this 
 /** What the guide says about `node`, and the code it covers, for a prompt that names the node. */
 export function nodeContext(node: GuideNode, code: readonly CodeReference[]): string {
   const lines = [`What the guide says about it:`, `- Summary: ${node.summary}`, `- Explanation: ${oneParagraph(node.explanation)}`];
-  for (const decision of node.decisions) lines.push(`- Decision: ${decision.choice} Rather than: ${decision.rejected}`);
+  for (const decision of node.decisions) lines.push(decisionLine(decision));
   if (code.length > 0) {
     lines.push("", "The code it covers:");
     for (const reference of code) lines.push(`- ${reference.path}${rangesOf(reference.ranges)}`);
@@ -111,4 +111,9 @@ function rangesOf(ranges: readonly LineRange[]): string {
 
 function oneParagraph(text: string): string {
   return text.trim().replace(/\s*\n\s*/g, " ");
+}
+
+/** A decision as a prompt lists it, with the alternative only where the author's words back one; a guide from before alternatives needed a quote has none. */
+export function decisionLine(decision: GuideDecision): string {
+  return decision.alternative ? `- Decision: ${decision.choice} Rather than: ${decision.alternative.text}` : `- Decision: ${decision.choice}`;
 }

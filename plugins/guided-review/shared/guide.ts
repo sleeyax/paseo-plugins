@@ -6,7 +6,16 @@ import { z } from "zod";
  */
 const DecisionSchema = z.object({
   choice: z.string().min(1).describe("What the author chose, in one sentence."),
-  rejected: z.string().min(1).describe("The alternative the author plausibly rejected, and why it lost, in one sentence."),
+  alternative: z
+    .object({
+      text: z.string().min(1).describe("The alternative the author rejected, and why it lost, in one sentence."),
+      quote: z
+        .string()
+        .min(1)
+        .describe("The author's own words that name or rule out the alternative, copied exactly from the description, a commit message, a linked issue or an added line of the diff."),
+    })
+    .nullable()
+    .describe("Null unless the author's own words name the alternative they rejected; never guess one."),
 });
 
 /** An edge of the node DAG: the node it sits on builds on `nodeId`, which comes earlier in `nodes`. */
@@ -30,7 +39,7 @@ export const GuideOverviewSchema = z.object({
   needToKnows: z
     .array(z.string().min(1))
     .describe("The new invariants, contracts and concepts a reviewer must hold in mind while reading, one per entry."),
-  decisions: z.array(DecisionSchema).describe("The decisions the author made across the change, each with its rejected alternative."),
+  decisions: z.array(DecisionSchema).describe("The decisions the author made across the change, each with the alternative the author rejected where they say so."),
   attention: z
     .array(
       z.object({
@@ -74,7 +83,7 @@ export const GuideNodeSchema = z.object({
     .array(CoveredCodeSchema)
     .min(1)
     .describe("The code this node explains, one entry per file, in the order to read it."),
-  decisions: z.array(DecisionSchema).describe("Decisions local to this concept, each with its rejected alternative."),
+  decisions: z.array(DecisionSchema).describe("Decisions local to this concept, each with the alternative the author rejected where they say so."),
   dependencies: z
     .array(DependencySchema)
     .describe("The earlier nodes this concept builds on, each with why; empty for a foundation."),
