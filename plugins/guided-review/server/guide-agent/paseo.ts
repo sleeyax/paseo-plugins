@@ -1,5 +1,6 @@
 import type { PaseoAgent, PaseoAgentHandle, PaseoAgentPermissionResponse, PaseoApi } from "@getpaseo/client";
 import { DEFAULT_GUIDE_AGENT, FALLBACK_GUIDE_AGENT } from "../../shared/settings.ts";
+import type { GuideAgentSettings } from "../settings.ts";
 import { GUIDE_AGENT_LABEL, GuideAgentError, type GuideAgentPort } from "./port.ts";
 
 export type PermissionRequest = PaseoAgent["pendingPermissions"][number];
@@ -7,8 +8,8 @@ export type PermissionRequest = PaseoAgent["pendingPermissions"][number];
 export type PaseoGuideAgentsOptions = {
   /** The daemon connection, which only arrives with the first RPC or hook and is the same one after it. */
   paseo: () => PaseoApi;
-  /** The configured agent, a provider (`claude`) or a provider and model (`codex/gpt-5.5`), read at every creation. */
-  agent: () => Promise<string>;
+  /** The configured agent, read at every creation. */
+  agent: () => Promise<GuideAgentSettings>;
   /** How long a turn may run before its reply is given up on. */
   timeoutMs?: number;
 };
@@ -39,11 +40,38 @@ const UNATTENDED_DENIAL =
  * ones; Codex accepts `read-only` without advertising it. A provider with neither runs in its default
  * mode, where the permission hook is what keeps it from writing.
  */
-export function readOnlyMode(provider: string, modes: readonly { id: string }[]): string | undefined {
+export function readOnlyMode(provider: string, modes: readonly ProviderMode[]): string | undefined {
   for (const preferred of ["plan", "read-only"]) {
     if (modes.some((mode) => mode.id === preferred)) return preferred;
   }
   return provider === "codex" ? "read-only" : undefined;
+}
+
+type ProviderMode = { id: string; colorTier?: string };
+
+/** Paseo's tiers for the modes that ask before a tool runs. */
+const ASKING_TIERS = ["safe", "planning"];
+/** Claude's asking modes, and Codex's read-only preset, for a provider like claude-tty that reports no tiers but uses Claude's IDs. */
+const ASKING_MODE_IDS = ["plan", "default", "read-only"];
+
+/**
+ * The mode the guide agent runs in: the configured one, or the read-only one when none is.
+ * The permission hook can deny only what a mode asks about, so a mode that runs tools without asking is refused.
+ */
+export function guideMode(provider: string, modes: readonly ProviderMode[], configured: string): string | undefined {
+  const readOnly = readOnlyMode(provider, modes);
+  if (configured === "" || configured === readOnly) return readOnly;
+  const mode = modes.find((candidate) => candidate.id === configured);
+  if (mode === undefined) {
+    throw new GuideAgentError(`The ${provider} provider has no ${configured} mode. Check the guide agent's mode setting.`);
+  }
+  const asks = mode.colorTier === undefined ? ASKING_MODE_IDS.includes(mode.id) : ASKING_TIERS.includes(mode.colorTier);
+  if (!asks) {
+    throw new GuideAgentError(
+      `The ${configured} mode of ${provider} runs tools without asking, so the guide agent could change the workspace. Pick a mode that asks first, like plan.`,
+    );
+  }
+  return configured;
 }
 
 /**
@@ -147,15 +175,20 @@ export function createPaseoGuideAgents(options: PaseoGuideAgentsOptions): PaseoG
   return {
     async create({ workspace, title, labels, prompt, outputSchema }) {
       const paseo = options.paseo();
-      const { provider, model } = parseAgentSetting(await availableAgent(paseo, await options.agent()));
+      const configured = await options.agent();
+      const { provider, model } = parseAgentSetting(await availableAgent(paseo, configured.agent));
       if (provider === "") throw new GuideAgentError("No guide agent provider is configured.");
       const resolvedModel = model ?? (await defaultModel(paseo, provider, workspace.directory));
       const modes = await paseo.providers.listModes(provider, { cwd: workspace.directory }).catch(() => null);
-      const modeId = readOnlyMode(provider, modes?.modes ?? []);
+      const modeId = guideMode(provider, modes?.modes ?? [], configured.mode);
 
       try {
         const handle = await paseo.workspaces.ref(workspace.id).agents.create({
-          config: { provider: `${provider}/${resolvedModel}`, ...(modeId === undefined ? {} : { modeId }) },
+          config: {
+            provider: `${provider}/${resolvedModel}`,
+            ...(modeId === undefined ? {} : { modeId }),
+            ...(configured.effort === "" ? {} : { thinkingOptionId: configured.effort }),
+          },
           title: title.length <= MAX_TITLE ? title : `${title.slice(0, MAX_TITLE - 1)}…`,
           labels,
           prompt,

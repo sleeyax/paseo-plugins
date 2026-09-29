@@ -23,8 +23,16 @@ export async function readGlabPath(settings: Pick<Settings, "read">): Promise<st
   return state.status === "ready" ? configuredGlabPath(state.values.glabPath) : DEFAULT_GLAB_PATH;
 }
 
+/** The guide agent as configured: a provider or provider/model, and an effort and mode that are blank when left to it. */
+export type GuideAgentSettings = { agent: string; effort: string; mode: string };
+
 /** Read at every guide agent creation, like the gh path. */
-export async function readGuideAgent(settings: Pick<Settings, "read">): Promise<string> {
+export async function readGuideAgent(settings: Pick<Settings, "read">): Promise<GuideAgentSettings> {
   const state = await settings.read();
-  return state.status === "ready" ? configuredGuideAgent(state.values.guideAgent) : DEFAULT_GUIDE_AGENT;
+  if (state.status !== "ready") return { agent: DEFAULT_GUIDE_AGENT, effort: "", mode: "" };
+  return {
+    agent: configuredGuideAgent(state.values.guideAgent),
+    effort: state.values.guideAgentEffort.trim(),
+    mode: state.values.guideAgentMode.trim(),
+  };
 }

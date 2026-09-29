@@ -33,6 +33,10 @@ export const settingsDocument = defineSettings({
      * (`codex/gpt-5.5`), as Paseo names them. Checked only when a guide agent is created.
      */
     guideAgent: z.string().default(DEFAULT_GUIDE_AGENT),
+    /** The guide agent's effort, one of its model's thinking options; blank for the model's default. */
+    guideAgentEffort: z.string().default(""),
+    /** The guide agent's mode, one that asks before a tool runs; blank for the provider's read-only mode. */
+    guideAgentMode: z.string().default(""),
   }),
 });
 
