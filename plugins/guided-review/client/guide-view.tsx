@@ -193,8 +193,9 @@ function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
 }
 
 /**
- * A node; a leaf, which follows what the trunk already explained, is drawn lighter. Its code (`code`)
- * comes last. The reviewer can highlight its text, not its code, or hold it in the phone app, to comment on.
+ * A node; a leaf, which follows what the trunk already explained, is drawn lighter.
+ * Its code (`code`) comes before its comments, which sit at the foot of the card.
+ * The reviewer can highlight its text, not its code, or hold it in the phone app, to comment on.
  */
 function NodeCard({
   node,
@@ -261,8 +262,8 @@ function NodeCard({
         </>
       ) : null}
       <AskAction subject={{ kind: "node", nodeId: node.id }} ask={ask} colors={colors} />
-      <NodeComments nodeId={node.id} colors={colors} selected={selected} />
       {code}
+      <NodeComments nodeId={node.id} colors={colors} selected={selected} />
     </Card>
   );
 }
