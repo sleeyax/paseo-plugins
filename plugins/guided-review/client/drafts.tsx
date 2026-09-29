@@ -14,10 +14,12 @@ import { Button } from "./button.tsx";
 /**
  * Where in the panel a comment box is open. The same line can be drawn twice (two nodes may cover
  * one file), so a box belongs to the place that opened it, not only to its location. A new comment
- * on text the reviewer highlighted in the guide carries that text as its `quote`.
+ * on text the reviewer highlighted in the guide carries that text as its `quote`; one that opened
+ * on its own when the reviewer let go of the highlight has `keepSelection`, so it leaves the
+ * highlight in place to copy rather than taking focus.
  */
 export type OpenBox =
-  | { kind: "new"; place: string; location: DraftLocation; quote?: string }
+  | { kind: "new"; place: string; location: DraftLocation; quote?: string; keepSelection?: boolean }
   | { kind: "edit"; place: string; draftId: string };
 
 /**
@@ -140,12 +142,14 @@ export function NewCommentBox({
   colors,
   from,
   quote,
+  keepSelection,
 }: {
   control: DraftsControl;
   location: DraftLocation;
   colors: Colors;
   from?: CommentOrigin;
   quote?: string;
+  keepSelection?: boolean;
 }) {
   const drawnIn = useContext(CommentNodeContext);
   const origin: CommentOrigin | null = from ?? (drawnIn === null ? null : { kind: "node", nodeId: drawnIn });
@@ -161,6 +165,7 @@ export function NewCommentBox({
       colors={colors}
       title={title}
       quote={quote}
+      autoFocus={!keepSelection}
       onSave={(body) => control.create(location, body, origin, quote)}
       onCancel={() => control.setOpen(null)}
       actions={subject === null ? [] : [suggestWordingAction(control, subject)]}
@@ -332,7 +337,14 @@ export function NodeComments({ nodeId, colors, selected }: { nodeId: string; col
         <DraftCard key={draft.id} control={control} draft={draft} place={place} colors={colors} />
       ))}
       {box ? (
-        <NewCommentBox control={control} location={box.location} colors={colors} from={{ kind: "node", nodeId }} quote={box.quote} />
+        <NewCommentBox
+          control={control}
+          location={box.location}
+          colors={colors}
+          from={{ kind: "node", nodeId }}
+          quote={box.quote}
+          keepSelection={box.keepSelection}
+        />
       ) : (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing[3] }}>
           <TextLink colors={colors} label="Comment on this concept" onPress={() => open()} />
@@ -360,7 +372,14 @@ export function OverviewComments({ colors, selected }: { colors: Colors; selecte
         <DraftCard key={draft.id} control={control} draft={draft} place={place} colors={colors} />
       ))}
       {box ? (
-        <NewCommentBox control={control} location={box.location} colors={colors} from={{ kind: "overview" }} quote={box.quote} />
+        <NewCommentBox
+          control={control}
+          location={box.location}
+          colors={colors}
+          from={{ kind: "overview" }}
+          quote={box.quote}
+          keepSelection={box.keepSelection}
+        />
       ) : selected === null ? null : (
         <CommentOnSelection colors={colors} onOpen={() => control.setOpen({ kind: "new", place, location: { kind: "general" }, quote: selected })} />
       )}
@@ -381,6 +400,22 @@ export function useCommentOnHold(from: CommentOrigin): ((text: string) => void) 
   const control = useContext(DraftsContext);
   if (control === null || HIGHLIGHTS_TEXT) return null;
   return (text) => control.setOpen({ kind: "new", place: placeOf(from), location: { kind: "general" }, quote: text });
+}
+
+/**
+ * Opens the box for a comment on `text` of `from`, which the reviewer highlighted and let go of, or
+ * points the one already open on a highlight of `from` at it, which keeps what was typed. Any other
+ * open box is left alone, since replacing it would throw its text away. Null outside a review.
+ */
+export function useCommentOnRelease(from: CommentOrigin): ((text: string) => void) | null {
+  const control = useContext(DraftsContext);
+  if (control === null) return null;
+  const place = placeOf(from);
+  return (text) => {
+    const open = control.open;
+    if (open !== null && !(open.kind === "new" && open.place === place && open.quote !== undefined)) return;
+    control.setOpen({ kind: "new", place, location: { kind: "general" }, quote: text, keepSelection: true });
+  };
 }
 
 /** Opens on press-in: pressing anywhere clears the selection, which hides this link before a press could end. */
