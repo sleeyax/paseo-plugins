@@ -66,6 +66,7 @@ const RULES = `Rules:
 - The overview's idea is two or three sentences. Each need-to-know is one new invariant, contract or concept. Each decision names what the author chose and the alternative they plausibly rejected.
 - Attention names the one or two foundational nodes that matter most, by their id.
 - A node's summary is one line; its explanation is a short paragraph or two.
+- Write the text of the guide as prose with inline Markdown only: backticks around code, identifiers and paths, and \`**\` or \`*\` for emphasis. The panel draws nothing else, so use no headings, lists, links, tables or code blocks; separate paragraphs with a blank line.
 - A node's dependencies name the earlier nodes it builds on, each with the reason it has to be understood first. A node may depend only on nodes listed before it. Foundations depend on nothing; keep the tree to about three layers.
 - A node's \`covers\` names the code it explains, one entry per file: the file's path, and the numbers of the hunks it covers as the diff below labels them ("Hunk 2"). Leave \`hunks\` and \`lines\` empty when the node covers all of the file. When one hunk holds more than one concept, give line ranges in \`lines\` instead, so each node shows only its own lines. Several nodes may cover different hunks of one file.
 - Tests, docs and pure wiring (exports, registration, configuration that only connects the rest) go in supporting, not in a node.
