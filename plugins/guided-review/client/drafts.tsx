@@ -7,6 +7,8 @@ import { describeLocation, pathOf, type CommentOrigin, type DraftList, type Draf
 import { PLUGIN_ID } from "../shared/identity.ts";
 import type { CommentSubject } from "../shared/contracts.ts";
 import { CommentBox, Quote, type CommentBoxAction } from "./comment-box.tsx";
+import { GuideText } from "./guide-text.tsx";
+import { plainText } from "./inline-markdown.ts";
 import { HIGHLIGHTS_TEXT } from "./text-selection.ts";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
@@ -196,7 +198,7 @@ function whereOf(draft: LinkedDraft, titles: ReadonlyMap<string, string>, showPa
     if (draft.from?.kind === "overview") return "Your comment on the overview";
     const nodeId = nodeOf(draft);
     const title = nodeId === null ? undefined : titles.get(nodeId);
-    return title === undefined ? "Your draft on the change as a whole" : `Your comment on the concept "${title}"`;
+    return title === undefined ? "Your draft on the change as a whole" : `Your comment on the concept "${plainText(title)}"`;
   }
   const path = pathOf(draft.location);
   return showPath && path !== null ? `${path} · ${describeLocation(draft.location)}` : `Your draft on ${describeLocation(draft.location)}`;
@@ -498,7 +500,9 @@ export function DraftsSection({ control, colors }: { control: DraftsControl; col
           <Text style={{ ...body, color: colors.foregroundMuted }}>Saved on the forge, unpublished until the review is submitted.</Text>
           {grouped.map((group) => (
             <View key={group.key} style={{ gap: spacing[2] }}>
-              <Text style={{ ...small, color: colors.foreground, fontWeight: "600" }}>{group.title}</Text>
+              <Text style={{ ...small, color: colors.foreground, fontWeight: "600" }}>
+                <GuideText text={group.title} colors={colors} />
+              </Text>
               {group.drafts.map((draft) => (
                 <DraftCard key={draft.id} control={control} draft={draft} place="list" colors={colors} showPath />
               ))}

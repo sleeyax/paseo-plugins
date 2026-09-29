@@ -9,6 +9,7 @@ import { ItemCommentBox, NodeComments, OverviewComments, useCommentOnHold, useCo
 import { ProgressContext, ProgressSummary, UnderstoodToggle, type ProgressControl } from "./progress.tsx";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
+import { GuideText } from "./guide-text.tsx";
 import { HIGHLIGHTS_TEXT, useHighlight } from "./text-selection.ts";
 
 export type GuideViewProps = {
@@ -158,14 +159,14 @@ function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
         <View ref={prose} style={{ gap: spacing[2] }}>
           <Label colors={colors}>The idea</Label>
           <Body colors={colors} item={{ key: "idea", text: overview.idea }}>
-            {overview.idea}
+            <GuideText text={overview.idea} colors={colors} />
           </Body>
           {overview.needToKnows.length > 0 ? (
             <>
               <Label colors={colors}>Need to know</Label>
               {overview.needToKnows.map((item, index) => (
                 <Bullet key={index} colors={colors} item={{ key: `need:${index}`, text: item }}>
-                  {item}
+                  <GuideText text={item} colors={colors} />
                 </Bullet>
               ))}
             </>
@@ -181,7 +182,10 @@ function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
             const title = titles.get(entry.nodeId) ?? entry.nodeId;
             return (
               <Bullet key={index} colors={colors} item={{ key: `attention:${index}`, text: `${title}: ${entry.reason}` }}>
-                <Text style={{ fontWeight: "600" }}>{title}</Text>: {entry.reason}
+                <Text style={{ fontWeight: "600" }}>
+                  <GuideText text={title} colors={colors} />
+                </Text>
+                : <GuideText text={entry.reason} colors={colors} />
               </Bullet>
             );
           })}
@@ -227,12 +231,12 @@ function NodeCard({
                 fontWeight: node.leaf ? "500" : "600",
               }}
             >
-              {node.title}
+              <GuideText text={node.title} colors={colors} />
             </Text>
             <UnderstoodToggle subject={{ kind: "node", nodeId: node.id }} colors={colors} />
           </View>
           <Body colors={colors} muted item={{ key: "summary", text: node.summary }}>
-            {node.summary}
+            <GuideText text={node.summary} colors={colors} />
           </Body>
           {node.dependencies.length > 0 ? (
             <>
@@ -241,14 +245,17 @@ function NodeCard({
                 const title = titles.get(dependency.nodeId) ?? dependency.nodeId;
                 return (
                   <Bullet key={dependency.nodeId} colors={colors} item={{ key: `dependency:${dependency.nodeId}`, text: `${title}: ${dependency.reason}` }}>
-                    <Text style={{ fontWeight: "600" }}>{title}</Text>: {dependency.reason}
+                    <Text style={{ fontWeight: "600" }}>
+                      <GuideText text={title} colors={colors} />
+                    </Text>
+                    : <GuideText text={dependency.reason} colors={colors} />
                   </Bullet>
                 );
               })}
             </>
           ) : null}
           <Body colors={colors} item={{ key: "explanation", text: node.explanation }}>
-            {node.explanation}
+            <GuideText text={node.explanation} colors={colors} />
           </Body>
           {node.decisions.length > 0 ? <Decisions decisions={node.decisions} colors={colors} /> : null}
         </View>
@@ -321,8 +328,11 @@ function Decisions({ decisions, colors }: { decisions: readonly GuideDecision[];
     <>
       {decisions.map((decision, index) => (
         <Bullet key={index} colors={colors} item={{ key: `decision:${index}`, text: `${decision.choice} Rather than: ${decision.rejected}` }}>
-          {decision.choice}
-          <Text style={{ color: colors.foregroundMuted }}> Rather than: {decision.rejected}</Text>
+          <GuideText text={decision.choice} colors={colors} />
+          <Text style={{ color: colors.foregroundMuted }}>
+            {" Rather than: "}
+            <GuideText text={decision.rejected} colors={colors} />
+          </Text>
         </Bullet>
       ))}
     </>
