@@ -145,7 +145,7 @@ function Tree({
 }
 
 function layerTitle(layer: number): string {
-  return layer === 0 ? "Foundations" : `Layer ${layer + 1}`;
+  return `Layer ${layer + 1}`;
 }
 
 /** The overview, whose text the reviewer can highlight, or hold in the phone app, to comment on. */
