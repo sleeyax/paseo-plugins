@@ -14,12 +14,13 @@ import { Button } from "./button.tsx";
 /**
  * Where in the panel a comment box is open. The same line can be drawn twice (two nodes may cover
  * one file), so a box belongs to the place that opened it, not only to its location. A new comment
- * on text the reviewer highlighted in the guide carries that text as its `quote`; one that opened
- * on its own when the reviewer let go of the highlight has `keepSelection`, so it leaves the
- * highlight in place to copy rather than taking focus.
+ * on text the reviewer highlighted in the guide carries that text as its `quote`, and the `item`
+ * of its card it opens under (see `Selected`); one that opened on its own when the reviewer let go
+ * of the highlight has `keepSelection`, so it leaves the highlight in place to copy rather than
+ * taking focus.
  */
 export type OpenBox =
-  | { kind: "new"; place: string; location: DraftLocation; quote?: string; keepSelection?: boolean }
+  | { kind: "new"; place: string; location: DraftLocation; quote?: string; item?: string | undefined; keepSelection?: boolean }
   | { kind: "edit"; place: string; draftId: string };
 
 /**
@@ -320,35 +321,34 @@ export function groupDrafts(
 }
 
 /**
+ * Text of the guide the reviewer highlighted, or held in the phone app, to comment on, with the key
+ * of the paragraph or bullet of its card it ends in, which the box opens under; without one, the
+ * box opens at the foot of the card.
+ */
+export type Selected = { text: string; item?: string | undefined };
+
+/**
  * A node's own comments, on the change as a whole, and the actions that write one: on the concept,
  * or on the text of its card the reviewer has `selected`. Under the node's card, where the reviewer
  * reads the concept. Nothing outside a review.
  */
-export function NodeComments({ nodeId, colors, selected }: { nodeId: string; colors: Colors; selected: string | null }) {
+export function NodeComments({ nodeId, colors, selected }: { nodeId: string; colors: Colors; selected: Selected | null }) {
   const control = useContext(DraftsContext);
   if (control === null) return null;
-  const place = placeOf({ kind: "node", nodeId });
+  const from: CommentOrigin = { kind: "node", nodeId };
   const comments = control.drafts.filter((draft) => nodeOf(draft) === nodeId && draft.location.kind === "general");
-  const box = control.open?.kind === "new" && control.open.place === place ? control.open : null;
-  const open = (quote?: string) => control.setOpen({ kind: "new", place, location: { kind: "general" }, ...(quote === undefined ? {} : { quote }) });
+  const box = boxAt(control, from, undefined);
   return (
     <View style={{ gap: spacing[2] }}>
       {comments.map((draft) => (
-        <DraftCard key={draft.id} control={control} draft={draft} place={place} colors={colors} />
+        <DraftCard key={draft.id} control={control} draft={draft} place={placeOf(from)} colors={colors} />
       ))}
       {box ? (
-        <NewCommentBox
-          control={control}
-          location={box.location}
-          colors={colors}
-          from={{ kind: "node", nodeId }}
-          quote={box.quote}
-          keepSelection={box.keepSelection}
-        />
+        <FromBox control={control} box={box} from={from} colors={colors} />
       ) : (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing[3] }}>
-          <TextLink colors={colors} label="Comment on this concept" onPress={() => open()} />
-          {selected === null ? null : <CommentOnSelection colors={colors} onOpen={() => open(selected)} />}
+          <TextLink colors={colors} label="Comment on this concept" onPress={() => control.setOpen({ kind: "new", place: placeOf(from), location: { kind: "general" } })} />
+          {selected === null ? null : <CommentOnSelection colors={colors} onOpen={() => openOn(control, from, selected)} />}
         </View>
       )}
     </View>
@@ -356,35 +356,51 @@ export function NodeComments({ nodeId, colors, selected }: { nodeId: string; col
 }
 
 /**
- * The comments on the overview, and the box for one on the text of it the reviewer has `selected`,
- * which is the only way to write one. Nothing outside a review, or with neither.
+ * The comments on the overview, and the action that writes one on the text of it the reviewer has
+ * `selected`, which is the only way to write one. Nothing outside a review, or with neither.
  */
-export function OverviewComments({ colors, selected }: { colors: Colors; selected: string | null }) {
+export function OverviewComments({ colors, selected }: { colors: Colors; selected: Selected | null }) {
   const control = useContext(DraftsContext);
   if (control === null) return null;
-  const place = placeOf({ kind: "overview" });
+  const from: CommentOrigin = { kind: "overview" };
   const comments = control.drafts.filter((draft) => draft.from?.kind === "overview");
-  const box = control.open?.kind === "new" && control.open.place === place ? control.open : null;
+  const box = boxAt(control, from, undefined);
   if (comments.length === 0 && box === null && selected === null) return null;
   return (
     <View style={{ gap: spacing[2] }}>
       {comments.map((draft) => (
-        <DraftCard key={draft.id} control={control} draft={draft} place={place} colors={colors} />
+        <DraftCard key={draft.id} control={control} draft={draft} place={placeOf(from)} colors={colors} />
       ))}
       {box ? (
-        <NewCommentBox
-          control={control}
-          location={box.location}
-          colors={colors}
-          from={{ kind: "overview" }}
-          quote={box.quote}
-          keepSelection={box.keepSelection}
-        />
+        <FromBox control={control} box={box} from={from} colors={colors} />
       ) : selected === null ? null : (
-        <CommentOnSelection colors={colors} onOpen={() => control.setOpen({ kind: "new", place, location: { kind: "general" }, quote: selected })} />
+        <CommentOnSelection colors={colors} onOpen={() => openOn(control, from, selected)} />
       )}
     </View>
   );
+}
+
+/** The box for a comment on text of `from` that ends in the paragraph or bullet `item`, drawn under it when it is open. */
+export function ItemCommentBox({ from, item, colors }: { from: CommentOrigin; item: string; colors: Colors }) {
+  const control = useContext(DraftsContext);
+  const box = control === null ? null : boxAt(control, from, item);
+  return control === null || box === null ? null : <FromBox control={control} box={box} from={from} colors={colors} />;
+}
+
+type NewBox = Extract<OpenBox, { kind: "new" }>;
+
+/** The new comment's box open on `from`, under its paragraph or bullet `item` or, without one, at the foot of its card. */
+function boxAt(control: DraftsControl, from: CommentOrigin, item: string | undefined): NewBox | null {
+  const open = control.open;
+  return open?.kind === "new" && open.place === placeOf(from) && open.item === item ? open : null;
+}
+
+function FromBox({ control, box, from, colors }: { control: DraftsControl; box: NewBox; from: CommentOrigin; colors: Colors }) {
+  return <NewCommentBox control={control} location={box.location} colors={colors} from={from} quote={box.quote} keepSelection={box.keepSelection} />;
+}
+
+function openOn(control: DraftsControl, from: CommentOrigin, { text, item }: Selected, keepSelection?: boolean): void {
+  control.setOpen({ kind: "new", place: placeOf(from), location: { kind: "general" }, quote: text, item, ...(keepSelection ? { keepSelection } : {}) });
 }
 
 /** Where the general comments from `from` are listed, and their box opens. */
@@ -396,25 +412,24 @@ function placeOf(from: CommentOrigin): string {
  * Opens the box for a comment on a whole paragraph or bullet of `from`'s text, which the phone app
  * offers on a long press, since it cannot tell what is highlighted. Null on the web and outside a review.
  */
-export function useCommentOnHold(from: CommentOrigin): ((text: string) => void) | null {
+export function useCommentOnHold(from: CommentOrigin): ((held: Selected) => void) | null {
   const control = useContext(DraftsContext);
   if (control === null || HIGHLIGHTS_TEXT) return null;
-  return (text) => control.setOpen({ kind: "new", place: placeOf(from), location: { kind: "general" }, quote: text });
+  return (held) => openOn(control, from, held);
 }
 
 /**
- * Opens the box for a comment on `text` of `from`, which the reviewer highlighted and let go of, or
- * points the one already open on a highlight of `from` at it, which keeps what was typed. Any other
- * open box is left alone, since replacing it would throw its text away. Null outside a review.
+ * Opens the box for a comment on text of `from` the reviewer highlighted and let go of, or points
+ * the one already open on a highlight in the same paragraph or bullet at it, which keeps what was
+ * typed. Any other open box is left alone, since replacing or moving it would throw its text away.
+ * Null outside a review.
  */
-export function useCommentOnRelease(from: CommentOrigin): ((text: string) => void) | null {
+export function useCommentOnRelease(from: CommentOrigin): ((released: Selected) => void) | null {
   const control = useContext(DraftsContext);
   if (control === null) return null;
-  const place = placeOf(from);
-  return (text) => {
-    const open = control.open;
-    if (open !== null && !(open.kind === "new" && open.place === place && open.quote !== undefined)) return;
-    control.setOpen({ kind: "new", place, location: { kind: "general" }, quote: text, keepSelection: true });
+  return (released) => {
+    if (control.open !== null && boxAt(control, from, released.item)?.quote === undefined) return;
+    openOn(control, from, released, true);
   };
 }
 
