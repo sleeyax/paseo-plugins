@@ -322,7 +322,7 @@ export function groupDrafts(
 export function NodeComments({ nodeId, colors, selected }: { nodeId: string; colors: Colors; selected: string | null }) {
   const control = useContext(DraftsContext);
   if (control === null) return null;
-  const place = `node:${nodeId}`;
+  const place = placeOf({ kind: "node", nodeId });
   const comments = control.drafts.filter((draft) => nodeOf(draft) === nodeId && draft.location.kind === "general");
   const box = control.open?.kind === "new" && control.open.place === place ? control.open : null;
   const open = (quote?: string) => control.setOpen({ kind: "new", place, location: { kind: "general" }, ...(quote === undefined ? {} : { quote }) });
@@ -350,7 +350,7 @@ export function NodeComments({ nodeId, colors, selected }: { nodeId: string; col
 export function OverviewComments({ colors, selected }: { colors: Colors; selected: string | null }) {
   const control = useContext(DraftsContext);
   if (control === null) return null;
-  const place = "overview";
+  const place = placeOf({ kind: "overview" });
   const comments = control.drafts.filter((draft) => draft.from?.kind === "overview");
   const box = control.open?.kind === "new" && control.open.place === place ? control.open : null;
   if (comments.length === 0 && box === null && selected === null) return null;
@@ -366,6 +366,21 @@ export function OverviewComments({ colors, selected }: { colors: Colors; selecte
       )}
     </View>
   );
+}
+
+/** Where the general comments from `from` are listed, and their box opens. */
+function placeOf(from: CommentOrigin): string {
+  return from.kind === "overview" ? "overview" : `node:${from.nodeId}`;
+}
+
+/**
+ * Opens the box for a comment on a whole paragraph or bullet of `from`'s text, which the phone app
+ * offers on a long press, since it cannot tell what is highlighted. Null on the web and outside a review.
+ */
+export function useCommentOnHold(from: CommentOrigin): ((text: string) => void) | null {
+  const control = useContext(DraftsContext);
+  if (control === null || HIGHLIGHTS_TEXT) return null;
+  return (text) => control.setOpen({ kind: "new", place: placeOf(from), location: { kind: "general" }, quote: text });
 }
 
 /** Opens on press-in: pressing anywhere clears the selection, which hides this link before a press could end. */
@@ -408,7 +423,7 @@ export function DraftsSection({ control, colors }: { control: DraftsControl; col
       ) : count === 0 ? (
         <Text style={{ ...body, color: colors.foregroundMuted }}>
           No drafts yet. Tap a line of a diff below to comment on it, drag across lines for a range (on a phone, hold first),
-          comment on a whole file from its header, or on a concept from its card{HIGHLIGHTS_TEXT ? ", or highlight text in the guide to comment on it" : ""}.
+          comment on a whole file from its header, or on a concept from its card{HIGHLIGHTS_TEXT ? ", or highlight text in the guide to comment on it" : ", or hold a paragraph of the guide to comment on it"}.
         </Text>
       ) : (
         <>
