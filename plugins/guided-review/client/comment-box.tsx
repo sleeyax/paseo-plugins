@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { Text, TextInput, View } from "react-native";
+import { Text, View } from "react-native";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
+import { GrowingTextInput } from "./growing-text-input.tsx";
 
 /**
  * An extra button in a comment box that rewrites its text, like "Suggest wording": it gets what the
@@ -77,17 +78,17 @@ export function CommentBox({
     >
       <Text style={{ ...small, color: colors.foregroundMuted, fontWeight: "600" }}>{title}</Text>
       {quote === undefined ? null : <Quote colors={colors} text={quote} />}
-      <TextInput
+      <GrowingTextInput
         value={body}
         onChangeText={setBody}
-        multiline
+        minHeight={72}
+        maxHeight={320}
         autoFocus={autoFocus}
         editable={running === null}
         placeholder={onAsk ? "Leave a comment, or ask the guide agent" : "Leave a comment"}
         placeholderTextColor={colors.foregroundMuted}
         accessibilityLabel={title}
         style={{
-          minHeight: 72,
           padding: spacing[2],
           borderRadius: radius.base,
           borderWidth: 1,

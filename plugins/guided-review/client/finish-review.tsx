@@ -1,7 +1,7 @@
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import React, { useEffect, useState } from "react";
-import { Text, TextInput, View } from "react-native";
+import { Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import type { ReviewHeader } from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
@@ -10,6 +10,7 @@ import { DraftCard, TextLink, type DraftsControl } from "./drafts.tsx";
 import { useSetHeadCheck, type RegenerateControl } from "./head-check.tsx";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
+import { GrowingTextInput } from "./growing-text-input.tsx";
 
 export type FinishReviewProps = {
   reviewId: string;
@@ -125,16 +126,16 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate }: F
       ) : (
         <>
           <Text style={{ ...small, color: colors.foregroundMuted, fontWeight: "600" }}>Review body</Text>
-          <TextInput
+          <GrowingTextInput
             value={body}
             onChangeText={setEdited}
-            multiline
+            minHeight={96}
+            maxHeight={400}
             editable={!busy}
             placeholder="What you think of the change as a whole (optional)"
             placeholderTextColor={colors.foregroundMuted}
             accessibilityLabel="Review body"
             style={{
-              minHeight: 96,
               padding: spacing[2],
               borderRadius: radius.base,
               borderWidth: 1,
