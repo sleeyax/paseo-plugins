@@ -14,6 +14,9 @@ export const radius = { sm: 2, base: 4, md: 6, lg: 8, full: 9999 } as const;
 /** Paseo centres its settings screens at this width rather than letting rows span the window. */
 export const MAX_CONTENT_WIDTH = 720;
 
+/** The review panel is wider than a settings screen, because its cards draw diffs whose lines would otherwise scroll sideways. */
+export const MAX_PANEL_WIDTH = 1200;
+
 /** Paseo derives every text line height from its font size this way. */
 export function leading(size: number): number {
   return Math.round(size * 1.4);
