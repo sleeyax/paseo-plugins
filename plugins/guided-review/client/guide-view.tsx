@@ -1,14 +1,15 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import React, { createContext, useContext, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
+import type { CommentOrigin } from "../shared/drafts.ts";
 import { coveredPaths, type Guide, type GuideDecision, type GuideState, type LayeredGuide, type LayeredNode } from "../shared/guide.ts";
 import { AskAction, type AskControl } from "./ask-action.tsx";
 import { NodeCode } from "./diff-view.tsx";
-import { NodeComments, OverviewComments, useCommentOnHold, useCommentOnRelease } from "./drafts.tsx";
+import { ItemCommentBox, NodeComments, OverviewComments, useCommentOnHold, useCommentOnRelease, type Selected } from "./drafts.tsx";
 import { ProgressContext, ProgressSummary, UnderstoodToggle, type ProgressControl } from "./progress.tsx";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
-import { HIGHLIGHTS_TEXT, useSelectedText } from "./text-selection.ts";
+import { HIGHLIGHTS_TEXT, useHighlight } from "./text-selection.ts";
 
 export type GuideViewProps = {
   reviewId: string;
@@ -150,22 +151,20 @@ function layerTitle(layer: number): string {
 function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
   const { overview } = guide;
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
-  const prose = useRef<View>(null);
-  const selected = useSelectedText(prose, useCommentOnRelease({ kind: "overview" }));
-  const hold = useCommentOnHold({ kind: "overview" });
+  const { prose, text, selected } = useCardText({ kind: "overview" });
   return (
     <Card colors={colors}>
-      <HoldToComment.Provider value={hold}>
+      <CardTextContext.Provider value={text}>
         <View ref={prose} style={{ gap: spacing[2] }}>
           <Label colors={colors}>The idea</Label>
-          <Body colors={colors} hold={overview.idea}>
+          <Body colors={colors} item={{ key: "idea", text: overview.idea }}>
             {overview.idea}
           </Body>
           {overview.needToKnows.length > 0 ? (
             <>
               <Label colors={colors}>Need to know</Label>
               {overview.needToKnows.map((item, index) => (
-                <Bullet key={index} colors={colors} hold={item}>
+                <Bullet key={index} colors={colors} item={{ key: `need:${index}`, text: item }}>
                   {item}
                 </Bullet>
               ))}
@@ -181,13 +180,13 @@ function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
           {overview.attention.map((entry, index) => {
             const title = titles.get(entry.nodeId) ?? entry.nodeId;
             return (
-              <Bullet key={index} colors={colors} hold={`${title}: ${entry.reason}`}>
+              <Bullet key={index} colors={colors} item={{ key: `attention:${index}`, text: `${title}: ${entry.reason}` }}>
                 <Text style={{ fontWeight: "600" }}>{title}</Text>: {entry.reason}
               </Bullet>
             );
           })}
         </View>
-      </HoldToComment.Provider>
+      </CardTextContext.Provider>
       <OverviewComments colors={colors} selected={selected} />
     </Card>
   );
@@ -211,12 +210,10 @@ function NodeCard({
   code: React.ReactNode;
 }) {
   const files = coveredPaths(node);
-  const prose = useRef<View>(null);
-  const selected = useSelectedText(prose, useCommentOnRelease({ kind: "node", nodeId: node.id }));
-  const hold = useCommentOnHold({ kind: "node", nodeId: node.id });
+  const { prose, text, selected } = useCardText({ kind: "node", nodeId: node.id });
   return (
     <Card colors={colors} light={node.leaf}>
-      <HoldToComment.Provider value={hold}>
+      <CardTextContext.Provider value={text}>
         <View ref={prose} style={{ gap: spacing[2] }}>
           <View style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing[2] }}>
             <Text
@@ -233,7 +230,7 @@ function NodeCard({
             </Text>
             <UnderstoodToggle subject={{ kind: "node", nodeId: node.id }} colors={colors} />
           </View>
-          <Body colors={colors} muted hold={node.summary}>
+          <Body colors={colors} muted item={{ key: "summary", text: node.summary }}>
             {node.summary}
           </Body>
           {node.dependencies.length > 0 ? (
@@ -242,19 +239,19 @@ function NodeCard({
               {node.dependencies.map((dependency) => {
                 const title = titles.get(dependency.nodeId) ?? dependency.nodeId;
                 return (
-                  <Bullet key={dependency.nodeId} colors={colors} hold={`${title}: ${dependency.reason}`}>
+                  <Bullet key={dependency.nodeId} colors={colors} item={{ key: `dependency:${dependency.nodeId}`, text: `${title}: ${dependency.reason}` }}>
                     <Text style={{ fontWeight: "600" }}>{title}</Text>: {dependency.reason}
                   </Bullet>
                 );
               })}
             </>
           ) : null}
-          <Body colors={colors} hold={node.explanation}>
+          <Body colors={colors} item={{ key: "explanation", text: node.explanation }}>
             {node.explanation}
           </Body>
           {node.decisions.length > 0 ? <Decisions decisions={node.decisions} colors={colors} /> : null}
         </View>
-      </HoldToComment.Provider>
+      </CardTextContext.Provider>
       {files.length > 0 ? (
         <>
           <Label colors={colors}>Files</Label>
@@ -322,7 +319,7 @@ function Decisions({ decisions, colors }: { decisions: readonly GuideDecision[];
   return (
     <>
       {decisions.map((decision, index) => (
-        <Bullet key={index} colors={colors} hold={`${decision.choice} Rather than: ${decision.rejected}`}>
+        <Bullet key={index} colors={colors} item={{ key: `decision:${index}`, text: `${decision.choice} Rather than: ${decision.rejected}` }}>
           {decision.choice}
           <Text style={{ color: colors.foregroundMuted }}> Rather than: {decision.rejected}</Text>
         </Bullet>
@@ -376,49 +373,99 @@ function Label({ colors, children }: { colors: Colors; children: React.ReactNode
   );
 }
 
-/** Opens a comment on a whole paragraph or bullet the phone app holds; null on the web and outside a review. */
-const HoldToComment = createContext<((text: string) => void) | null>(null);
+/** A paragraph or bullet of a card's text a comment can open under: its key within the card, and its whole text. */
+type Item = { key: string; text: string };
 
-/** What a long press on a paragraph or bullet whose text is `hold` does: comment on it, where `HoldToComment` is set. */
-function useHold(hold: string | undefined): (() => void) | undefined {
-  const onHold = useContext(HoldToComment);
-  return onHold === null || hold === undefined ? undefined : () => onHold(hold);
+/**
+ * A card whose text takes comments: `from`, the part of the guide it shows, and `register`, which
+ * records each paragraph's and bullet's element so a highlight can be traced to the one it ends
+ * in. `hold` comments on a whole one, which the phone app offers on a long press; null on the web.
+ */
+type CardText = { from: CommentOrigin; register: (key: string, element: unknown) => void; hold: ((held: Selected) => void) | null };
+
+/** Null outside a card whose text takes comments, and outside a review. */
+const CardTextContext = createContext<CardText | null>(null);
+
+/**
+ * What a card of `from` needs for comments on its text: the element of its prose, which a highlight
+ * has to lie inside, the `CardText` its paragraphs and bullets read, and what is highlighted in it.
+ */
+function useCardText(from: CommentOrigin): { prose: React.RefObject<View | null>; text: CardText | null; selected: Selected | null } {
+  const prose = useRef<View>(null);
+  const items = useRef(new Map<string, Node>());
+  const itemOf = (end: Node) => [...items.current].find(([, element]) => element.contains(end))?.[0];
+  const release = useCommentOnRelease(from);
+  const highlight = useHighlight(prose, release && ((found) => release({ text: found.text, item: itemOf(found.end) })));
+  const hold = useCommentOnHold(from);
+  const register = (key: string, element: unknown) => {
+    // On the web an element's ref is its DOM node; elsewhere it is never looked into.
+    if (element === null) items.current.delete(key);
+    else items.current.set(key, element as Node);
+  };
+  return {
+    prose,
+    text: release === null ? null : { from, register, hold },
+    selected: highlight === null ? null : { text: highlight.text, item: itemOf(highlight.end) },
+  };
+}
+
+/** What a paragraph or bullet `item` of a card's text needs: its element's ref, its long press, and the box that opens under it. */
+function useItem(item: Item | undefined, colors: Colors) {
+  const card = useContext(CardTextContext);
+  if (card === null || item === undefined) return { ref: undefined, onLongPress: undefined, box: null };
+  const { hold } = card;
+  return {
+    ref: (element: unknown) => card.register(item.key, element),
+    onLongPress: hold === null ? undefined : () => hold({ text: item.text, item: item.key }),
+    box: <ItemCommentBox from={card.from} item={item.key} colors={colors} />,
+  };
 }
 
 function Body({
   colors,
   muted,
   color,
-  hold,
+  item,
   children,
 }: {
   colors: Colors;
   muted?: boolean;
   color?: string;
-  hold?: string;
+  item?: Item;
   children: React.ReactNode;
 }) {
-  const onLongPress = useHold(hold);
+  const { ref, onLongPress, box } = useItem(item, colors);
   return (
-    <Text
-      selectable={HIGHLIGHTS_TEXT}
-      onLongPress={onLongPress}
-      style={{ color: color ?? (muted ? colors.foregroundMuted : colors.foreground), fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}
-    >
-      {children}
-    </Text>
+    <>
+      <Text
+        ref={ref}
+        selectable={HIGHLIGHTS_TEXT}
+        onLongPress={onLongPress}
+        style={{ color: color ?? (muted ? colors.foregroundMuted : colors.foreground), fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}
+      >
+        {children}
+      </Text>
+      {box}
+    </>
   );
 }
 
-function Bullet({ colors, hold, children }: { colors: Colors; hold?: string; children: React.ReactNode }) {
-  const onLongPress = useHold(hold);
+function Bullet({ colors, item, children }: { colors: Colors; item?: Item; children: React.ReactNode }) {
+  const { ref, onLongPress, box } = useItem(item, colors);
   return (
-    <View style={{ flexDirection: "row", gap: spacing[2] }}>
-      <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>•</Text>
-      <Text selectable={HIGHLIGHTS_TEXT} onLongPress={onLongPress} style={{ flex: 1, color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>
-        {children}
-      </Text>
-    </View>
+    <>
+      <View ref={ref} style={{ flexDirection: "row", gap: spacing[2] }}>
+        <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>•</Text>
+        <Text
+          selectable={HIGHLIGHTS_TEXT}
+          onLongPress={onLongPress}
+          style={{ flex: 1, color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}
+        >
+          {children}
+        </Text>
+      </View>
+      {box}
+    </>
   );
 }
 
