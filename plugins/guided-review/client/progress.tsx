@@ -120,7 +120,7 @@ export function ProgressSummary({ colors, layerTitle }: { colors: Colors; layerT
     progress.nextLayer === null
       ? "Every concept is understood."
       : progress.nextLayer === 0
-        ? "Next: the foundations, which everything else builds on."
+        ? `Next: ${layerTitle(0)}, which everything else builds on.`
         : `Next: ${layerTitle(progress.nextLayer)}. Everything it builds on is understood.`;
   return (
     <View
