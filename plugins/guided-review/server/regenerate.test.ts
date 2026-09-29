@@ -273,6 +273,7 @@ test("marks carry over to nodes covering the same code, however renumbered or re
       { understood: 1, total: 1 },
     ],
     tests: { understood: 1, total: 1 },
+    docs: { understood: 0, total: 0 },
     supporting: { understood: 0, total: 0 },
     unsorted: { understood: 0, total: 1 },
     overall: { understood: 2, total: 5 },

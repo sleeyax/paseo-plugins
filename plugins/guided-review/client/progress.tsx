@@ -112,7 +112,7 @@ export function UnderstoodToggle({ subject, colors }: { subject: GuideSubject; c
   );
 }
 
-/** Progress through the guide trunk first: each layer from the foundations up, then Tests, Supporting, Unsorted and overall. */
+/** Progress through the guide trunk first: each layer from the foundations up, then Tests, Documentation, Supporting, Unsorted and overall. */
 export function ProgressSummary({ colors, layerTitle }: { colors: Colors; layerTitle: (layer: number) => string }) {
   const progress = useContext(ProgressContext)?.progress ?? null;
   if (progress === null) return null;
@@ -138,6 +138,7 @@ export function ProgressSummary({ colors, layerTitle }: { colors: Colors; layerT
         <Row key={layer} colors={colors} label={layerTitle(layer)} tally={tally} />
       ))}
       {progress.tests.total > 0 ? <Row colors={colors} label="Tests" tally={progress.tests} /> : null}
+      {progress.docs.total > 0 ? <Row colors={colors} label="Documentation" tally={progress.docs} /> : null}
       {progress.supporting.total > 0 ? <Row colors={colors} label="Supporting" tally={progress.supporting} /> : null}
       {progress.unsorted.total > 0 ? <Row colors={colors} label="Unsorted" tally={progress.unsorted} /> : null}
       <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>{next}</Text>

@@ -23,22 +23,24 @@ const RETRY_DOC: ChangedFile = { path: "docs/retry.md", previousPath: null, stat
 
 type Host = { data: string; service: ReviewService; agents: FakeGuideAgents; restart(): ReviewService };
 
-test("Supporting's tests are tallied as Tests, apart from the rest of Supporting", () => {
+test("Supporting's tests and docs are tallied as Tests and Documentation, apart from the rest of Supporting", () => {
   const guide = {
     ...sampleGuide(),
     nodes: [],
     supporting: [
       { path: RETRY_TEST.path, category: "test" },
       { path: RETRY_DOC.path, category: "docs" },
+      { path: "src/index.ts", category: "wiring" },
     ],
     unsorted: [],
   } satisfies LayeredGuide;
 
-  const progress = summariseProgress(guide, HEAD, { nodes: [], files: [RETRY_DOC.path] });
+  const progress = summariseProgress(guide, HEAD, { nodes: [], files: [RETRY_DOC.path, "src/index.ts"] });
 
   assert.deepEqual(progress.tests, { understood: 0, total: 1 });
+  assert.deepEqual(progress.docs, { understood: 1, total: 1 });
   assert.deepEqual(progress.supporting, { understood: 1, total: 1 });
-  assert.deepEqual(progress.overall, { understood: 1, total: 2 });
+  assert.deepEqual(progress.overall, { understood: 2, total: 3 });
 });
 
 async function withHost(t: TestContext): Promise<Host> {
@@ -70,13 +72,14 @@ const NOTHING_UNDERSTOOD = {
     { understood: 0, total: 1 },
   ],
   tests: { understood: 0, total: 1 },
+  docs: { understood: 0, total: 0 },
   supporting: { understood: 0, total: 0 },
   unsorted: { understood: 0, total: 1 },
   overall: { understood: 0, total: 4 },
   nextLayer: 0,
 };
 
-test("a ready guide starts with nothing understood, tallied per layer, Tests, Supporting, Unsorted and overall", async (t) => {
+test("a ready guide starts with nothing understood, tallied per layer, Tests, Documentation, Supporting, Unsorted and overall", async (t) => {
   const { service } = await withGuide(t);
 
   assert.deepEqual(await service.readingProgress({ reviewId: REVIEW_ID }), NOTHING_UNDERSTOOD);
@@ -127,6 +130,7 @@ test("Supporting and Unsorted entries are marked by path, and every node underst
       { understood: 1, total: 1 },
     ],
     tests: { understood: 1, total: 1 },
+    docs: { understood: 0, total: 0 },
     supporting: { understood: 0, total: 0 },
     unsorted: { understood: 1, total: 1 },
     overall: { understood: 4, total: 4 },
