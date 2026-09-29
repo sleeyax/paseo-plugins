@@ -1,13 +1,14 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import React from "react";
+import React, { useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 import { coveredPaths, type Guide, type GuideDecision, type GuideState, type LayeredGuide, type LayeredNode } from "../shared/guide.ts";
 import { AskAction, type AskControl } from "./ask-action.tsx";
 import { NodeCode } from "./diff-view.tsx";
-import { NodeComments } from "./drafts.tsx";
+import { NodeComments, OverviewComments } from "./drafts.tsx";
 import { ProgressContext, ProgressSummary, UnderstoodToggle, type ProgressControl } from "./progress.tsx";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
+import { HIGHLIGHTS_TEXT, useSelectedText } from "./text-selection.ts";
 
 export type GuideViewProps = {
   reviewId: string;
@@ -145,40 +146,49 @@ function layerTitle(layer: number): string {
   return layer === 0 ? "Foundations" : `Layer ${layer + 1}`;
 }
 
+/** The overview, whose text the reviewer can highlight to comment on. */
 function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
   const { overview } = guide;
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
+  const prose = useRef<View>(null);
+  const selected = useSelectedText(prose);
   return (
     <Card colors={colors}>
-      <Label colors={colors}>The idea</Label>
-      <Body colors={colors}>{overview.idea}</Body>
-      {overview.needToKnows.length > 0 ? (
-        <>
-          <Label colors={colors}>Need to know</Label>
-          {overview.needToKnows.map((item, index) => (
-            <Bullet key={index} colors={colors}>
-              {item}
-            </Bullet>
-          ))}
-        </>
-      ) : null}
-      {overview.decisions.length > 0 ? (
-        <>
-          <Label colors={colors}>Decisions</Label>
-          <Decisions decisions={overview.decisions} colors={colors} />
-        </>
-      ) : null}
-      <Label colors={colors}>Where to spend your attention</Label>
-      {overview.attention.map((entry, index) => (
-        <Bullet key={index} colors={colors}>
-          <Text style={{ fontWeight: "600" }}>{titles.get(entry.nodeId) ?? entry.nodeId}</Text>: {entry.reason}
-        </Bullet>
-      ))}
+      <View ref={prose} style={{ gap: spacing[2] }}>
+        <Label colors={colors}>The idea</Label>
+        <Body colors={colors}>{overview.idea}</Body>
+        {overview.needToKnows.length > 0 ? (
+          <>
+            <Label colors={colors}>Need to know</Label>
+            {overview.needToKnows.map((item, index) => (
+              <Bullet key={index} colors={colors}>
+                {item}
+              </Bullet>
+            ))}
+          </>
+        ) : null}
+        {overview.decisions.length > 0 ? (
+          <>
+            <Label colors={colors}>Decisions</Label>
+            <Decisions decisions={overview.decisions} colors={colors} />
+          </>
+        ) : null}
+        <Label colors={colors}>Where to spend your attention</Label>
+        {overview.attention.map((entry, index) => (
+          <Bullet key={index} colors={colors}>
+            <Text style={{ fontWeight: "600" }}>{titles.get(entry.nodeId) ?? entry.nodeId}</Text>: {entry.reason}
+          </Bullet>
+        ))}
+      </View>
+      <OverviewComments colors={colors} selected={selected} />
     </Card>
   );
 }
 
-/** A node; a leaf, which follows what the trunk already explained, is drawn lighter. Its code (`code`) comes last. */
+/**
+ * A node; a leaf, which follows what the trunk already explained, is drawn lighter. Its code (`code`)
+ * comes last. The reviewer can highlight its text, not its code, to comment on.
+ */
 function NodeCard({
   node,
   titles,
@@ -193,37 +203,42 @@ function NodeCard({
   code: React.ReactNode;
 }) {
   const files = coveredPaths(node);
+  const prose = useRef<View>(null);
+  const selected = useSelectedText(prose);
   return (
     <Card colors={colors} light={node.leaf}>
-      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing[2] }}>
-        <Text
-          style={{
-            flex: 1,
-            color: node.leaf ? colors.foregroundMuted : colors.foreground,
-            fontSize: fontSize.base,
-            lineHeight: leading(fontSize.base),
-            fontWeight: node.leaf ? "500" : "600",
-          }}
-        >
-          {node.title}
-        </Text>
-        <UnderstoodToggle subject={{ kind: "node", nodeId: node.id }} colors={colors} />
+      <View ref={prose} style={{ gap: spacing[2] }}>
+        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing[2] }}>
+          <Text
+            selectable={HIGHLIGHTS_TEXT}
+            style={{
+              flex: 1,
+              color: node.leaf ? colors.foregroundMuted : colors.foreground,
+              fontSize: fontSize.base,
+              lineHeight: leading(fontSize.base),
+              fontWeight: node.leaf ? "500" : "600",
+            }}
+          >
+            {node.title}
+          </Text>
+          <UnderstoodToggle subject={{ kind: "node", nodeId: node.id }} colors={colors} />
+        </View>
+        <Body colors={colors} muted>
+          {node.summary}
+        </Body>
+        {node.dependencies.length > 0 ? (
+          <>
+            <Label colors={colors}>Builds on</Label>
+            {node.dependencies.map((dependency) => (
+              <Bullet key={dependency.nodeId} colors={colors}>
+                <Text style={{ fontWeight: "600" }}>{titles.get(dependency.nodeId) ?? dependency.nodeId}</Text>: {dependency.reason}
+              </Bullet>
+            ))}
+          </>
+        ) : null}
+        <Body colors={colors}>{node.explanation}</Body>
+        {node.decisions.length > 0 ? <Decisions decisions={node.decisions} colors={colors} /> : null}
       </View>
-      <Body colors={colors} muted>
-        {node.summary}
-      </Body>
-      {node.dependencies.length > 0 ? (
-        <>
-          <Label colors={colors}>Builds on</Label>
-          {node.dependencies.map((dependency) => (
-            <Bullet key={dependency.nodeId} colors={colors}>
-              <Text style={{ fontWeight: "600" }}>{titles.get(dependency.nodeId) ?? dependency.nodeId}</Text>: {dependency.reason}
-            </Bullet>
-          ))}
-        </>
-      ) : null}
-      <Body colors={colors}>{node.explanation}</Body>
-      {node.decisions.length > 0 ? <Decisions decisions={node.decisions} colors={colors} /> : null}
       {files.length > 0 ? (
         <>
           <Label colors={colors}>Files</Label>
@@ -233,7 +248,7 @@ function NodeCard({
         </>
       ) : null}
       <AskAction subject={{ kind: "node", nodeId: node.id }} ask={ask} colors={colors} />
-      <NodeComments nodeId={node.id} colors={colors} />
+      <NodeComments nodeId={node.id} colors={colors} selected={selected} />
       {code}
     </Card>
   );
@@ -331,6 +346,7 @@ function Heading({ colors, children }: { colors: Colors; children: React.ReactNo
 function Label({ colors, children }: { colors: Colors; children: React.ReactNode }) {
   return (
     <Text
+      selectable={HIGHLIGHTS_TEXT}
       style={{
         color: colors.foregroundMuted,
         fontSize: fontSize.sm,
@@ -346,7 +362,10 @@ function Label({ colors, children }: { colors: Colors; children: React.ReactNode
 
 function Body({ colors, muted, color, children }: { colors: Colors; muted?: boolean; color?: string; children: React.ReactNode }) {
   return (
-    <Text style={{ color: color ?? (muted ? colors.foregroundMuted : colors.foreground), fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>
+    <Text
+      selectable={HIGHLIGHTS_TEXT}
+      style={{ color: color ?? (muted ? colors.foregroundMuted : colors.foreground), fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}
+    >
       {children}
     </Text>
   );
@@ -356,7 +375,9 @@ function Bullet({ colors, children }: { colors: Colors; children: React.ReactNod
   return (
     <View style={{ flexDirection: "row", gap: spacing[2] }}>
       <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>•</Text>
-      <Text style={{ flex: 1, color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>{children}</Text>
+      <Text selectable={HIGHLIGHTS_TEXT} style={{ flex: 1, color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>
+        {children}
+      </Text>
     </View>
   );
 }

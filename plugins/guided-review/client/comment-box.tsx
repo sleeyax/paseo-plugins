@@ -19,6 +19,8 @@ export type CommentBoxProps = {
   colors: Colors;
   /** What the comment is on, as a heading: "Comment on lines 10–14". */
   title: string;
+  /** The text of the guide the comment is about, when the reviewer highlighted some. */
+  quote?: string | undefined;
   initialBody?: string;
   saveLabel?: string;
   /** Saves the text, trimmed; a failure is shown in the box, which stays open with the text. */
@@ -28,7 +30,7 @@ export type CommentBoxProps = {
 };
 
 /** The one box every comment is written and edited in, wherever it is anchored. */
-export function CommentBox({ colors, title, initialBody = "", saveLabel = "Save draft", onSave, onCancel, actions = [] }: CommentBoxProps) {
+export function CommentBox({ colors, title, quote, initialBody = "", saveLabel = "Save draft", onSave, onCancel, actions = [] }: CommentBoxProps) {
   const [body, setBody] = useState(initialBody);
   /** What is running: "save", or an action's label. */
   const [running, setRunning] = useState<string | null>(null);
@@ -59,6 +61,7 @@ export function CommentBox({ colors, title, initialBody = "", saveLabel = "Save 
       }}
     >
       <Text style={{ ...small, color: colors.foregroundMuted, fontWeight: "600" }}>{title}</Text>
+      {quote === undefined ? null : <Quote colors={colors} text={quote} />}
       <TextInput
         value={body}
         onChangeText={setBody}
@@ -105,3 +108,18 @@ export function CommentBox({ colors, title, initialBody = "", saveLabel = "Save 
   );
 }
 
+/**
+ * Text of the guide a comment is about, as the reviewer highlighted it, which is kept on this machine
+ * and never posted. `earlier` says it is from a guide the one shown has replaced, so it is greyed.
+ */
+export function Quote({ colors, text, earlier }: { colors: Colors; text: string; earlier?: boolean }) {
+  const small = { fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) };
+  return (
+    <View style={{ gap: spacing[1], paddingLeft: spacing[2], borderLeftWidth: 2, borderLeftColor: colors.border, opacity: earlier ? 0.6 : 1 }}>
+      <Text numberOfLines={4} style={{ ...small, color: colors.foregroundMuted, fontStyle: "italic" }}>
+        {text}
+      </Text>
+      {earlier ? <Text style={{ ...small, color: colors.foregroundMuted }}>From an earlier guide</Text> : null}
+    </View>
+  );
+}

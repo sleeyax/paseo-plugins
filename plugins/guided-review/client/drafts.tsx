@@ -3,18 +3,22 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { createContext, useContext, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
-import { describeLocation, pathOf, type DraftList, type DraftLocation, type LinkedDraft } from "../shared/drafts.ts";
+import { describeLocation, pathOf, type CommentOrigin, type DraftList, type DraftLocation, type LinkedDraft } from "../shared/drafts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import type { CommentSubject } from "../shared/contracts.ts";
-import { CommentBox, type CommentBoxAction } from "./comment-box.tsx";
+import { CommentBox, Quote, type CommentBoxAction } from "./comment-box.tsx";
+import { HIGHLIGHTS_TEXT } from "./text-selection.ts";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
 
 /**
  * Where in the panel a comment box is open. The same line can be drawn twice (two nodes may cover
- * one file), so a box belongs to the place that opened it, not only to its location.
+ * one file), so a box belongs to the place that opened it, not only to its location. A new comment
+ * on text the reviewer highlighted in the guide carries that text as its `quote`.
  */
-export type OpenBox = { kind: "new"; place: string; location: DraftLocation } | { kind: "edit"; place: string; draftId: string };
+export type OpenBox =
+  | { kind: "new"; place: string; location: DraftLocation; quote?: string }
+  | { kind: "edit"; place: string; draftId: string };
 
 /**
  * The reviewer's drafts and what the panel does with them, shared through `DraftsContext` so the
@@ -27,8 +31,11 @@ export type DraftsControl = {
   /** Why the drafts could not be read, as a sentence. */
   error: string | null;
   refresh: () => void;
-  /** Saves a comment; `nodeId` is the node it was written from, which the panel groups it under. */
-  create: (location: DraftLocation, body: string, nodeId: string | null) => Promise<void>;
+  /**
+   * Saves a comment; `from` is the node or overview it was written from, which the panel groups it
+   * under, and `quote` the text highlighted there to comment on.
+   */
+  create: (location: DraftLocation, body: string, from: CommentOrigin | null, quote?: string) => Promise<void>;
   /** The title of a node of the guide the panel shows, in the guide's order; empty until it is ready. */
   titles: ReadonlyMap<string, string>;
   update: (draftId: string, body: string) => Promise<void>;
@@ -92,8 +99,8 @@ export function useDrafts(reviewId: string | null, headSha: string | null, guide
     error: query.isError ? (query.error instanceof Error ? query.error.message : String(query.error)) : null,
     refresh: () => void query.refetch(),
     titles,
-    create: async (location, body, nodeId) => {
-      const draft = await createDraft({ reviewId, headSha, location, body, from: nodeId === null ? null : { kind: "node", nodeId } });
+    create: async (location, body, from, quote) => {
+      const draft = await createDraft({ reviewId, headSha, location, body, from, quote: quote ?? null });
       change((drafts) => [...drafts, draft]);
       setOpen(null);
     },
@@ -124,28 +131,37 @@ export function useDrafts(reviewId: string | null, headSha: string | null, guide
 /**
  * The box for a new comment at `location`. Every comment box in the panel is opened through this
  * or `DraftCard`, which is where actions for all of them, like "Suggest wording", go. The comment
- * is linked to the node whose code the box is drawn in, or for a node's own comment (a `general`
- * location) to `nodeId`.
+ * is linked to the node whose code the box is drawn in, or for a general comment to `from`, with
+ * the `quote` highlighted there.
  */
 export function NewCommentBox({
   control,
   location,
   colors,
-  nodeId,
+  from,
+  quote,
 }: {
   control: DraftsControl;
   location: DraftLocation;
   colors: Colors;
-  nodeId?: string;
+  from?: CommentOrigin;
+  quote?: string;
 }) {
   const drawnIn = useContext(CommentNodeContext);
-  const node = nodeId ?? drawnIn;
-  const subject = subjectOf(location, node);
+  const origin: CommentOrigin | null = from ?? (drawnIn === null ? null : { kind: "node", nodeId: drawnIn });
+  const subject = subjectOf(location, origin, quote);
+  const title =
+    location.kind !== "general"
+      ? `Comment on ${describeLocation(location)}`
+      : quote !== undefined
+        ? "Comment on the highlighted text, posted on the change as a whole"
+        : "Comment on this concept, posted on the change as a whole";
   return (
     <CommentBox
       colors={colors}
-      title={location.kind === "general" ? "Comment on this concept, posted on the change as a whole" : `Comment on ${describeLocation(location)}`}
-      onSave={(body) => control.create(location, body, node)}
+      title={title}
+      quote={quote}
+      onSave={(body) => control.create(location, body, origin, quote)}
       onCancel={() => control.setOpen(null)}
       actions={subject === null ? [] : [suggestWordingAction(control, subject)]}
     />
@@ -157,15 +173,21 @@ function nodeOf(draft: LinkedDraft): string | null {
   return draft.from?.kind === "node" ? draft.from.nodeId : null;
 }
 
-/** What "Suggest wording" words a comment at `location` from: its code, or for a general one, its node. */
-function subjectOf(location: DraftLocation, nodeId: string | null): CommentSubject | null {
+/**
+ * What "Suggest wording" words a comment at `location` from: its code, or for a general one, the
+ * node or overview it came from with the text highlighted there. The overview is worded only from
+ * highlighted text, which every comment on it has.
+ */
+function subjectOf(location: DraftLocation, from: CommentOrigin | null, quote: string | undefined): CommentSubject | null {
   if (location.kind !== "general") return { kind: "code", location };
-  return nodeId === null ? null : { kind: "node", nodeId };
+  if (from?.kind === "node") return { kind: "node", nodeId: from.nodeId, quote: quote ?? null };
+  return from?.kind === "overview" && quote !== undefined ? { kind: "overview", quote } : null;
 }
 
-/** Where a draft is, for its card: its place in a file, or for a general draft, the node it was written from. */
+/** Where a draft is, for its card: its place in a file, or for a general draft, the part of the guide it was written from. */
 function whereOf(draft: LinkedDraft, titles: ReadonlyMap<string, string>, showPath: boolean): string {
   if (draft.location.kind === "general") {
+    if (draft.from?.kind === "overview") return "Your comment on the overview";
     const nodeId = nodeOf(draft);
     const title = nodeId === null ? undefined : titles.get(nodeId);
     return title === undefined ? "Your draft on the change as a whole" : `Your comment on the concept "${title}"`;
@@ -209,12 +231,13 @@ export function DraftCard({
   const open = control.open;
 
   if (open?.kind === "edit" && open.draftId === draft.id && open.place === place) {
-    const subject = subjectOf(draft.location, nodeOf(draft));
+    const subject = subjectOf(draft.location, draft.from, draft.quote?.text);
     return (
       <CommentBox
         colors={colors}
         title={`Edit ${where}`}
         initialBody={draft.body}
+        quote={draft.quote?.text}
         onSave={(body) => control.update(draft.id, body)}
         onCancel={() => control.setOpen(null)}
         actions={subject === null ? [] : [suggestWordingAction(control, subject)]}
@@ -246,6 +269,7 @@ export function DraftCard({
       }}
     >
       <Text style={{ ...small, color: colors.foregroundMuted }}>{where}</Text>
+      {draft.quote ? <Quote colors={colors} text={draft.quote.text} earlier={draft.quote.earlier} /> : null}
       <Text selectable style={{ color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>
         {draft.body}
       </Text>
@@ -269,18 +293,21 @@ export function DraftCard({
 }
 
 /**
- * The drafts grouped under the node each was written from, in the guide's order, then the ones
- * written from no node of this guide: started on the web, on a Supporting or Unsorted file, or from
- * a node a Regenerate changed the code of. Within a group, the forge's order.
+ * The drafts written from the overview, then the ones grouped under the node each was written from,
+ * in the guide's order, then the ones written from no part of this guide: started on the web, on a
+ * Supporting or Unsorted file, or from a node a Regenerate changed the code of. Within a group, the
+ * forge's order.
  */
-export function groupByNode(
+export function groupDrafts(
   drafts: readonly LinkedDraft[],
   titles: ReadonlyMap<string, string>,
-): { groups: { nodeId: string; title: string; drafts: LinkedDraft[] }[]; unlinked: LinkedDraft[] } {
+): { overview: LinkedDraft[]; groups: { nodeId: string; title: string; drafts: LinkedDraft[] }[]; unlinked: LinkedDraft[] } {
   const groups = [...titles].map(([nodeId, title]) => ({ nodeId, title, drafts: drafts.filter((draft) => nodeOf(draft) === nodeId) }));
   return {
+    overview: drafts.filter((draft) => draft.from?.kind === "overview"),
     groups: groups.filter((group) => group.drafts.length > 0),
     unlinked: drafts.filter((draft) => {
+      if (draft.from?.kind === "overview") return false;
       const nodeId = nodeOf(draft);
       return nodeId === null || !titles.has(nodeId);
     }),
@@ -288,28 +315,65 @@ export function groupByNode(
 }
 
 /**
- * A node's own comments, on the change as a whole, and the action that writes one: under the node's
- * card, where the reviewer reads the concept. Nothing outside a review.
+ * A node's own comments, on the change as a whole, and the actions that write one: on the concept,
+ * or on the text of its card the reviewer has `selected`. Under the node's card, where the reviewer
+ * reads the concept. Nothing outside a review.
  */
-export function NodeComments({ nodeId, colors }: { nodeId: string; colors: Colors }) {
+export function NodeComments({ nodeId, colors, selected }: { nodeId: string; colors: Colors; selected: string | null }) {
   const control = useContext(DraftsContext);
   if (control === null) return null;
   const place = `node:${nodeId}`;
   const comments = control.drafts.filter((draft) => nodeOf(draft) === nodeId && draft.location.kind === "general");
   const box = control.open?.kind === "new" && control.open.place === place ? control.open : null;
+  const open = (quote?: string) => control.setOpen({ kind: "new", place, location: { kind: "general" }, ...(quote === undefined ? {} : { quote }) });
   return (
     <View style={{ gap: spacing[2] }}>
       {comments.map((draft) => (
         <DraftCard key={draft.id} control={control} draft={draft} place={place} colors={colors} />
       ))}
       {box ? (
-        <NewCommentBox control={control} location={box.location} colors={colors} nodeId={nodeId} />
+        <NewCommentBox control={control} location={box.location} colors={colors} from={{ kind: "node", nodeId }} quote={box.quote} />
       ) : (
-        <View style={{ alignItems: "flex-start" }}>
-          <TextLink colors={colors} label="Comment on this concept" onPress={() => control.setOpen({ kind: "new", place, location: { kind: "general" } })} />
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing[3] }}>
+          <TextLink colors={colors} label="Comment on this concept" onPress={() => open()} />
+          {selected === null ? null : <CommentOnSelection colors={colors} onOpen={() => open(selected)} />}
         </View>
       )}
     </View>
+  );
+}
+
+/**
+ * The comments on the overview, and the box for one on the text of it the reviewer has `selected`,
+ * which is the only way to write one. Nothing outside a review, or with neither.
+ */
+export function OverviewComments({ colors, selected }: { colors: Colors; selected: string | null }) {
+  const control = useContext(DraftsContext);
+  if (control === null) return null;
+  const place = "overview";
+  const comments = control.drafts.filter((draft) => draft.from?.kind === "overview");
+  const box = control.open?.kind === "new" && control.open.place === place ? control.open : null;
+  if (comments.length === 0 && box === null && selected === null) return null;
+  return (
+    <View style={{ gap: spacing[2] }}>
+      {comments.map((draft) => (
+        <DraftCard key={draft.id} control={control} draft={draft} place={place} colors={colors} />
+      ))}
+      {box ? (
+        <NewCommentBox control={control} location={box.location} colors={colors} from={{ kind: "overview" }} quote={box.quote} />
+      ) : selected === null ? null : (
+        <CommentOnSelection colors={colors} onOpen={() => control.setOpen({ kind: "new", place, location: { kind: "general" }, quote: selected })} />
+      )}
+    </View>
+  );
+}
+
+/** Opens on press-in: pressing anywhere clears the selection, which hides this link before a press could end. */
+function CommentOnSelection({ colors, onOpen }: { colors: Colors; onOpen: () => void }) {
+  return (
+    <Pressable onPressIn={onOpen} accessibilityRole="button" hitSlop={4} style={{ alignSelf: "flex-start" }}>
+      <Text style={{ color: colors.accent, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm), fontWeight: "600" }}>Comment on selection</Text>
+    </Pressable>
   );
 }
 
@@ -318,7 +382,8 @@ export function DraftsSection({ control, colors }: { control: DraftsControl; col
   const body = { fontSize: fontSize.base, lineHeight: leading(fontSize.base) };
   const small = { fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) };
   const count = control.drafts.length;
-  const { groups, unlinked } = groupByNode(control.drafts, control.titles);
+  const { overview, groups, unlinked } = groupDrafts(control.drafts, control.titles);
+  const grouped = [...(overview.length > 0 ? [{ key: "overview", title: "Overview", drafts: overview }] : []), ...groups.map((group) => ({ key: group.nodeId, ...group }))];
   return (
     <View
       style={{
@@ -343,13 +408,13 @@ export function DraftsSection({ control, colors }: { control: DraftsControl; col
       ) : count === 0 ? (
         <Text style={{ ...body, color: colors.foregroundMuted }}>
           No drafts yet. Tap a line of a diff below to comment on it, drag across lines for a range (on a phone, hold first),
-          comment on a whole file from its header, or on a concept from its card.
+          comment on a whole file from its header, or on a concept from its card{HIGHLIGHTS_TEXT ? ", or highlight text in the guide to comment on it" : ""}.
         </Text>
       ) : (
         <>
           <Text style={{ ...body, color: colors.foregroundMuted }}>Saved on the forge, unpublished until the review is submitted.</Text>
-          {groups.map((group) => (
-            <View key={group.nodeId} style={{ gap: spacing[2] }}>
+          {grouped.map((group) => (
+            <View key={group.key} style={{ gap: spacing[2] }}>
               <Text style={{ ...small, color: colors.foreground, fontWeight: "600" }}>{group.title}</Text>
               {group.drafts.map((draft) => (
                 <DraftCard key={draft.id} control={control} draft={draft} place="list" colors={colors} showPath />
@@ -358,7 +423,7 @@ export function DraftsSection({ control, colors }: { control: DraftsControl; col
           ))}
           {unlinked.length > 0 ? (
             <View style={{ gap: spacing[2] }}>
-              {groups.length > 0 ? (
+              {grouped.length > 0 ? (
                 <Text style={{ ...small, color: colors.foreground, fontWeight: "600" }}>Not from a concept of this guide</Text>
               ) : null}
               {unlinked.map((draft) => (
