@@ -314,7 +314,7 @@ test("on GitLab a node's comment is worded as a thread of its own on the merge r
   const ref = { forge: "gitlab", host: "gitlab.com", project: "acme/uploader", number: 7, url: "https://gitlab.com/acme/uploader/-/merge_requests/7" } as const;
   const node = sampleGuide().nodes[0]!;
 
-  const prompt = wordingPrompt(ref, HEAD, { kind: "node", node, code: [{ path: "src/retry.ts", ranges: [] }] }, "");
+  const prompt = wordingPrompt(ref, HEAD, { kind: "node", node, code: [{ path: "src/retry.ts", ranges: [] }], quote: null }, "");
 
   assert.match(prompt, /It goes on the merge request as a whole, not on any line or file/);
   assert.match(prompt, /posted on GitLab as the reviewer's own, as a thread of its own on the merge request, where/);
@@ -326,4 +326,64 @@ test("a node the guide does not have gets no wording", async (t) => {
 
   assert.deepEqual(await suggest(service, { kind: "node", nodeId: "gone" }, "x"), { status: "failed", message: "That concept is not in the guide any more." });
   assert.deepEqual(agents.created[0]!.sent, []);
+});
+
+const GENERAL_RULES = [
+  "The comment is posted on GitHub as the reviewer's own, as a paragraph of the review's summary, where the author and other reviewers read it with no code beside it. None of them has seen your guide, so it must read correctly without it.",
+  '- Open with what the comment is about, named in plain words for what the code does, as in "About the retry handling: …", so it stands on its own.',
+  "- Do not use the guide's vocabulary: no trunk, leaf, node or layer, no titles or IDs from the guide, and no mention of the guide or of this chat. Name code by its files, functions and behaviour.",
+  "- Word only what the reviewer wants to say. Do not add bugs, security issues, risks, style problems or fixes of your own.",
+  "- Write the comment's text only: no greeting, no sign-off and no preamble.",
+  "- Do not change anything. Read files in your working directory, the repository at the change's head commit, where the diff alone does not explain something.",
+].join("\n");
+
+function highlighted(quote: string): string {
+  return [
+    "The reviewer highlighted this passage of your guide to comment on:",
+    "```",
+    quote,
+    "```",
+    "It is your guide's wording, which nobody reading the review has seen: take it as what the comment is about, and do not quote it.",
+  ].join("\n");
+}
+
+test("a passage highlighted in the overview is worded as a general comment about what it says, from the overview as the guide has it", async (t) => {
+  const { service, forge, agents } = await withGuide(t);
+
+  const result = await suggest(service, { kind: "overview", quote: " only when the failure is transient \n" }, "");
+  assert.deepEqual(result, { status: "ready", body: "Why is the upload logged only once it has been sent?" });
+
+  assert.deepEqual(agents.created[0]!.sent, [
+    withOutputSchema(
+      [
+        `The reviewer of ${URL} at bbbbbbbbbbbb is writing a review comment and wants you to word it.`,
+        [
+          "It goes on the pull request as a whole, not on any line or file: it is about the overview of your guide, which says:",
+          "- Idea: Uploads that fail on a flaky network are retried with exponential backoff instead of failing at once.",
+          "- Need to know: An upload is retried only when the failure is transient: a timeout or a 5xx.",
+          "- Decision: Retry inside the uploader. Rather than: Retrying in every caller, which would repeat the policy.",
+          '- Where to spend attention: "Retry policy": Every retry decision is made here.',
+        ].join("\n"),
+        highlighted("only when the failure is transient"),
+        "The reviewer has not typed anything yet. Suggest a short comment a reviewer could leave here: a question about something the code, the description or the commits leave unclear. Do not invent a problem.",
+        GENERAL_RULES,
+      ].join("\n\n"),
+      jsonSchemaOf(WordingSchema),
+    ),
+  ]);
+  assert.deepEqual(forge.created, []);
+});
+
+test("a passage highlighted in a node follows what the guide says about the node", async (t) => {
+  const { service, agents } = await withGuide(t);
+
+  await suggest(service, { kind: "node", nodeId: "retry-policy", quote: "Full jitter on the backoff." }, "why");
+
+  const sent = agents.created[0]!.sent[0]!;
+  const [concept, passage, typed] = [
+    'it is about one concept of the change, the node "retry-policy"',
+    `- src/retry.ts\n\n${highlighted("Full jitter on the backoff.")}\n\nWhat the reviewer typed`,
+    "What the reviewer typed",
+  ].map((part) => sent.indexOf(part));
+  assert.ok(concept !== -1 && passage > concept && typed > passage, sent);
 });

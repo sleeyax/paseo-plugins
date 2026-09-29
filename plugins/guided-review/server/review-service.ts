@@ -442,7 +442,11 @@ export class ReviewService {
       if (subject.kind === "node") {
         const node = shown.guide.nodes.find((candidate) => candidate.id === subject.nodeId);
         if (node === undefined) return notSuggested("That concept is not in the guide any more.");
-        context = { kind: "node", node, code: codeReferencesOf(resolveCode(changeRequest.files, node.covers).files) };
+        const code = codeReferencesOf(resolveCode(changeRequest.files, node.covers).files);
+        context = { kind: "node", node, code, quote: subject.quote?.trim() || null };
+      } else if (subject.kind === "overview") {
+        const titles = new Map(shown.guide.nodes.map((node) => [node.id, node.title]));
+        context = { kind: "overview", overview: shown.guide.overview, titles, quote: subject.quote.trim() };
       } else {
         context = codeWordingContext(changeRequest.files, shown.guide.nodes, subject.location);
       }
