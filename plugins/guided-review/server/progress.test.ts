@@ -3,6 +3,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
+import type { LayeredGuide } from "../shared/guide.ts";
+import { summariseProgress } from "../shared/progress.ts";
 import { fakeForge, sampleChangeRequest } from "./fake-forge.ts";
 import { fakeGuideAgents, sampleGuide, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
 import type { ChangedFile } from "./forge/port.ts";
@@ -20,6 +22,24 @@ const RETRY_TEST: ChangedFile = { path: "src/retry.test.ts", previousPath: null,
 const RETRY_DOC: ChangedFile = { path: "docs/retry.md", previousPath: null, status: "added", additions: 12, deletions: 0, patch: "@@ -0,0 +1,1 @@\n+d" };
 
 type Host = { data: string; service: ReviewService; agents: FakeGuideAgents; restart(): ReviewService };
+
+test("Supporting's tests are tallied as Tests, apart from the rest of Supporting", () => {
+  const guide = {
+    ...sampleGuide(),
+    nodes: [],
+    supporting: [
+      { path: RETRY_TEST.path, category: "test" },
+      { path: RETRY_DOC.path, category: "docs" },
+    ],
+    unsorted: [],
+  } satisfies LayeredGuide;
+
+  const progress = summariseProgress(guide, HEAD, { nodes: [], files: [RETRY_DOC.path] });
+
+  assert.deepEqual(progress.tests, { understood: 0, total: 1 });
+  assert.deepEqual(progress.supporting, { understood: 1, total: 1 });
+  assert.deepEqual(progress.overall, { understood: 1, total: 2 });
+});
 
 async function withHost(t: TestContext): Promise<Host> {
   const data = await mkdtemp(path.join(os.tmpdir(), "guided-review-progress-"));
@@ -49,13 +69,14 @@ const NOTHING_UNDERSTOOD = {
     { understood: 0, total: 1 },
     { understood: 0, total: 1 },
   ],
-  supporting: { understood: 0, total: 1 },
+  tests: { understood: 0, total: 1 },
+  supporting: { understood: 0, total: 0 },
   unsorted: { understood: 0, total: 1 },
   overall: { understood: 0, total: 4 },
   nextLayer: 0,
 };
 
-test("a ready guide starts with nothing understood, tallied per layer, Supporting, Unsorted and overall", async (t) => {
+test("a ready guide starts with nothing understood, tallied per layer, Tests, Supporting, Unsorted and overall", async (t) => {
   const { service } = await withGuide(t);
 
   assert.deepEqual(await service.readingProgress({ reviewId: REVIEW_ID }), NOTHING_UNDERSTOOD);
@@ -105,7 +126,8 @@ test("Supporting and Unsorted entries are marked by path, and every node underst
       { understood: 1, total: 1 },
       { understood: 1, total: 1 },
     ],
-    supporting: { understood: 1, total: 1 },
+    tests: { understood: 1, total: 1 },
+    supporting: { understood: 0, total: 0 },
     unsorted: { understood: 1, total: 1 },
     overall: { understood: 4, total: 4 },
     nextLayer: null,

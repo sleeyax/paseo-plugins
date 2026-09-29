@@ -135,6 +135,17 @@ export type LayeredGuide = z.output<typeof LayeredGuideSchema>;
 export type LayeredNode = z.output<typeof LayeredNodeSchema>;
 
 /**
+ * Supporting's tests apart from the rest of it, since the panel shows and tallies them as a Tests group of their own.
+ * The stored guide keeps them in Supporting, so guides and marks written before the split read the same.
+ */
+export function splitTests(supporting: readonly SupportingEntry[]): { tests: SupportingEntry[]; supporting: SupportingEntry[] } {
+  return {
+    tests: supporting.filter((entry) => entry.category === "test"),
+    supporting: supporting.filter((entry) => entry.category !== "test"),
+  };
+}
+
+/**
  * The files a node covers, once each, in the order its `covers` first names them: a node's code is
  * its `covers`, so this is its file list wherever one is wanted.
  */
