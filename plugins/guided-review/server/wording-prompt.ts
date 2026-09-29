@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { DiffLine } from "../shared/diff.ts";
 import { describeLocation, type DraftLocation } from "../shared/drafts.ts";
-import { coveredPaths, type GuideNode } from "../shared/guide.ts";
+import { coveredPaths, type Guide, type GuideNode } from "../shared/guide.ts";
 import { anchorAt } from "./anchors.ts";
 import { parsePatch, resolveCode } from "./diff.ts";
 import type { ChangedFile, ChangeRequestRef } from "./forge/port.ts";
@@ -19,9 +19,13 @@ export const WordingSchema = z.object({
  * What the wording prompt says about where the comment goes, resolved from the stored guide and what
  * the forge said at its head. A comment on code names its file, the lines it is on (none for the
  * file as a whole) and the guide's nodes whose covers include any of them, usually one and often none.
- * A node's comment, on the change as a whole, names the node and the code it covers.
+ * A general comment, on the change as a whole, names the node and the code it covers, or the overview
+ * with the node titles its attention entries point at, and the passage of either the reviewer highlighted.
  */
-export type WordingSubjectContext = CodeWordingContext | { kind: "node"; node: GuideNode; code: readonly CodeReference[] };
+export type WordingSubjectContext =
+  | CodeWordingContext
+  | { kind: "node"; node: GuideNode; code: readonly CodeReference[]; quote: string | null }
+  | { kind: "overview"; overview: Guide["overview"]; titles: ReadonlyMap<string, string>; quote: string };
 
 export type CodeWordingContext = {
   kind: "code";
@@ -36,7 +40,7 @@ export type CodeWordingContext = {
  * the nodes that cover them. Throws, in a sentence for the panel, when a comment cannot go there.
  */
 export function codeWordingContext(files: readonly ChangedFile[], nodes: readonly GuideNode[], location: DraftLocation): CodeWordingContext {
-  if (location.kind === "general") throw new Error("A comment on the change as a whole is a node's comment; suggest its wording from the node.");
+  if (location.kind === "general") throw new Error("A comment on the change as a whole is about a node or the overview; suggest its wording from there.");
   const anchor = anchorAt(files, location);
   const file = files.find((candidate) => candidate.path === location.path)!;
   if (anchor.kind === "file" || anchor.kind === "general") {
@@ -72,7 +76,7 @@ export function wordingPrompt(ref: ChangeRequestRef, headSha: string, subject: W
   const text = typed.trim();
   return [
     `The reviewer of ${change} is writing a review comment and wants you to word it.`,
-    ...(subject.kind === "code" ? [codeContext(subject), nodesContext(subject.nodes)] : [conceptContext(ref, subject.node, subject.code)]),
+    ...subjectContext(ref, subject),
     text === ""
       ? "The reviewer has not typed anything yet. Suggest a short comment a reviewer could leave here: a question about something the code, the description or the commits leave unclear. Do not invent a problem."
       : [
@@ -80,8 +84,19 @@ export function wordingPrompt(ref: ChangeRequestRef, headSha: string, subject: W
           fenced(text),
           "Turn it into the comment they mean to post: keep their point, their stance and every question they ask, and make it clear and concise. If they wrote an instruction rather than a draft, follow it.",
         ].join("\n"),
-    subject.kind === "code" ? wordingRules(ref) : conceptRules(ref),
+    subject.kind === "code" ? wordingRules(ref) : generalRules(ref),
   ].join("\n\n");
+}
+
+function subjectContext(ref: ChangeRequestRef, subject: WordingSubjectContext): string[] {
+  switch (subject.kind) {
+    case "code":
+      return [codeContext(subject), nodesContext(subject.nodes)];
+    case "node":
+      return [conceptContext(ref, subject.node, subject.code), ...quoteContext(subject.quote)];
+    case "overview":
+      return [overviewContext(ref, subject.overview, subject.titles), ...quoteContext(subject.quote)];
+  }
 }
 
 function codeContext({ location, file, lines }: CodeWordingContext): string {
@@ -121,11 +136,36 @@ function conceptContext(ref: ChangeRequestRef, node: GuideNode, code: readonly C
   ].join("\n");
 }
 
+/** A comment on the change as a whole about the overview, which the prompt gives as the guide has it. */
+function overviewContext(ref: ChangeRequestRef, overview: Guide["overview"], titles: ReadonlyMap<string, string>): string {
+  const change = ref.forge === "gitlab" ? "merge request" : "pull request";
+  const lines = [
+    `It goes on the ${change} as a whole, not on any line or file: it is about the overview of your guide, which says:`,
+    `- Idea: ${oneLine(overview.idea)}`,
+  ];
+  for (const item of overview.needToKnows) lines.push(`- Need to know: ${oneLine(item)}`);
+  for (const decision of overview.decisions) lines.push(`- Decision: ${decision.choice} Rather than: ${decision.rejected}`);
+  for (const entry of overview.attention) lines.push(`- Where to spend attention: "${titles.get(entry.nodeId) ?? entry.nodeId}": ${entry.reason}`);
+  return lines.join("\n");
+}
+
+/** The passage of the guide the reviewer highlighted, which only tells the agent what the comment is about. */
+function quoteContext(quote: string | null): string[] {
+  if (quote === null) return [];
+  return [
+    [
+      "The reviewer highlighted this passage of your guide to comment on:",
+      fenced(quote),
+      "It is your guide's wording, which nobody reading the review has seen: take it as what the comment is about, and do not quote it.",
+    ].join("\n"),
+  ];
+}
+
 /**
- * The rules for a node's comment: those for any comment, but it is read with no code beside it, so
+ * The rules for a general comment: those for any comment, but it is read with no code beside it, so
  * it says what it is about first, in the words of the code rather than the guide's.
  */
-function conceptRules(ref: ChangeRequestRef): string {
+function generalRules(ref: ChangeRequestRef): string {
   const [forge, where] =
     ref.forge === "gitlab" ? ["GitLab", "as a thread of its own on the merge request"] : ["GitHub", "as a paragraph of the review's summary"];
   return `The comment is posted on ${forge} as the reviewer's own, ${where}, where the author and other reviewers read it with no code beside it. None of them has seen your guide, so it must read correctly without it.
@@ -134,6 +174,10 @@ function conceptRules(ref: ChangeRequestRef): string {
 - Word only what the reviewer wants to say. Do not add bugs, security issues, risks, style problems or fixes of your own.
 - Write the comment's text only: no greeting, no sign-off and no preamble.
 - Do not change anything. Read files in your working directory, the repository at the change's head commit, where the diff alone does not explain something.`;
+}
+
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 /** `text` in a Markdown fence long enough that nothing inside closes it. */
