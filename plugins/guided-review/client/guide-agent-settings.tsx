@@ -37,9 +37,10 @@ export function GuideAgentSettings({ theme, settings }: { theme: PluginSurfacePr
       <Text
         style={{ color: theme.colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm), marginTop: spacing[2] }}
       >
-        The agent that writes each guide and answers questions about it, such as claude, claude/claude-opus-5-5 or
-        codex/gpt-5.5. It runs read-only: in plan or read-only mode where the provider has one, and with every request to
-        edit, write or run a command denied.
+        The agent that writes each guide and answers questions about it, such as claude-tty, claude/claude-opus-5-5 or
+        codex/gpt-5.5. The default, claude-tty, becomes claude where the claude-tty plugin is not available. It runs
+        read-only: in plan or read-only mode where the provider has one, and with every request to edit, write or run a
+        command denied.
       </Text>
     </SettingsSection>
   );
