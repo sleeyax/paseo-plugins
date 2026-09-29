@@ -6,7 +6,7 @@ import { coveredPaths, type Guide, type GuideDecision, type GuideState, type Lay
 import { AskAction, type AskControl } from "./ask-action.tsx";
 import { NodeCode } from "./diff-view.tsx";
 import { ItemCommentBox, NodeComments, OverviewComments, useCommentOnHold, useCommentOnRelease, type Selected } from "./drafts.tsx";
-import { ProgressContext, ProgressSummary, UnderstoodToggle, type ProgressControl } from "./progress.tsx";
+import { ProgressContext, ProgressSummary, UnderstoodToggle, useCollapsed, type ProgressControl } from "./progress.tsx";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
 import { GuideText } from "./guide-text.tsx";
@@ -216,11 +216,13 @@ function NodeCard({
 }) {
   const files = coveredPaths(node);
   const { prose, text, selected } = useCardText({ kind: "node", nodeId: node.id });
+  const [collapsed, setCollapsed] = useCollapsed({ kind: "node", nodeId: node.id });
   return (
     <Card colors={colors} light={node.leaf}>
       <CardTextContext.Provider value={text}>
         <View ref={prose} style={{ gap: spacing[2] }}>
           <View style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing[2] }}>
+            <CollapseToggle colors={colors} collapsed={collapsed} onPress={() => setCollapsed(!collapsed)} />
             <Text
               selectable={HIGHLIGHTS_TEXT}
               style={{
@@ -235,42 +237,46 @@ function NodeCard({
             </Text>
             <UnderstoodToggle subject={{ kind: "node", nodeId: node.id }} colors={colors} />
           </View>
-          <Body colors={colors} muted item={{ key: "summary", text: node.summary }}>
-            <GuideText text={node.summary} colors={colors} />
-          </Body>
-          {node.dependencies.length > 0 ? (
-            <>
-              <Label colors={colors}>Builds on</Label>
-              {node.dependencies.map((dependency) => {
-                const title = titles.get(dependency.nodeId) ?? dependency.nodeId;
-                return (
-                  <Bullet key={dependency.nodeId} colors={colors} item={{ key: `dependency:${dependency.nodeId}`, text: `${title}: ${dependency.reason}` }}>
-                    <Text style={{ fontWeight: "600" }}>
-                      <GuideText text={title} colors={colors} />
-                    </Text>
-                    : <GuideText text={dependency.reason} colors={colors} />
-                  </Bullet>
-                );
-              })}
-            </>
-          ) : null}
-          <Body colors={colors} item={{ key: "explanation", text: node.explanation }}>
-            <GuideText text={node.explanation} colors={colors} />
-          </Body>
-          {node.decisions.length > 0 ? <Decisions decisions={node.decisions} colors={colors} /> : null}
+          <Collapsible collapsed={collapsed}>
+            <Body colors={colors} muted item={{ key: "summary", text: node.summary }}>
+              <GuideText text={node.summary} colors={colors} />
+            </Body>
+            {node.dependencies.length > 0 ? (
+              <>
+                <Label colors={colors}>Builds on</Label>
+                {node.dependencies.map((dependency) => {
+                  const title = titles.get(dependency.nodeId) ?? dependency.nodeId;
+                  return (
+                    <Bullet key={dependency.nodeId} colors={colors} item={{ key: `dependency:${dependency.nodeId}`, text: `${title}: ${dependency.reason}` }}>
+                      <Text style={{ fontWeight: "600" }}>
+                        <GuideText text={title} colors={colors} />
+                      </Text>
+                      : <GuideText text={dependency.reason} colors={colors} />
+                    </Bullet>
+                  );
+                })}
+              </>
+            ) : null}
+            <Body colors={colors} item={{ key: "explanation", text: node.explanation }}>
+              <GuideText text={node.explanation} colors={colors} />
+            </Body>
+            {node.decisions.length > 0 ? <Decisions decisions={node.decisions} colors={colors} /> : null}
+          </Collapsible>
         </View>
       </CardTextContext.Provider>
-      {files.length > 0 ? (
-        <>
-          <Label colors={colors}>Files</Label>
-          {files.map((file) => (
-            <FileLine key={file} colors={colors} path={file} />
-          ))}
-        </>
-      ) : null}
-      <AskAction subject={{ kind: "node", nodeId: node.id }} ask={ask} colors={colors} />
-      {code}
-      <NodeComments nodeId={node.id} colors={colors} selected={selected} />
+      <Collapsible collapsed={collapsed}>
+        {files.length > 0 ? (
+          <>
+            <Label colors={colors}>Files</Label>
+            {files.map((file) => (
+              <FileLine key={file} colors={colors} path={file} />
+            ))}
+          </>
+        ) : null}
+        <AskAction subject={{ kind: "node", nodeId: node.id }} ask={ask} colors={colors} />
+        {code}
+        <NodeComments nodeId={node.id} colors={colors} selected={selected} />
+      </Collapsible>
     </Card>
   );
 }
@@ -297,19 +303,23 @@ function FileEntry({
   folded?: boolean;
 }) {
   const [open, setOpen] = React.useState(!folded);
+  const [collapsed, setCollapsed] = useCollapsed({ kind: "file", path });
   return (
     <View style={{ gap: spacing[1] }}>
       <View style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing[2] }}>
+        <CollapseToggle colors={colors} collapsed={collapsed} onPress={() => setCollapsed(!collapsed)} />
         <View style={{ flex: 1 }}>
           <FileLine colors={colors} path={path} note={note} />
         </View>
         <UnderstoodToggle subject={{ kind: "file", path }} colors={colors} />
       </View>
-      <AskAction subject={{ kind: "file", path }} ask={ask} colors={colors} />
-      <View style={{ alignItems: "flex-start" }}>
-        <Link colors={colors} label={open ? "Hide the diff" : "Show the diff"} onPress={() => setOpen(!open)} />
-      </View>
-      {open ? code : null}
+      <Collapsible collapsed={collapsed} gap={spacing[1]}>
+        <AskAction subject={{ kind: "file", path }} ask={ask} colors={colors} />
+        <View style={{ alignItems: "flex-start" }}>
+          <Link colors={colors} label={open ? "Hide the diff" : "Show the diff"} onPress={() => setOpen(!open)} />
+        </View>
+        {open ? code : null}
+      </Collapsible>
     </View>
   );
 }
@@ -355,6 +365,27 @@ function Card({ colors, light, children }: { colors: Colors; light?: boolean; ch
       {children}
     </View>
   );
+}
+
+function CollapseToggle({ colors, collapsed, onPress }: { colors: Colors; collapsed: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={spacing[2]}
+      accessibilityRole="button"
+      accessibilityLabel={collapsed ? "Expand" : "Collapse"}
+      accessibilityState={{ expanded: !collapsed }}
+    >
+      <Text style={{ width: spacing[4], color: colors.foregroundMuted, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>
+        {collapsed ? "▸" : "▾"}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** Hidden rather than unmounted while collapsed, so a comment box inside keeps what was typed in it. */
+function Collapsible({ collapsed, gap = spacing[2], children }: { collapsed: boolean; gap?: number; children: React.ReactNode }) {
+  return <View style={{ display: collapsed ? "none" : "flex", gap }}>{children}</View>;
 }
 
 function Heading({ colors, children }: { colors: Colors; children: React.ReactNode }) {
