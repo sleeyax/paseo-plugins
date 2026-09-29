@@ -378,10 +378,15 @@ type Item = { key: string; text: string };
 
 /**
  * A card whose text takes comments: `from`, the part of the guide it shows, and `register`, which
- * records each paragraph's and bullet's element so a highlight can be traced to the one it ends
- * in. `hold` comments on a whole one, which the phone app offers on a long press; null on the web.
+ * records the element of each paragraph and bullet, so a highlight can be traced to the one it ends
+ * in, and of each comment box drawn under one, which is no part of the text. `hold` comments on a
+ * whole paragraph or bullet, which the phone app offers on a long press; null on the web.
  */
-type CardText = { from: CommentOrigin; register: (key: string, element: unknown) => void; hold: ((held: Selected) => void) | null };
+type CardText = {
+  from: CommentOrigin;
+  register: (part: "item" | "box", key: string, element: unknown) => void;
+  hold: ((held: Selected) => void) | null;
+};
 
 /** Null outside a card whose text takes comments, and outside a review. */
 const CardTextContext = createContext<CardText | null>(null);
@@ -392,15 +397,18 @@ const CardTextContext = createContext<CardText | null>(null);
  */
 function useCardText(from: CommentOrigin): { prose: React.RefObject<View | null>; text: CardText | null; selected: Selected | null } {
   const prose = useRef<View>(null);
-  const items = useRef(new Map<string, Node>());
-  const itemOf = (end: Node) => [...items.current].find(([, element]) => element.contains(end))?.[0];
+  const parts = useRef({ item: new Map<string, Node>(), box: new Map<string, Node>() });
+  const itemOf = (end: Node) => [...parts.current.item].find(([, element]) => element.contains(end))?.[0];
   const release = useCommentOnRelease(from);
-  const highlight = useHighlight(prose, release && ((found) => release({ text: found.text, item: itemOf(found.end) })));
+  const highlight = useHighlight(prose, {
+    onRelease: release && ((found) => release({ text: found.text, item: itemOf(found.end) })),
+    excluded: () => parts.current.box.values(),
+  });
   const hold = useCommentOnHold(from);
-  const register = (key: string, element: unknown) => {
+  const register = (part: "item" | "box", key: string, element: unknown) => {
     // On the web an element's ref is its DOM node; elsewhere it is never looked into.
-    if (element === null) items.current.delete(key);
-    else items.current.set(key, element as Node);
+    if (element === null) parts.current[part].delete(key);
+    else parts.current[part].set(key, element as Node);
   };
   return {
     prose,
@@ -415,9 +423,9 @@ function useItem(item: Item | undefined, colors: Colors) {
   if (card === null || item === undefined) return { ref: undefined, onLongPress: undefined, box: null };
   const { hold } = card;
   return {
-    ref: (element: unknown) => card.register(item.key, element),
+    ref: (element: unknown) => card.register("item", item.key, element),
     onLongPress: hold === null ? undefined : () => hold({ text: item.text, item: item.key }),
-    box: <ItemCommentBox from={card.from} item={item.key} colors={colors} />,
+    box: <ItemCommentBox from={card.from} item={item.key} colors={colors} boxRef={(element) => card.register("box", item.key, element)} />,
   };
 }
 
