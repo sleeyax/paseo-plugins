@@ -1,15 +1,15 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
-import React, { useContext, useId, useRef, useState } from "react";
+import React, { createContext, useContext, useId, useRef, useState } from "react";
 import { Platform, Pressable, Text, View, type GestureResponderEvent } from "react-native";
 import * as contracts from "../shared/contracts.ts";
-import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
-import type { DiffHunk, DiffLine, FileDiff } from "../shared/diff.ts";
+import { subjectKey, type GuideSubject, type SyntaxPalette } from "../shared/contracts.ts";
+import type { DiffHunk, DiffLine, FileDiff, SyntaxToken } from "../shared/diff.ts";
 import { isLine, lastLineOf, lineRefOf, pathOf, type DraftLocation, type LineRef } from "../shared/drafts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { CommentNodeContext, DraftCard, DraftsContext, NewCommentBox, type DraftsControl } from "./drafts.tsx";
-import { fontSize, leading, radius, spacing, tint, type Colors } from "./theme.ts";
+import { fontSize, isDark, leading, radius, spacing, tint, type Colors } from "./theme.ts";
 
 /** The host has no monospace token; this is the stack Paseo's own code views use. */
 export const MONO_FONT =
@@ -29,6 +29,20 @@ const LINE_TINT = 0.14;
 const SELECTED_TINT = 0.28;
 const MARKERS = { added: "+", removed: "−", context: " " } as const;
 
+/** The syntax palette for the host's theme, which the lines' tokens are coloured with; null until it has been read. */
+const SyntaxContext = createContext<SyntaxPalette | null>(null);
+
+function useSyntaxPalette(colors: Colors): SyntaxPalette | null {
+  const getSyntaxColors = useRpc(contracts.getSyntaxColors);
+  const palettes = useQuery({
+    queryKey: [PLUGIN_ID, "syntax-colors"],
+    queryFn: () => getSyntaxColors({}),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  if (palettes.data === undefined) return null;
+  return isDark(colors.surface0) ? palettes.data.dark : palettes.data.light;
+}
+
 export type NodeCodeProps = {
   reviewId: string;
   /** The guide's agent: a regenerated guide is a new agent, whose nodes may cover other code under the same IDs. */
@@ -47,6 +61,7 @@ export function NodeCode({ reviewId, agentId, subject, theme }: NodeCodeProps) {
     staleTime: Number.POSITIVE_INFINITY,
   });
   const colors = theme.colors;
+  const syntax = useSyntaxPalette(colors);
 
   if (diff.isPending) return <Muted colors={colors}>Reading the code…</Muted>;
   if (diff.isError) {
@@ -55,11 +70,13 @@ export function NodeCode({ reviewId, agentId, subject, theme }: NodeCodeProps) {
   // A comment on a node's code is linked to the node; on a Supporting or Unsorted file, to none.
   return (
     <CommentNodeContext.Provider value={subject.kind === "node" ? subject.nodeId : null}>
-      <View style={{ gap: spacing[3], marginTop: spacing[1] }}>
-        {diff.data.files.map((file) => (
-          <FileDiffView key={file.path} file={file} colors={colors} />
-        ))}
-      </View>
+      <SyntaxContext.Provider value={syntax}>
+        <View style={{ gap: spacing[3], marginTop: spacing[1] }}>
+          {diff.data.files.map((file) => (
+            <FileDiffView key={file.path} file={file} colors={colors} />
+          ))}
+        </View>
+      </SyntaxContext.Provider>
     </CommentNodeContext.Provider>
   );
 }
@@ -355,6 +372,7 @@ export function DiffLineRow({
   selected?: boolean;
   selectable?: boolean;
 }) {
+  const syntax = useContext(SyntaxContext);
   const accent = line.kind === "added" ? colors.statusSuccess : line.kind === "removed" ? colors.statusDanger : null;
   const code = { fontFamily: MONO_FONT, fontSize: CODE_SIZE, lineHeight: CODE_LEADING };
   const number = { ...code, width, textAlign: "right" as const, color: colors.foregroundMuted, paddingRight: spacing[1] };
@@ -365,11 +383,29 @@ export function DiffLineRow({
         <Text selectable={selectable} style={number}>{line.oldLine ?? ""}</Text>
         <Text selectable={selectable} style={number}>{line.newLine ?? ""}</Text>
         <Text selectable={selectable} style={{ ...code, width: DIGIT_WIDTH * 2, textAlign: "center", color: accent ?? colors.foregroundMuted }}>{MARKERS[line.kind]}</Text>
-        <Text selectable={selectable} style={{ ...code, flex: 1, color: colors.foreground, paddingRight: spacing[2] }}>{expandTabs(line.text)}</Text>
+        <Text selectable={selectable} style={{ ...code, flex: 1, color: colors.foreground, paddingRight: spacing[2] }}>
+          {syntax !== null && line.tokens !== undefined ? <Tokens tokens={line.tokens} palette={syntax} /> : expandTabs(line.text)}
+        </Text>
       </View>
       {line.noNewlineAtEnd ? (
         <Text style={{ ...code, color: colors.foregroundMuted, paddingLeft: width * 2 + DIGIT_WIDTH * 2 }}>No newline at end of file</Text>
       ) : null}
+    </>
+  );
+}
+
+/** A line's tokens in their palette colours; a token with no role, or one the palette lacks, keeps the line's colour. */
+function Tokens({ tokens, palette }: { tokens: readonly SyntaxToken[]; palette: SyntaxPalette }) {
+  return (
+    <>
+      {tokens.map((token, index) => {
+        const color = token.style === null ? undefined : palette[token.style];
+        return (
+          <Text key={index} style={color === undefined ? undefined : { color }}>
+            {expandTabs(token.text)}
+          </Text>
+        );
+      })}
     </>
   );
 }

@@ -38,6 +38,20 @@ export function tint(color: string, base: string, amount: number): string {
   return `#${channel(0)}${channel(1)}${channel(2)}`;
 }
 
+/**
+ * Whether `background` is a dark colour: its relative luminance is under 0.18, perceptual mid-grey.
+ * One that cannot be read counts as dark, as Paseo's default theme is.
+ */
+export function isDark(background: string): boolean {
+  const rgb = parseRgb(background);
+  if (rgb === null) return true;
+  const [r, g, b] = rgb.map((channel) => {
+    const value = channel / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.18;
+}
+
 function parseRgb(value: string): [number, number, number] | null {
   const text = value.trim();
   const hex = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(text)?.[1];

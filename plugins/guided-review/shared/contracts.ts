@@ -166,6 +166,18 @@ export const getNodeDiff = defineRpc({
   output: NodeDiffSchema,
 });
 
+/** A syntax palette: a colour for each role Paseo's highlighter gives a token. */
+export const SyntaxPaletteSchema = z.record(z.string(), z.string());
+
+/** The syntax palettes the diffs are coloured with, one for a dark theme and one for a light one. */
+export const SyntaxColorsSchema = z.object({ dark: SyntaxPaletteSchema, light: SyntaxPaletteSchema });
+
+export const getSyntaxColors = defineRpc({
+  name: "guided-review.syntax-colors",
+  input: z.object({}),
+  output: SyntaxColorsSchema,
+});
+
 /**
  * The reviewer's progress through the guide the panel shows, the one at the review's head SHA; null
  * while that guide is not ready.
@@ -360,6 +372,8 @@ export const getSuggestion = defineRpc({
 
 export type ReviewHeader = z.output<typeof ReviewHeaderSchema>;
 export type NodeDiff = z.output<typeof NodeDiffSchema>;
+export type SyntaxPalette = z.output<typeof SyntaxPaletteSchema>;
+export type SyntaxColors = z.output<typeof SyntaxColorsSchema>;
 export type StartResult = z.output<typeof StartResultSchema>;
 export type StartPhase = (typeof START_PHASES)[number];
 export type StartProgress = z.output<typeof StartProgressSchema>;

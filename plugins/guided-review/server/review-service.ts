@@ -12,12 +12,15 @@ import type {
   StartProgress,
   StartResult,
   Suggestion,
+  SyntaxColors,
 } from "../shared/contracts.ts";
+import type { FileDiff } from "../shared/diff.ts";
 import type { CommentOrigin, DraftList, DraftLocation, LinkedDraft } from "../shared/drafts.ts";
 import { coveredPaths, type CoveredCode, type GuideState, type LayeredGuide } from "../shared/guide.ts";
 import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
 import type { SubmitResult, Verdict, VerdictOption } from "../shared/submit.ts";
 import { askPrompt, codeReferencesOf, type AskSubjectContext } from "./ask-prompt.ts";
+import { DiffHighlighter, syntaxColors } from "./diff-highlight.ts";
 import { entryCode, resolveCode } from "./diff.ts";
 import { errorMessage } from "./error-message.ts";
 import { ForgeError, type BranchChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
@@ -79,6 +82,7 @@ export class ReviewService {
   readonly #branchStarts = new Map<string, BranchJob>();
   /** Writes of each guide's marks, by review and head SHA, one at a time. */
   readonly #progressWrites = oneAtATimePer<string>();
+  readonly #highlighter = new DiffHighlighter();
   /** "Suggest wording" requests, by suggestion ID, until the panel has read how they ended. */
   readonly #suggestions = new Map<string, SuggestionJob>();
 
@@ -295,10 +299,25 @@ export class ReviewService {
     }
     const changeRequest = await this.#store.snapshot(record.id, headSha);
     if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
-    if (subject.kind === "node") return { headSha, files: resolveCode(changeRequest.files, covers).files };
-    const entry = entryCode(changeRequest.files, stored.guide.nodes, subject.path);
-    if (entry === null) throw new Error(`${subject.path} is not one of the change's files.`);
-    return { headSha, files: [entry] };
+    let files: FileDiff[];
+    if (subject.kind === "node") {
+      files = resolveCode(changeRequest.files, covers).files;
+    } else {
+      const entry = entryCode(changeRequest.files, stored.guide.nodes, subject.path);
+      if (entry === null) throw new Error(`${subject.path} is not one of the change's files.`);
+      files = [entry];
+    }
+    const highlighted = await this.#highlighter.highlight(`${record.id}:${headSha}`, files, changeRequest.files, {
+      baseSha: changeRequest.baseSha,
+      headSha,
+      fileAt: (sha, path) => this.#workspaces.fileAt({ workspace: record.workspace, sha, path }),
+    });
+    return { headSha, files: highlighted };
+  }
+
+  /** The palettes the panel colours the diffs' syntax tokens with. */
+  async syntaxColors(): Promise<SyntaxColors> {
+    return syntaxColors();
   }
 
   /**

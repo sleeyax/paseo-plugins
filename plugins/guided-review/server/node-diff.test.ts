@@ -349,3 +349,30 @@ test("an entry of a file some node covers part of holds the rest of it, which ta
   assert.deepEqual(draft.location, { kind: "line", path: "src/upload.ts", line: { side: "new", line: 21 } });
   assert.equal(forge.created.length, 1);
 });
+
+test("a node's lines carry Paseo's syntax tokens, read from the hunks where the workspace has no file to read", async (t) => {
+  const changeRequest = await recordedPullRequest();
+  const guide = guideOver({ "menu-keys": [{ path: "apps/claude-tty-acp/src/claude-runtime.test.ts", hunks: [1], lines: [] }] });
+  const { service, reviewId } = await reviewing(t, changeRequest, guide);
+
+  const [runtime] = (await service.nodeDiff({ reviewId, subject: { kind: "node", nodeId: "menu-keys" } })).files;
+  const lines = runtime!.hunks[0]!.lines;
+  assert.ok(lines.every((line) => line.tokens?.map((token) => token.text).join("") === line.text));
+  assert.deepEqual(
+    lines[4]!.tokens!.filter((token) => token.style !== null && token.style !== "punctuation").map((token) => [token.text, token.style]),
+    [
+      ["const", "keyword"],
+      ["CURSOR_DOWN", "definition"],
+      ["=", "operator"],
+      ['"', "string"],
+      ["\\^", "escape"],
+      ['[[B"', "string"],
+    ],
+  );
+});
+
+test("the diffs are coloured with Paseo's default syntax palettes", async () => {
+  const { darkHighlightColors, lightHighlightColors } = await import("@getpaseo/highlight");
+  const service = new ReviewService({ forges: [], workspaces: fakeWorkspaces(), guideAgents: fakeGuideAgents(), dataDirectory: os.tmpdir() });
+  assert.deepEqual(await service.syntaxColors(), { dark: darkHighlightColors, light: lightHighlightColors });
+});

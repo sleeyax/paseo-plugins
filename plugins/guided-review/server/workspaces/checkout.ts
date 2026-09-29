@@ -89,6 +89,12 @@ export async function fastForward(run: CommandRunner, request: FastForwardReques
   return { status: "fast-forwarded", from };
 }
 
+/** A file's text at `sha`, its path from the repository's root; null when git cannot show it, as for a commit the clone lacks. */
+export async function showFile(run: CommandRunner, directory: string, sha: string, path: string): Promise<string | null> {
+  const shown = await gitIn(run, directory)(["show", `${sha}:${path}`]);
+  return shown.exitCode === 0 ? shown.stdout : null;
+}
+
 type Git = (args: readonly string[], timeoutMs?: number) => Promise<CommandResult>;
 
 function gitIn(run: CommandRunner, directory: string): Git {
