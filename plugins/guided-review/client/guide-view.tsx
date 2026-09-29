@@ -2,7 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import React, { createContext, useContext, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { CommentOrigin } from "../shared/drafts.ts";
-import { coveredPaths, type Guide, type GuideDecision, type GuideState, type LayeredGuide, type LayeredNode } from "../shared/guide.ts";
+import { coveredPaths, splitTests, type Guide, type GuideDecision, type GuideState, type LayeredGuide, type LayeredNode } from "../shared/guide.ts";
 import { AskAction, type AskControl } from "./ask-action.tsx";
 import { NodeCode } from "./diff-view.tsx";
 import { ItemCommentBox, NodeComments, OverviewComments, useCommentOnHold, useCommentOnRelease, type Selected } from "./drafts.tsx";
@@ -71,7 +71,7 @@ export function GuideView({ reviewId, state, theme, openAgent, retry, ask, progr
   }
 }
 
-/** The nodes by layer, trunk first, then Supporting and Unsorted. */
+/** The nodes by layer, trunk first, then Tests, Supporting and Unsorted. */
 function Tree({
   reviewId,
   agentId,
@@ -90,6 +90,7 @@ function Tree({
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
   const layers: LayeredNode[][] = [];
   for (const node of guide.nodes) (layers[node.layer] ??= []).push(node);
+  const { tests, supporting } = splitTests(guide.supporting);
   return (
     <>
       <ProgressSummary colors={colors} layerTitle={layerTitle} />
@@ -109,11 +110,21 @@ function Tree({
           ))}
         </React.Fragment>
       ))}
-      {guide.supporting.length > 0 ? (
+      {tests.length > 0 ? (
+        <>
+          <Heading colors={colors}>Tests</Heading>
+          <Card colors={colors} light>
+            {tests.map((entry) => (
+              <FileEntry key={entry.path} colors={colors} path={entry.path} ask={ask} code={fileCode(entry.path)} />
+            ))}
+          </Card>
+        </>
+      ) : null}
+      {supporting.length > 0 ? (
         <>
           <Heading colors={colors}>Supporting</Heading>
           <Card colors={colors} light>
-            {guide.supporting.map((entry) => (
+            {supporting.map((entry) => (
               <FileEntry
                 key={entry.path}
                 colors={colors}

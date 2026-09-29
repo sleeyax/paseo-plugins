@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { GuideSubject } from "./contracts.ts";
-import type { LayeredGuide } from "./guide.ts";
+import { splitTests, type LayeredGuide } from "./guide.ts";
 
 /** How many of a group's entries the reviewer has marked understood. */
 export const TallySchema = z.object({
@@ -25,6 +25,8 @@ export const GuideProgressSchema = z.object({
   understood: UnderstoodSchema,
   /** One per layer, foundations first. */
   layers: z.array(TallySchema),
+  tests: TallySchema,
+  /** Supporting without its tests. */
   supporting: TallySchema,
   unsorted: TallySchema,
   /** Every node and every Supporting and Unsorted entry. */
@@ -58,7 +60,9 @@ export function summariseProgress(guide: LayeredGuide, headSha: string, marks: U
     understood: paths.filter((file) => markedFiles.has(file)).length,
     total: paths.length,
   });
-  const supporting = tallyOf(guide.supporting.map((entry) => entry.path));
+  const split = splitTests(guide.supporting);
+  const tests = tallyOf(split.tests.map((entry) => entry.path));
+  const supporting = tallyOf(split.supporting.map((entry) => entry.path));
   const unsorted = tallyOf(guide.unsorted);
   const nextLayer = layers.findIndex((tally) => tally.understood < tally.total);
 
@@ -66,6 +70,7 @@ export function summariseProgress(guide: LayeredGuide, headSha: string, marks: U
     headSha,
     understood: { nodes, files },
     layers,
+    tests,
     supporting,
     unsorted,
     overall: {
