@@ -127,12 +127,35 @@ export function resolveCode(changed: readonly ChangedFile[], covers: readonly Co
 
 /**
  * What of a changed file's diff none of `covers` takes: the file's whole diff when no cover names it,
- * otherwise each unbroken run of lines left over that holds an added or removed line, cut as
+ * otherwise each unbroken run of lines left over that changes more than whitespace, cut as
  * `resolveCode` cuts a node's. Null when a cover names the file and nothing it changes is left,
  * which is also how a withheld file some cover names reads. What a Supporting or Unsorted entry of a
  * file some node covers part of shows, so no change in it goes unshown.
  */
 export function uncoveredCode(file: ChangedFile, covers: readonly CoveredCode[]): FileDiff | null {
+  return leftover(file, covers, changesText);
+}
+
+/**
+ * The code a Supporting or Unsorted entry of `guide` shows for the changed file `path`: what no node
+ * covers of it. Its whole diff when every change in it is a node's, which only a guide laid out
+ * before partly covered files had entries can hold. Null when the change has no such file.
+ * A guide laid out before blank leftovers stopped counting can list a file whose only leftovers are blank lines, and shows those.
+ */
+export function entryCode(changed: readonly ChangedFile[], nodes: readonly { covers: readonly CoveredCode[] }[], path: string): FileDiff | null {
+  const file = changed.find((candidate) => candidate.path === path);
+  if (file === undefined) return null;
+  const covers = nodes.flatMap((node) => node.covers);
+  return uncoveredCode(file, covers) ?? leftover(file, covers, (line) => line.kind !== "context") ?? fileDiffOf(file);
+}
+
+/** An added or removed line with more than whitespace on it: a blank line left between the ranges a node covers is nothing to review. */
+function changesText(line: DiffLine): boolean {
+  return line.kind !== "context" && line.text.trim() !== "";
+}
+
+/** What of `file` none of `covers` takes, keeping only the untouched hunks and the leftover runs that hold a line `counts`. */
+function leftover(file: ChangedFile, covers: readonly CoveredCode[], counts: (line: DiffLine) => boolean): FileDiff | null {
   const diff = fileDiffOf(file);
   const own = covers.filter((cover) => cover.path === file.path);
   if (own.length === 0) return diff;
@@ -140,24 +163,13 @@ export function uncoveredCode(file: ChangedFile, covers: readonly CoveredCode[])
   for (const cover of own) select(diff, cover, selection, () => {});
   const hunks = diff.hunks.flatMap((hunk) => {
     const taken = selection.get(hunk.index);
-    if (taken === undefined) return [hunk];
+    if (taken === undefined) return hunk.lines.some(counts) ? [hunk] : [];
     const left = hunk.lines.map((_, index) => index).filter((index) => !taken.has(index));
     return runs(left)
-      .filter((run) => run.some((index) => hunk.lines[index]!.kind !== "context"))
+      .filter((run) => run.some((index) => counts(hunk.lines[index]!)))
       .map((run) => slice(hunk, run));
   });
   return hunks.length === 0 ? null : { ...diff, hunks };
-}
-
-/**
- * The code a Supporting or Unsorted entry of `guide` shows for the changed file `path`: what no node
- * covers of it. Its whole diff when every change in it is a node's, which only a guide laid out
- * before partly covered files had entries can hold. Null when the change has no such file.
- */
-export function entryCode(changed: readonly ChangedFile[], nodes: readonly { covers: readonly CoveredCode[] }[], path: string): FileDiff | null {
-  const file = changed.find((candidate) => candidate.path === path);
-  if (file === undefined) return null;
-  return uncoveredCode(file, nodes.flatMap((node) => node.covers)) ?? fileDiffOf(file);
 }
 
 /**
