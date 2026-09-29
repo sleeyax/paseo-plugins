@@ -13,7 +13,7 @@ import type {
   StartResult,
   Suggestion,
 } from "../shared/contracts.ts";
-import type { DraftList, DraftLocation, LinkedDraft } from "../shared/drafts.ts";
+import type { CommentOrigin, DraftList, DraftLocation, LinkedDraft } from "../shared/drafts.ts";
 import { coveredPaths, type CoveredCode, type GuideState, type LayeredGuide } from "../shared/guide.ts";
 import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
 import type { SubmitResult, Verdict, VerdictOption } from "../shared/submit.ts";
@@ -359,8 +359,8 @@ export class ReviewService {
   }
 
   /**
-   * The reviewer's drafts, read from the forge every time, with GitHub's node comments, each with the
-   * node of the guide the panel shows it was written from: see `ReviewDrafts.list`.
+   * The reviewer's drafts, read from the forge every time, with GitHub's general comments, each with the
+   * part of the guide the panel shows it was written from: see `ReviewDrafts.list`.
    */
   async listDrafts({ reviewId }: { reviewId: string }): Promise<DraftList> {
     const record = await this.#record(reviewId);
@@ -369,23 +369,26 @@ export class ReviewService {
 
   /**
    * Saves a comment on the forge as a draft at once, on lines of the diff the panel drew at `headSha`,
-   * linked to the node `nodeId` of that guide it was written from: see `ReviewDrafts.create`.
+   * linked to the node or overview `from` of that guide it was written from, with the passage `quote`
+   * highlighted there: see `ReviewDrafts.create`.
    */
   async createDraft({
     reviewId,
     headSha,
     location,
     body,
-    nodeId = null,
+    from = null,
+    quote = null,
   }: {
     reviewId: string;
     headSha: string;
     location: DraftLocation;
     body: string;
-    nodeId?: string | null | undefined;
+    from?: CommentOrigin | null | undefined;
+    quote?: string | null | undefined;
   }): Promise<LinkedDraft> {
     const record = await this.#record(reviewId);
-    return this.#drafts.create(record, this.#forgeFor(record.ref), { drawnAt: headSha, location, body, nodeId });
+    return this.#drafts.create(record, this.#forgeFor(record.ref), { drawnAt: headSha, location, body, from, quote });
   }
 
   async updateDraft({ reviewId, draftId, body }: { reviewId: string; draftId: string; body: string }): Promise<null> {

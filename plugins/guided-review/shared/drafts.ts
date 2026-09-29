@@ -24,7 +24,7 @@ export const DraftLocationSchema = z.discriminatedUnion("kind", [
   /**
    * The change as a whole, on no file: a GitLab draft note without a position, which becomes a thread
    * of its own on the merge request, or a paragraph of the GitHub pending review's body. What the
-   * panel writes here is a node's comment; which node is kept locally, never on the forge.
+   * panel writes here is a comment on a node or on the overview; which is kept locally, never on the forge.
    */
   z.object({ kind: z.literal("general") }),
 ]);
@@ -37,16 +37,32 @@ export const DraftSchema = z.object({
   location: DraftLocationSchema,
 });
 
+/** The part of the guide a comment was written from: one of its nodes, or its overview. */
+export const CommentOriginSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("node"), nodeId: z.string() }),
+  z.object({ kind: z.literal("overview") }),
+]);
+
+/** The longest passage of the guide a comment keeps as the text it was written about. */
+export const MAX_QUOTE_LENGTH = 2000;
+
+export const QuoteSchema = z.string().trim().min(1).max(MAX_QUOTE_LENGTH);
+
 /**
- * A draft as the panel lists it: as the forge has it, with the node of the guide it was written from
- * when the panel wrote it there. The link is kept locally and never posted; a draft started on the
- * web, or from a Supporting or Unsorted file, has none.
+ * A draft as the panel lists it: as the forge has it, with the part of the guide it was written from
+ * when the panel wrote it there, and the passage of the guide the reviewer highlighted for it, if any.
+ * `earlier` says the passage is from a guide the one shown has replaced. Both are kept locally and
+ * never posted; a draft started on the web, or from a Supporting or Unsorted file, has no origin.
  */
-export const LinkedDraftSchema = DraftSchema.extend({ nodeId: z.string().nullable() });
+export const LinkedDraftSchema = DraftSchema.extend({
+  from: CommentOriginSchema.nullable(),
+  quote: z.object({ text: z.string(), earlier: z.boolean() }).nullable(),
+});
 
 export const DraftListSchema = z.object({ drafts: z.array(LinkedDraftSchema) });
 
 export type LineRef = z.output<typeof LineRefSchema>;
+export type CommentOrigin = z.output<typeof CommentOriginSchema>;
 export type DraftLocation = z.output<typeof DraftLocationSchema>;
 export type Draft = z.output<typeof DraftSchema>;
 export type LinkedDraft = z.output<typeof LinkedDraftSchema>;

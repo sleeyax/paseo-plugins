@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ReviewHeader } from "../shared/contracts.ts";
+import type { CommentOrigin } from "../shared/drafts.ts";
 import type { LayeredGuide } from "../shared/guide.ts";
 import type { ChangeRequest, ChangeRequestRef, ForgeUser } from "./forge/port.ts";
 import type { BodyParagraph } from "./review-body.ts";
@@ -60,11 +61,12 @@ export type ProgressRecord = {
 };
 
 /**
- * Where a draft the panel wrote came from: the node `nodeId` of the guide at `headSha` its agent
- * `agentId` wrote. Node IDs mean something only within their guide, so a link to an earlier guide
- * is followed to the node of the current one that covers the same code, as marks are carried over.
+ * Where a draft the panel wrote came from: a node or the overview of the guide at `headSha` its agent
+ * `agentId` wrote, and the passage of it the reviewer highlighted, if any. Node IDs mean something
+ * only within their guide, so a link to an earlier guide's node is followed to the node of the
+ * current one that covers the same code, as marks are carried over; every guide has an overview.
  */
-export type DraftLink = { nodeId: string; headSha: string; agentId: string };
+export type DraftLink = { from: CommentOrigin; quote?: string; headSha: string; agentId: string };
 
 /**
  * What the plugin keeps about the reviewer's drafts, which themselves live on the forge: the node
@@ -72,6 +74,13 @@ export type DraftLink = { nodeId: string; headSha: string; agentId: string };
  * node comments in the pending review's body. None of it is ever posted.
  */
 export type DraftsRecord = { links: Record<string, DraftLink>; paragraphs: BodyParagraph[] };
+
+/** A link as `drafts.json` kept it before a draft could come from the overview, when it could name only a node. */
+type NodeOnlyLink = { nodeId: string; headSha: string; agentId: string };
+
+function fromNode({ nodeId, headSha, agentId }: NodeOnlyLink): DraftLink {
+  return { from: { kind: "node", nodeId }, headSha, agentId };
+}
 
 const RECORD_FILE = "review.json";
 const GUIDES = "guides";
@@ -171,8 +180,11 @@ export class ReviewStore {
 
   /** The links and paragraphs kept for the review's drafts; none when nothing was ever kept. */
   async getDrafts(id: string): Promise<DraftsRecord> {
-    const record = await readJson<Partial<DraftsRecord>>(path.join(this.directoryOf(id), DRAFTS_FILE));
-    return { links: record?.links ?? {}, paragraphs: record?.paragraphs ?? [] };
+    const record = await readJson<{ links?: Record<string, DraftLink | NodeOnlyLink>; paragraphs?: BodyParagraph[] }>(
+      path.join(this.directoryOf(id), DRAFTS_FILE),
+    );
+    const links = Object.entries(record?.links ?? {}).map(([draftId, link]) => [draftId, "from" in link ? link : fromNode(link)]);
+    return { links: Object.fromEntries(links), paragraphs: record?.paragraphs ?? [] };
   }
 
   async saveDrafts(id: string, record: DraftsRecord): Promise<void> {

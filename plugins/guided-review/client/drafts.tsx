@@ -93,7 +93,7 @@ export function useDrafts(reviewId: string | null, headSha: string | null, guide
     refresh: () => void query.refetch(),
     titles,
     create: async (location, body, nodeId) => {
-      const draft = await createDraft({ reviewId, headSha, location, body, nodeId });
+      const draft = await createDraft({ reviewId, headSha, location, body, from: nodeId === null ? null : { kind: "node", nodeId } });
       change((drafts) => [...drafts, draft]);
       setOpen(null);
     },
@@ -152,6 +152,11 @@ export function NewCommentBox({
   );
 }
 
+/** The node a draft was written from; null for one from the overview or from no part of the guide. */
+function nodeOf(draft: LinkedDraft): string | null {
+  return draft.from?.kind === "node" ? draft.from.nodeId : null;
+}
+
 /** What "Suggest wording" words a comment at `location` from: its code, or for a general one, its node. */
 function subjectOf(location: DraftLocation, nodeId: string | null): CommentSubject | null {
   if (location.kind !== "general") return { kind: "code", location };
@@ -161,7 +166,8 @@ function subjectOf(location: DraftLocation, nodeId: string | null): CommentSubje
 /** Where a draft is, for its card: its place in a file, or for a general draft, the node it was written from. */
 function whereOf(draft: LinkedDraft, titles: ReadonlyMap<string, string>, showPath: boolean): string {
   if (draft.location.kind === "general") {
-    const title = draft.nodeId === null ? undefined : titles.get(draft.nodeId);
+    const nodeId = nodeOf(draft);
+    const title = nodeId === null ? undefined : titles.get(nodeId);
     return title === undefined ? "Your draft on the change as a whole" : `Your comment on the concept "${title}"`;
   }
   const path = pathOf(draft.location);
@@ -203,7 +209,7 @@ export function DraftCard({
   const open = control.open;
 
   if (open?.kind === "edit" && open.draftId === draft.id && open.place === place) {
-    const subject = subjectOf(draft.location, draft.nodeId);
+    const subject = subjectOf(draft.location, nodeOf(draft));
     return (
       <CommentBox
         colors={colors}
@@ -271,10 +277,13 @@ export function groupByNode(
   drafts: readonly LinkedDraft[],
   titles: ReadonlyMap<string, string>,
 ): { groups: { nodeId: string; title: string; drafts: LinkedDraft[] }[]; unlinked: LinkedDraft[] } {
-  const groups = [...titles].map(([nodeId, title]) => ({ nodeId, title, drafts: drafts.filter((draft) => draft.nodeId === nodeId) }));
+  const groups = [...titles].map(([nodeId, title]) => ({ nodeId, title, drafts: drafts.filter((draft) => nodeOf(draft) === nodeId) }));
   return {
     groups: groups.filter((group) => group.drafts.length > 0),
-    unlinked: drafts.filter((draft) => draft.nodeId === null || !titles.has(draft.nodeId)),
+    unlinked: drafts.filter((draft) => {
+      const nodeId = nodeOf(draft);
+      return nodeId === null || !titles.has(nodeId);
+    }),
   };
 }
 
@@ -286,7 +295,7 @@ export function NodeComments({ nodeId, colors }: { nodeId: string; colors: Color
   const control = useContext(DraftsContext);
   if (control === null) return null;
   const place = `node:${nodeId}`;
-  const comments = control.drafts.filter((draft) => draft.nodeId === nodeId && draft.location.kind === "general");
+  const comments = control.drafts.filter((draft) => nodeOf(draft) === nodeId && draft.location.kind === "general");
   const box = control.open?.kind === "new" && control.open.place === place ? control.open : null;
   return (
     <View style={{ gap: spacing[2] }}>
