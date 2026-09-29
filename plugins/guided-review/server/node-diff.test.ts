@@ -336,7 +336,7 @@ test("an entry of a file some node covers part of holds the rest of it, which ta
   assert.deepEqual(unsorted.files[0]!.hunks.map(headerOf), [{ index: 1, oldStart: 2, oldLines: 1, newStart: 3, newLines: 3, complete: false }]);
   assert.deepEqual(numbering(unsorted.files[0]!.hunks[0]!.lines), ["added - 3 2_3", "context 2 4 2_4", "added - 5 3_5"]);
 
-  const progress = await service.setUnderstood({ reviewId, headSha: base.headSha, subject: { kind: "file", path: "src/wire.ts" }, understood: true });
+  const progress = await service.setUnderstood({ reviewId, headSha: base.headSha, subjects: [{ kind: "file", path: "src/wire.ts" }], understood: true });
   assert.deepEqual(progress.understood.files, ["src/wire.ts"]);
   assert.deepEqual(progress.unsorted, { understood: 1, total: 1 });
 

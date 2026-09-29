@@ -9,16 +9,17 @@ import { isUnderstood, type GuideProgress, type Tally } from "../shared/progress
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 
 /**
- * The panel's side of "understood": the reviewer's progress through the guide it shows, and the
- * toggle every node and every Supporting and Unsorted entry renders.
+ * The panel's side of "understood": the reviewer's progress through the guide it shows, the toggle
+ * every node and every Supporting and Unsorted entry renders, and the one on each group's heading.
  */
 export type ProgressControl = {
   /** Null until the guide is ready and its progress has been read. */
   progress: GuideProgress | null;
-  toggle: (subject: GuideSubject) => void;
-  /** The `subjectKey` of the subject whose mark is being written. */
+  /** Marks every one of `subjects` understood, or takes their marks back; `place` names the toggle that asked. */
+  set: (place: string, subjects: readonly GuideSubject[], understood: boolean) => void;
+  /** The place of the toggle whose marks are being written. */
   pendingKey: string | null;
-  /** Why the last mark did not land, under the subject it was for. */
+  /** Why the last marks did not land, under the toggle they were for. */
   notice: { key: string; message: string } | null;
 };
 
@@ -44,20 +45,21 @@ export function useProgress(reviewId: string | null, guideAgentId: string | null
   });
   const progress = query.data ?? null;
   const mutation = useMutation({
-    mutationFn: (input: { reviewId: string; headSha: string; subject: GuideSubject; understood: boolean }) => setUnderstood(input),
+    mutationFn: ({ input }: { place: string; input: { reviewId: string; headSha: string; subjects: GuideSubject[]; understood: boolean } }) =>
+      setUnderstood(input),
     onSuccess: (result) => queryClient.setQueryData(queryKey, result),
   });
-  const subject = mutation.variables?.subject;
+  const place = mutation.variables?.place;
   return {
     progress,
-    toggle: (subject) => {
-      if (reviewId === null || progress === null) return;
-      mutation.mutate({ reviewId, headSha: progress.headSha, subject, understood: !isUnderstood(progress, subject) });
+    set: (place, subjects, understood) => {
+      if (reviewId === null || progress === null || subjects.length === 0) return;
+      mutation.mutate({ place, input: { reviewId, headSha: progress.headSha, subjects: [...subjects], understood } });
     },
-    pendingKey: mutation.isPending && subject ? subjectKey(subject) : null,
+    pendingKey: mutation.isPending && place !== undefined ? place : null,
     notice:
-      mutation.isError && subject
-        ? { key: subjectKey(subject), message: mutation.error instanceof Error ? mutation.error.message : String(mutation.error) }
+      mutation.isError && place !== undefined
+        ? { key: place, message: mutation.error instanceof Error ? mutation.error.message : String(mutation.error) }
         : null,
   };
 }
@@ -80,20 +82,32 @@ export function useCollapsed(subject: GuideSubject): [boolean, (collapsed: boole
 
 /** Marks the subject understood, or takes the mark back. Draws nothing until the progress is known. */
 export function UnderstoodToggle({ subject, colors }: { subject: GuideSubject; colors: Colors }) {
+  return <MarkToggle place={subjectKey(subject)} subjects={[subject]} label="Understood" colors={colors} />;
+}
+
+/**
+ * Marks every subject of a group (a layer's nodes, or the entries of Tests, Documentation, Supporting or Unsorted) understood, or takes every mark back once all are.
+ * `group` is the group's title, unique among the guide's groups.
+ */
+export function GroupUnderstoodToggle({ group, subjects, colors }: { group: string; subjects: readonly GuideSubject[]; colors: Colors }) {
+  return <MarkToggle place={`group:${group}`} subjects={subjects} label="All understood" colors={colors} />;
+}
+
+function MarkToggle({ place, subjects, label, colors }: { place: string; subjects: readonly GuideSubject[]; label: string; colors: Colors }) {
   const control = useContext(ProgressContext);
-  if (control === null || control.progress === null) return null;
-  const key = subjectKey(subject);
-  const understood = isUnderstood(control.progress, subject);
-  const pending = control.pendingKey === key;
+  if (control === null || control.progress === null || subjects.length === 0) return null;
+  const { progress } = control;
+  const understood = subjects.every((subject) => isUnderstood(progress, subject));
+  const pending = control.pendingKey === place;
   const small = { fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) };
   return (
     <View style={{ gap: spacing[1], alignItems: "flex-end" }}>
       <Pressable
-        onPress={() => control.toggle(subject)}
+        onPress={() => control.set(place, subjects, !understood)}
         disabled={pending}
         accessibilityRole="checkbox"
         accessibilityState={{ checked: understood }}
-        accessibilityLabel="Understood"
+        accessibilityLabel={label}
         style={({ pressed }) => ({
           paddingVertical: spacing[1],
           paddingHorizontal: spacing[2],
@@ -104,10 +118,10 @@ export function UnderstoodToggle({ subject, colors }: { subject: GuideSubject; c
         })}
       >
         <Text style={{ ...small, color: understood ? colors.statusSuccess : colors.foregroundMuted }}>
-          {understood ? "✓ Understood" : "Mark understood"}
+          {understood ? `✓ ${label}` : `Mark ${label.toLowerCase()}`}
         </Text>
       </Pressable>
-      {control.notice?.key === key ? <Text style={{ ...small, color: colors.statusWarning }}>{control.notice.message}</Text> : null}
+      {control.notice?.key === place ? <Text style={{ ...small, color: colors.statusWarning }}>{control.notice.message}</Text> : null}
     </View>
   );
 }

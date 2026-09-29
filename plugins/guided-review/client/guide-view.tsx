@@ -1,12 +1,13 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import React, { createContext, useContext, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
+import type { GuideSubject } from "../shared/contracts.ts";
 import type { CommentOrigin } from "../shared/drafts.ts";
-import { coveredPaths, splitSupporting, type Guide, type GuideDecision, type GuideState, type LayeredGuide, type LayeredNode } from "../shared/guide.ts";
+import { coveredPaths, splitSupporting, type Guide, type GuideDecision, type GuideState, type LayeredGuide, type LayeredNode, type SupportingEntry } from "../shared/guide.ts";
 import { AskAction, type AskControl } from "./ask-action.tsx";
 import { NodeCode } from "./diff-view.tsx";
 import { ItemCommentBox, NodeComments, OverviewComments, useCommentOnHold, useCommentOnRelease, type Selected } from "./drafts.tsx";
-import { ProgressContext, ProgressSummary, UnderstoodToggle, useCollapsed, type ProgressControl } from "./progress.tsx";
+import { GroupUnderstoodToggle, ProgressContext, ProgressSummary, UnderstoodToggle, useCollapsed, type ProgressControl } from "./progress.tsx";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
 import { GuideText } from "./guide-text.tsx";
@@ -97,7 +98,9 @@ function Tree({
       {/* A node's layer is one past a node's it builds on, so no layer is empty. */}
       {layers.map((nodes, layer) => (
         <React.Fragment key={layer}>
-          <Heading colors={colors}>{layerTitle(layer)}</Heading>
+          <Heading colors={colors} subjects={nodes.map((node) => ({ kind: "node", nodeId: node.id }))}>
+            {layerTitle(layer)}
+          </Heading>
           {nodes.map((node) => (
             <NodeCard
               key={node.id}
@@ -118,7 +121,9 @@ function Tree({
       ).map(([title, entries]) =>
         entries.length > 0 ? (
           <React.Fragment key={title}>
-            <Heading colors={colors}>{title}</Heading>
+            <Heading colors={colors} subjects={filesOf(entries)}>
+              {title}
+            </Heading>
             <Card colors={colors} light>
               {entries.map((entry) => (
                 <FileEntry key={entry.path} colors={colors} path={entry.path} ask={ask} code={fileCode(entry.path)} />
@@ -129,7 +134,9 @@ function Tree({
       )}
       {supporting.length > 0 ? (
         <>
-          <Heading colors={colors}>Supporting</Heading>
+          <Heading colors={colors} subjects={filesOf(supporting)}>
+            Supporting
+          </Heading>
           <Card colors={colors} light>
             {supporting.map((entry) => (
               <FileEntry
@@ -147,7 +154,9 @@ function Tree({
       ) : null}
       {guide.unsorted.length > 0 ? (
         <>
-          <Heading colors={colors}>Unsorted</Heading>
+          <Heading colors={colors} subjects={guide.unsorted.map((path) => ({ kind: "file", path }))}>
+            Unsorted
+          </Heading>
           <Card colors={colors}>
             <Body colors={colors} muted>
               The guide agent placed these changes nowhere, so no concept explains them. Where a concept covers part of a file, only the rest is here.
@@ -160,6 +169,10 @@ function Tree({
       ) : null}
     </>
   );
+}
+
+function filesOf(entries: readonly SupportingEntry[]): GuideSubject[] {
+  return entries.map((entry) => ({ kind: "file", path: entry.path }));
 }
 
 function layerTitle(layer: number): string {
@@ -406,13 +419,13 @@ function Collapsible({ collapsed, gap = spacing[2], children }: { collapsed: boo
   return <View style={{ display: collapsed ? "none" : "flex", gap }}>{children}</View>;
 }
 
-function Heading({ colors, children }: { colors: Colors; children: React.ReactNode }) {
+/** A group's heading, with the toggle that marks every one of its `subjects` understood at once. */
+function Heading({ colors, subjects, children }: { colors: Colors; subjects: readonly GuideSubject[]; children: string }) {
   return (
-    <Text
-      style={{ color: colors.foreground, fontSize: fontSize.lg, lineHeight: leading(fontSize.lg), fontWeight: "600", marginTop: spacing[2] }}
-    >
-      {children}
-    </Text>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[2], marginTop: spacing[2] }}>
+      <Text style={{ flex: 1, color: colors.foreground, fontSize: fontSize.lg, lineHeight: leading(fontSize.lg), fontWeight: "600" }}>{children}</Text>
+      <GroupUnderstoodToggle group={children} subjects={subjects} colors={colors} />
+    </View>
   );
 }
 

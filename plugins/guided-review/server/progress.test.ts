@@ -91,7 +91,7 @@ test("marking the trunk understood moves the next layer on, and the marks are ke
   const progress = await service.setUnderstood({
     reviewId: REVIEW_ID,
     headSha: HEAD,
-    subject: { kind: "node", nodeId: "retry-policy" },
+    subjects: [{ kind: "node", nodeId: "retry-policy" }],
     understood: true,
   });
 
@@ -113,8 +113,8 @@ test("marking the trunk understood moves the next layer on, and the marks are ke
 
 test("Supporting and Unsorted entries are marked by path, and every node understood leaves no next layer", async (t) => {
   const { service } = await withGuide(t);
-  const mark = (subject: Parameters<ReviewService["setUnderstood"]>[0]["subject"]) =>
-    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject, understood: true });
+  const mark = (subject: Parameters<ReviewService["setUnderstood"]>[0]["subjects"][number]) =>
+    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: [subject], understood: true });
 
   await mark({ kind: "node", nodeId: "uploader" });
   await mark({ kind: "file", path: "docs/retry.md" });
@@ -141,7 +141,7 @@ test("Supporting and Unsorted entries are marked by path, and every node underst
 test("clearing a mark takes it back, and marking twice counts once", async (t) => {
   const { service } = await withGuide(t);
   const set = (nodeId: string, understood: boolean) =>
-    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "node", nodeId }, understood });
+    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: [{ kind: "node", nodeId }], understood });
 
   await set("retry-policy", true);
   await set("retry-policy", true);
@@ -155,9 +155,9 @@ test("toggles sent at once all land", async (t) => {
   const { service } = await withGuide(t);
 
   await Promise.all([
-    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "node", nodeId: "retry-policy" }, understood: true }),
-    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "node", nodeId: "uploader" }, understood: true }),
-    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "file", path: "docs/retry.md" }, understood: true }),
+    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: [{ kind: "node", nodeId: "retry-policy" }], understood: true }),
+    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: [{ kind: "node", nodeId: "uploader" }], understood: true }),
+    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: [{ kind: "file", path: "docs/retry.md" }], understood: true }),
   ]);
 
   assert.deepEqual((await service.readingProgress({ reviewId: REVIEW_ID }))?.understood, {
@@ -166,16 +166,49 @@ test("toggles sent at once all land", async (t) => {
   });
 });
 
+test("a whole group is marked in one write, and cleared in one", async (t) => {
+  const { service } = await withGuide(t);
+  const layers = [
+    { kind: "node", nodeId: "retry-policy" },
+    { kind: "node", nodeId: "uploader" },
+  ] as const;
+
+  const marked = await service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: layers, understood: true });
+  assert.deepEqual(marked.understood, { nodes: ["retry-policy", "uploader"], files: [] });
+  assert.equal(marked.nextLayer, null);
+
+  const cleared = await service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: layers, understood: false });
+  assert.deepEqual(cleared, NOTHING_UNDERSTOOD);
+});
+
+test("a subject the guide lacks refuses the whole group, marking none of it", async (t) => {
+  const { service } = await withGuide(t);
+
+  await assert.rejects(
+    service.setUnderstood({
+      reviewId: REVIEW_ID,
+      headSha: HEAD,
+      subjects: [
+        { kind: "file", path: RETRY_TEST.path },
+        { kind: "node", nodeId: "backoff" },
+      ],
+      understood: true,
+    }),
+    { message: "That concept is not in the guide any more." },
+  );
+  assert.deepEqual(await service.readingProgress({ reviewId: REVIEW_ID }), NOTHING_UNDERSTOOD);
+});
+
 test("progress survives a restart, including a mark cleared before it", async (t) => {
   const { service, restart } = await withGuide(t);
-  await service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "node", nodeId: "retry-policy" }, understood: true });
-  await service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "file", path: "src/retry.test.ts" }, understood: true });
-  await service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "node", nodeId: "retry-policy" }, understood: false });
+  await service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: [{ kind: "node", nodeId: "retry-policy" }], understood: true });
+  await service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: [{ kind: "file", path: "src/retry.test.ts" }], understood: true });
+  await service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: [{ kind: "node", nodeId: "retry-policy" }], understood: false });
 
   const restarted = restart();
 
   assert.deepEqual((await restarted.readingProgress({ reviewId: REVIEW_ID }))?.understood, { nodes: [], files: ["src/retry.test.ts"] });
-  await restarted.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "node", nodeId: "uploader" }, understood: true });
+  await restarted.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: [{ kind: "node", nodeId: "uploader" }], understood: true });
   assert.deepEqual((await restart().readingProgress({ reviewId: REVIEW_ID }))?.understood, {
     nodes: ["uploader"],
     files: ["src/retry.test.ts"],
@@ -184,12 +217,12 @@ test("progress survives a restart, including a mark cleared before it", async (t
 
 test("a guide generated again at the same head starts with nothing understood", async (t) => {
   const { service } = await withGuide(t);
-  await service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "node", nodeId: "retry-policy" }, understood: true });
+  await service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: [{ kind: "node", nodeId: "retry-policy" }], understood: true });
 
   await service.generateGuide({ reviewId: REVIEW_ID });
   assert.equal(await service.readingProgress({ reviewId: REVIEW_ID }), null);
   await assert.rejects(
-    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "node", nodeId: "uploader" }, understood: true }),
+    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: [{ kind: "node", nodeId: "uploader" }], understood: true }),
     { message: "There is no finished guide to mark progress in." },
   );
   await service.settled();
@@ -207,15 +240,15 @@ test("only a node, a Supporting entry or an Unsorted entry of a finished guide c
 
   assert.equal(await service.readingProgress({ reviewId: REVIEW_ID }), null);
   await assert.rejects(
-    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subject: { kind: "node", nodeId: "retry-policy" }, understood: true }),
+    service.setUnderstood({ reviewId: REVIEW_ID, headSha: HEAD, subjects: [{ kind: "node", nodeId: "retry-policy" }], understood: true }),
     { message: "There is no finished guide to mark progress in." },
   );
 
   release(sampleGuideReply({ ...sampleGuide(), supporting: [{ path: RETRY_TEST.path, category: "test" }] }));
   await service.settled();
 
-  const set = (subject: Parameters<ReviewService["setUnderstood"]>[0]["subject"], headSha = HEAD) =>
-    service.setUnderstood({ reviewId: REVIEW_ID, headSha, subject, understood: true });
+  const set = (subject: Parameters<ReviewService["setUnderstood"]>[0]["subjects"][number], headSha = HEAD) =>
+    service.setUnderstood({ reviewId: REVIEW_ID, headSha, subjects: [subject], understood: true });
   await assert.rejects(set({ kind: "node", nodeId: "backoff" }), { message: "That concept is not in the guide any more." });
   // A node's own file is understood with its node.
   await assert.rejects(set({ kind: "file", path: "src/retry.ts" }), {
@@ -226,7 +259,7 @@ test("only a node, a Supporting entry or an Unsorted entry of a finished guide c
     service.setUnderstood({
       reviewId: "github/github.com/acme/uploader/8",
       headSha: HEAD,
-      subject: { kind: "node", nodeId: "uploader" },
+      subjects: [{ kind: "node", nodeId: "uploader" }],
       understood: true,
     }),
     { message: "This review is not known here any more. Start it again." },

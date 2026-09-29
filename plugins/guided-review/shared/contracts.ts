@@ -197,12 +197,12 @@ export const getProgress = defineRpc({
 });
 
 /**
- * Marks a subject of the guide at `headSha` understood, or clears the mark. The subjects are the
- * ones "Ask about this" takes: a node, or a Supporting or Unsorted entry. Returns the progress after.
+ * Marks subjects of the guide at `headSha` understood, or clears their marks, all in one write: one card's, or a whole group's.
+ * The subjects are the ones "Ask about this" takes: a node, or a Supporting or Unsorted entry. Returns the progress after.
  */
 export const setUnderstood = defineRpc({
   name: "guided-review.progress.set",
-  input: z.object({ reviewId: z.string(), headSha: z.string(), subject: GuideSubjectSchema, understood: z.boolean() }),
+  input: z.object({ reviewId: z.string(), headSha: z.string(), subjects: z.array(GuideSubjectSchema).min(1), understood: z.boolean() }),
   output: GuideProgressSchema,
 });
 

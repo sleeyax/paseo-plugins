@@ -338,44 +338,46 @@ export class ReviewService {
   }
 
   /**
-   * Marks a node, or a Supporting or Unsorted entry, of the guide at `headSha` understood, or clears
-   * the mark, and keeps the marks on disk under that head. Marks of one guide are written one at a
-   * time, so two toggles at once both land.
+   * Marks nodes, and Supporting or Unsorted entries, of the guide at `headSha` understood, or clears
+   * their marks, and keeps the marks on disk under that head. A subject the guide lacks refuses the
+   * whole write. Marks of one guide are written one at a time, so two toggles at once both land.
    */
   async setUnderstood({
     reviewId,
     headSha,
-    subject,
+    subjects,
     understood,
   }: {
     reviewId: string;
     headSha: string;
-    subject: GuideSubject;
+    subjects: readonly GuideSubject[];
     understood: boolean;
   }): Promise<GuideProgress> {
-    return this.#progressWrites(`${reviewId}@${headSha}`, () => this.#setUnderstood(reviewId, headSha, subject, understood));
+    return this.#progressWrites(`${reviewId}@${headSha}`, () => this.#setUnderstood(reviewId, headSha, subjects, understood));
   }
 
-  async #setUnderstood(reviewId: string, headSha: string, subject: GuideSubject, understood: boolean): Promise<GuideProgress> {
+  async #setUnderstood(reviewId: string, headSha: string, subjects: readonly GuideSubject[], understood: boolean): Promise<GuideProgress> {
     const record = await this.#record(reviewId);
     const stored = this.#guides.running(record, headSha) ? null : await this.#store.getGuide(record.id, headSha);
     if (stored === null || !isReady(stored)) throw new Error("There is no finished guide to mark progress in.");
     const { guide } = stored;
-    if (subject.kind === "node" && !guide.nodes.some((node) => node.id === subject.nodeId)) {
-      throw new Error("That concept is not in the guide any more.");
-    }
-    if (subject.kind === "file" && !guide.supporting.some((entry) => entry.path === subject.path) && !guide.unsorted.includes(subject.path)) {
-      throw new Error(`${subject.path} is not a Supporting or Unsorted file of the guide.`);
+    for (const subject of subjects) {
+      if (subject.kind === "node" && !guide.nodes.some((node) => node.id === subject.nodeId)) {
+        throw new Error("That concept is not in the guide any more.");
+      }
+      if (subject.kind === "file" && !guide.supporting.some((entry) => entry.path === subject.path) && !guide.unsorted.includes(subject.path)) {
+        throw new Error(`${subject.path} is not a Supporting or Unsorted file of the guide.`);
+      }
     }
 
     const marks = marksOf(stored, await this.#store.getProgress(record.id, headSha));
-    const [list, value] = subject.kind === "node" ? [marks.nodes, subject.nodeId] : [marks.files, subject.path];
-    const next = understood ? [...new Set([...list, value])] : list.filter((entry) => entry !== value);
+    const apply = (list: readonly string[], values: readonly string[]) =>
+      understood ? [...new Set([...list, ...values])] : list.filter((entry) => !values.includes(entry));
     const saved: ProgressRecord = {
       headSha,
       agentId: stored.agentId,
-      nodes: subject.kind === "node" ? next : marks.nodes,
-      files: subject.kind === "file" ? next : marks.files,
+      nodes: apply(marks.nodes, subjects.flatMap((subject) => (subject.kind === "node" ? [subject.nodeId] : []))),
+      files: apply(marks.files, subjects.flatMap((subject) => (subject.kind === "file" ? [subject.path] : []))),
       updatedAt: this.#now().toISOString(),
     };
     await this.#store.saveProgress(record.id, saved);
