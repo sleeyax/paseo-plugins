@@ -1,7 +1,7 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { FileDiffSchema } from "./diff.ts";
-import { DraftListSchema, DraftLocationSchema, LinkedDraftSchema } from "./drafts.ts";
+import { CommentOriginSchema, DraftListSchema, DraftLocationSchema, LinkedDraftSchema, QuoteSchema } from "./drafts.ts";
 import { GuideStateSchema } from "./guide.ts";
 import { GuideProgressSchema } from "./progress.ts";
 import { SubmitResultSchema, VerdictOptionSchema, VerdictSchema } from "./submit.ts";
@@ -210,10 +210,12 @@ export const createDraft = defineRpc({
     location: DraftLocationSchema,
     body: z.string(),
     /**
-     * The node of the guide at `headSha` the comment was written from: a node's own comment, or one
-     * on code drawn in a node. Kept here, keyed by the draft's ID, and never posted.
+     * The part of the guide at `headSha` the comment was written from: a node's own comment, one on
+     * code drawn in a node, or one on the overview. Kept here, keyed by the draft's ID, and never posted.
      */
-    nodeId: z.string().nullable().optional(),
+    from: CommentOriginSchema.nullable().optional(),
+    /** The passage of that part the reviewer highlighted to comment on; kept with the origin, never posted. */
+    quote: QuoteSchema.nullable().optional(),
   }),
   output: LinkedDraftSchema,
 });

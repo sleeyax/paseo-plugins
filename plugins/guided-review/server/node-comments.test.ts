@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
@@ -46,13 +46,21 @@ async function withGuide(t: TestContext, kind: ForgeKind): Promise<Host> {
   return { data, forge, service, url, reviewId: REVIEW_IDS[kind], restart: create };
 }
 
+function node(nodeId: string) {
+  return { kind: "node", nodeId } as const;
+}
+
 function commentOn(host: Host, nodeId: string, body: string) {
-  return host.service.createDraft({ reviewId: host.reviewId, headSha: HEAD, location: GENERAL, body, nodeId });
+  return host.service.createDraft({ reviewId: host.reviewId, headSha: HEAD, location: GENERAL, body, from: node(nodeId) });
+}
+
+function draftsFile(host: Host): string {
+  return path.join(host.data, "reviews", ...host.reviewId.split("/"), "drafts.json");
 }
 
 /** Everything the plugin keeps on disk about a review's drafts. */
 async function kept(host: Host): Promise<unknown> {
-  return JSON.parse(await readFile(path.join(host.data, "reviews", ...host.reviewId.split("/"), "drafts.json"), "utf8"));
+  return JSON.parse(await readFile(draftsFile(host), "utf8"));
 }
 
 test("on GitLab a node's comment is an MR-level draft note, and only the plugin knows its node", async (t) => {
@@ -64,9 +72,9 @@ test("on GitLab a node's comment is an MR-level draft note, and only the plugin 
   assert.deepEqual(forge.created.map(({ anchor, body }) => ({ anchor, body })), [
     { anchor: { kind: "general" }, body: "About the retry handling: why full jitter?" },
   ]);
-  assert.deepEqual(draft, { id: "draft-1", body: "About the retry handling: why full jitter?", location: GENERAL, nodeId: "retry-policy" });
+  assert.deepEqual(draft, { id: "draft-1", body: "About the retry handling: why full jitter?", location: GENERAL, from: node("retry-policy"), quote: null });
   assert.deepEqual(await kept(host), {
-    links: { "draft-1": { nodeId: "retry-policy", headSha: HEAD, agentId: "agent-1" } },
+    links: { "draft-1": { from: node("retry-policy"), headSha: HEAD, agentId: "agent-1" } },
     paragraphs: [],
   });
   assert.equal(await service.finish({ reviewId }).then((view) => view.body), "", "the review body is the reviewer's alone");
@@ -74,13 +82,13 @@ test("on GitLab a node's comment is an MR-level draft note, and only the plugin 
   // One started on the web has no node; the link survives a restart.
   const fromTheWeb: Draft = { id: "88", body: "Overall fine.", location: GENERAL };
   forge.drafts.set(host.url, [...forge.drafts.get(host.url)!, fromTheWeb]);
-  assert.deepEqual((await host.restart().listDrafts({ reviewId })).drafts, [draft, { ...fromTheWeb, nodeId: null }]);
+  assert.deepEqual((await host.restart().listDrafts({ reviewId })).drafts, [draft, { ...fromTheWeb, from: null, quote: null }]);
 
   await service.updateDraft({ reviewId, draftId: draft.id, body: "About the retry handling: why jitter at all?" });
   assert.deepEqual((await service.listDrafts({ reviewId })).drafts[0], { ...draft, body: "About the retry handling: why jitter at all?" });
 
   await service.deleteDraft({ reviewId, draftId: draft.id });
-  assert.deepEqual((await service.listDrafts({ reviewId })).drafts, [{ ...fromTheWeb, nodeId: null }]);
+  assert.deepEqual((await service.listDrafts({ reviewId })).drafts, [{ ...fromTheWeb, from: null, quote: null }]);
   assert.deepEqual(await kept(host), { links: {}, paragraphs: [] });
 });
 
@@ -95,7 +103,7 @@ test("on GitHub a node's comment is a paragraph of the pending review's body, af
   assert.deepEqual(forge.created, [], "no thread is started");
   assert.equal(forge.bodies.get(url), "Looks good overall.\n\nAbout the retry handling: why full jitter?\n\nAbout the upload loop: is every attempt logged?");
   assert.match(retry.id, /^paragraph-/);
-  assert.deepEqual(retry, { id: retry.id, body: "About the retry handling: why full jitter?", location: GENERAL, nodeId: "retry-policy" });
+  assert.deepEqual(retry, { id: retry.id, body: "About the retry handling: why full jitter?", location: GENERAL, from: node("retry-policy"), quote: null });
   assert.deepEqual((await service.listDrafts({ reviewId })).drafts, [retry, upload]);
 
   // Finish review shows and saves the reviewer's own text; the node comments stay where they are.
@@ -108,7 +116,7 @@ test("on GitHub a node's comment is a paragraph of the pending review's body, af
   assert.equal(forge.bodies.get(url), "Looks good.\n\nTwo questions.\n\nAbout the retry handling: why jitter at all?");
   assert.deepEqual((await host.restart().listDrafts({ reviewId })).drafts, [{ ...retry, body: "About the retry handling: why jitter at all?" }]);
   assert.deepEqual(await kept(host), {
-    links: { [retry.id]: { nodeId: "retry-policy", headSha: HEAD, agentId: "agent-1" } },
+    links: { [retry.id]: { from: node("retry-policy"), headSha: HEAD, agentId: "agent-1" } },
     paragraphs: [{ id: retry.id, body: "About the retry handling: why jitter at all?" }],
   });
 });
@@ -214,11 +222,62 @@ test("a comment on code drawn in a node is linked to that node too, and one on a
     headSha: HEAD,
     location: { kind: "file", path: "src/upload.ts" },
     body: "Why here?",
-    nodeId: "uploader",
+    from: node("uploader"),
   });
-  assert.equal(onCode.nodeId, "uploader");
-  assert.deepEqual((await service.listDrafts({ reviewId })).drafts.map((draft) => draft.nodeId), ["uploader"]);
+  assert.deepEqual(onCode.from, node("uploader"));
+  assert.deepEqual((await service.listDrafts({ reviewId })).drafts.map((draft) => draft.from), [node("uploader")]);
 
   await assert.rejects(commentOn(host, "no-such-node", "Hm."), new Error("That concept is not in the guide any more."));
   assert.equal(forge.created.length, 1, "nothing more was sent");
+});
+
+test("a comment on the overview is a general draft on either forge, and the passage highlighted for it is kept locally", async (t) => {
+  const passage = "An upload is retried only when the failure is transient";
+  for (const kind of ["github", "gitlab"] as const) {
+    const host = await withGuide(t, kind);
+    const { forge, service, url, reviewId } = host;
+
+    const draft = await service.createDraft({
+      reviewId,
+      headSha: HEAD,
+      location: GENERAL,
+      body: "Why is a 429 not transient?",
+      from: { kind: "overview" },
+      quote: `  ${passage}\n`,
+    });
+
+    assert.deepEqual(draft, {
+      id: draft.id,
+      body: "Why is a 429 not transient?",
+      location: GENERAL,
+      from: { kind: "overview" },
+      quote: { text: passage, earlier: false },
+    }, kind);
+    if (kind === "github") assert.equal(forge.bodies.get(url), "Why is a 429 not transient?", kind);
+    else assert.deepEqual(forge.created.map(({ anchor, body }) => ({ anchor, body })), [{ anchor: GENERAL, body: "Why is a 429 not transient?" }], kind);
+    assert.deepEqual((await kept(host) as { links: unknown }).links, {
+      [draft.id]: { from: { kind: "overview" }, quote: passage, headSha: HEAD, agentId: "agent-1" },
+    }, kind);
+    assert.deepEqual((await host.restart().listDrafts({ reviewId })).drafts, [draft], kind);
+  }
+});
+
+test("a highlighted passage without the part of the guide it is from is refused, and nothing is sent", async (t) => {
+  const host = await withGuide(t, "gitlab");
+  await assert.rejects(
+    host.service.createDraft({ reviewId: host.reviewId, headSha: HEAD, location: GENERAL, body: "Hm.", quote: "retried" }),
+    new Error("A highlighted passage has to come from the guide's overview or one of its concepts."),
+  );
+  assert.deepEqual(host.forge.created, []);
+});
+
+test("a link kept before a draft could come from the overview still names its node", async (t) => {
+  const host = await withGuide(t, "gitlab");
+  const { service, reviewId } = host;
+  const draft = await commentOn(host, "retry-policy", "About the retry handling: why full jitter?");
+  await writeFile(draftsFile(host), JSON.stringify({ links: { [draft.id]: { nodeId: "retry-policy", headSha: HEAD, agentId: "agent-1" } }, paragraphs: [] }));
+
+  assert.deepEqual((await host.restart().listDrafts({ reviewId })).drafts, [draft]);
+  await service.deleteDraft({ reviewId, draftId: draft.id });
+  assert.deepEqual(await kept(host), { links: {}, paragraphs: [] });
 });

@@ -1,4 +1,4 @@
-import type { Draft, DraftList, DraftLocation, LinkedDraft } from "../shared/drafts.ts";
+import type { CommentOrigin, Draft, DraftList, DraftLocation, LinkedDraft } from "../shared/drafts.ts";
 import type { Verdict } from "../shared/submit.ts";
 import { anchorAt } from "./anchors.ts";
 import { followNode, type GuideAtHead } from "./carry-over.ts";
@@ -12,12 +12,12 @@ export type ReviewDraftsOptions = { store: ReviewStore; guides: GuideGenerations
 
 /**
  * The reviewer's drafts and review body, and what the plugin keeps about them: the drafts live on
- * the forge, `drafts.json` links each to the node it was written from, and on GitHub a node's comment
+ * the forge, `drafts.json` links each to the node or overview it was written from, and on GitHub a general comment
  * is a paragraph of the pending review's body, after the reviewer's own text. On GitLab, which keeps
  * no body before submit, the body is kept here until a submit publishes it.
  *
  * Every read-modify-write of the body or `drafts.json` goes through `#changing`, one at a time per
- * review: a node comment on GitHub rewrites the body the reviewer's own text shares, and both read it first.
+ * review: a general comment on GitHub rewrites the body the reviewer's own text shares, and both read it first.
  */
 export class ReviewDrafts {
   readonly #store: ReviewStore;
@@ -31,36 +31,46 @@ export class ReviewDrafts {
 
   /**
    * The reviewer's drafts, read from the forge every time: they live there, and may have been started
-   * on the web. On GitHub the node comments in the pending review's body are drafts too. Each comes
-   * with the node of the guide the panel shows that it was written from, when it was written from one.
+   * on the web. On GitHub the general comments in the pending review's body are drafts too. Each comes
+   * with the part of the guide the panel shows that it was written from, when it was written from one,
+   * and the passage the reviewer highlighted for it.
    */
   async list(record: ReviewRecord, forge: Forge): Promise<DraftList> {
     const [drafts, kept] = await Promise.all([forge.listDrafts(record.ref), this.#store.getDrafts(record.id)]);
     const { paragraphs } = await this.#readBody(record, forge, kept);
-    const nodeOf = await this.#linkFollower(record);
+    const follow = await this.#linkFollower(record);
     const all = [...drafts, ...paragraphs.map(paragraphDraft)];
-    return { drafts: await Promise.all(all.map(async (draft) => ({ ...draft, nodeId: await nodeOf(kept.links[draft.id]) }))) };
+    return { drafts: await Promise.all(all.map(async (draft) => ({ ...draft, ...(await follow(kept.links[draft.id])) }))) };
   }
 
   /**
    * Saves a comment on the forge as a draft at once, at `location` in the diff the panel drew at
    * `drawnAt`, which must still be the review's head: Regenerate moves the review to a new head, whose
    * lines are numbered differently, so a comment from a guide it replaced is refused rather than put
-   * on whatever line now has its number. It is linked to the node `nodeId` of the guide the panel
-   * shows when it was written from one. A `general` comment, on the change as a whole, is a node's
-   * comment: an MR-level draft note on GitLab, and on GitHub a paragraph added to the pending review's body.
+   * on whatever line now has its number. It is linked to the node or overview `from` of the guide the
+   * panel shows when it was written from one, with the passage `quote` the reviewer highlighted there.
+   * A `general` comment, on the change as a whole, is a comment on a node or on the overview: an
+   * MR-level draft note on GitLab, and on GitHub a paragraph added to the pending review's body.
    */
   async create(
     record: ReviewRecord,
     forge: Forge,
-    { drawnAt, location, body, nodeId }: { drawnAt: string; location: DraftLocation; body: string; nodeId: string | null },
+    {
+      drawnAt,
+      location,
+      body,
+      from,
+      quote,
+    }: { drawnAt: string; location: DraftLocation; body: string; from: CommentOrigin | null; quote: string | null },
   ): Promise<LinkedDraft> {
     const text = draftText(body);
+    const passage = quote?.trim() || null;
     if (drawnAt !== record.header.headSha) throw new Error(regeneratedAway(drawnAt, record.header.headSha));
+    if (passage !== null && from === null) throw new Error("A highlighted passage has to come from the guide's overview or one of its concepts.");
     const changeRequest = await this.#store.snapshot(record.id, record.header.headSha);
     if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
     const anchor = anchorAt(changeRequest.files, location);
-    const link = nodeId === null ? null : await this.#linkTo(record, nodeId);
+    const link = from === null ? null : await this.#linkTo(record, from, passage);
     const { ref, baseSha, startSha, headSha } = changeRequest;
 
     if (anchor.kind === "general" && forge.reviewBody) {
@@ -69,7 +79,7 @@ export class ReviewDrafts {
         const kept = await this.#store.getDrafts(record.id);
         const { own, paragraphs } = await this.#readBody(record, forge, kept);
         await this.#writeBody(record, forge, own, [...paragraphs, paragraph], link === null ? kept.links : { ...kept.links, [paragraph.id]: link });
-        return { ...paragraphDraft(paragraph), nodeId: link?.nodeId ?? null };
+        return { ...paragraphDraft(paragraph), ...fresh(link) };
       });
     }
 
@@ -80,7 +90,7 @@ export class ReviewDrafts {
         await this.#store.saveDrafts(record.id, { ...kept, links: { ...kept.links, [draft.id]: link } });
       });
     }
-    return { ...draft, nodeId: link?.nodeId ?? null };
+    return { ...draft, ...fresh(link) };
   }
 
   async update(record: ReviewRecord, forge: Forge, draftId: string, body: string): Promise<void> {
@@ -106,13 +116,13 @@ export class ReviewDrafts {
 
   /**
    * The review body so far, the reviewer's own text: the forge's, where it keeps one before submit,
-   * without the node comments GitHub keeps in it, else the one kept here.
+   * without the general comments GitHub keeps in it, else the one kept here.
    */
   async ownBody(record: ReviewRecord, forge: Forge): Promise<string> {
     return (await this.#readBody(record, forge)).own;
   }
 
-  /** Replaces the reviewer's own text of the body, leaving the node comments GitHub keeps after it. */
+  /** Replaces the reviewer's own text of the body, leaving the general comments GitHub keeps after it. */
   async saveOwnBody(record: ReviewRecord, forge: Forge, body: string): Promise<void> {
     await this.#changing(record.id, async () => {
       const kept = await this.#store.getDrafts(record.id);
@@ -131,7 +141,7 @@ export class ReviewDrafts {
 
   /**
    * Submits the review with `verdict`: the drafts, and the body, the reviewer's own text followed by
-   * the node comments GitHub keeps in it. Once the forge says they are published, nothing kept here
+   * the general comments GitHub keeps in it. Once the forge says they are published, nothing kept here
    * about them is wanted any more.
    */
   async submit(record: ReviewRecord, forge: Forge, verdict: Verdict, body: string): Promise<SubmitOutcome> {
@@ -156,7 +166,7 @@ export class ReviewDrafts {
   }
 
   /**
-   * Rewrites the node comments in the GitHub pending review's body, one of which is `draftId`, and
+   * Rewrites the general comments in the GitHub pending review's body, one of which is `draftId`, and
    * keeps the reviewer's own text as it is. A paragraph no longer in the body whole, edited or
    * deleted on GitHub, cannot be found to change.
    */
@@ -179,23 +189,25 @@ export class ReviewDrafts {
     });
   }
 
-  /** A link to the node `nodeId` of the guide the panel shows, which must have it. */
-  async #linkTo(record: ReviewRecord, nodeId: string): Promise<DraftLink> {
+  /** A link to `from` in the guide the panel shows, which must have it, with the passage `quote` highlighted there. */
+  async #linkTo(record: ReviewRecord, from: CommentOrigin, quote: string | null): Promise<DraftLink> {
     const current = await this.#guides.shown(record);
-    if (current === null) throw new Error("There is no finished guide to comment on a concept of.");
-    if (!current.guide.nodes.some((node) => node.id === nodeId)) throw new Error("That concept is not in the guide any more.");
-    return { nodeId, headSha: current.headSha, agentId: current.agentId };
+    if (current === null) throw new Error("There is no finished guide to comment on.");
+    if (from.kind === "node" && !current.guide.nodes.some((node) => node.id === from.nodeId)) throw new Error("That concept is not in the guide any more.");
+    return { from, ...(quote === null ? {} : { quote }), headSha: current.headSha, agentId: current.agentId };
   }
 
   /**
-   * Follows a draft's link to a node of the guide the panel shows: the node itself when the link was
-   * made in that guide, else the node covering the same code as the one it was made to in the guide
-   * then shown, as marks are carried over. Null without a link, a guide, or such a node.
+   * Follows a draft's link to the part of the guide the panel shows it came from: the overview, the
+   * node itself when the link was made in that guide, else the node covering the same code as the one
+   * it was made to in the guide then shown, as marks are carried over. No origin without a link, a
+   * guide, or such a node. A highlighted passage stays with the draft, marked as from an earlier guide
+   * when it was highlighted in another than the one shown.
    */
-  async #linkFollower(record: ReviewRecord): Promise<(link: DraftLink | undefined) => Promise<string | null>> {
+  async #linkFollower(record: ReviewRecord): Promise<(link: DraftLink | undefined) => Promise<Linked>> {
     const current = await this.#guides.shown(record);
     const snapshot = current === null ? null : await this.#store.snapshot(record.id, current.headSha);
-    if (current === null || snapshot === null) return async () => null;
+    if (current === null || snapshot === null) return async (link) => ({ from: null, quote: quoteOf(link, true) });
     const now: GuideAtHead = { guide: current.guide, files: snapshot.files };
     const earlier = new Map<string, Promise<GuideAtHead | null>>();
     const guideOf = (link: DraftLink) => {
@@ -210,18 +222,23 @@ export class ReviewDrafts {
       }
       return earlier.get(key)!;
     };
-    return async (link) => {
-      if (link === undefined) return null;
-      if (link.headSha === current.headSha && link.agentId === current.agentId) {
-        return current.guide.nodes.some((node) => node.id === link.nodeId) ? link.nodeId : null;
-      }
+    const follow = async (link: DraftLink, same: boolean): Promise<CommentOrigin | null> => {
+      if (link.from.kind === "overview") return link.from;
+      const { nodeId } = link.from;
+      if (same) return current.guide.nodes.some((node) => node.id === nodeId) ? link.from : null;
       const then = await guideOf(link);
-      return then === null ? null : followNode(then, link.nodeId, now);
+      const followed = then === null ? null : followNode(then, nodeId, now);
+      return followed === null ? null : { kind: "node", nodeId: followed };
+    };
+    return async (link) => {
+      if (link === undefined) return { from: null, quote: null };
+      const same = link.headSha === current.headSha && link.agentId === current.agentId;
+      return { from: await follow(link, same), quote: quoteOf(link, !same) };
     };
   }
 
   /**
-   * The body as the forge keeps it, split into the reviewer's own text and the node comments kept
+   * The body as the forge keeps it, split into the reviewer's own text and the general comments kept
    * here that are still in it, or on a forge that keeps none, the own text kept here and no paragraphs.
    */
   async #readBody(record: ReviewRecord, forge: Forge, kept?: DraftsRecord): Promise<{ own: string; paragraphs: BodyParagraph[] }> {
@@ -269,7 +286,19 @@ function draftText(body: string): string {
   return text;
 }
 
-/** A node comment in GitHub's review body, as the panel lists it beside the forge's drafts. */
+/** What a draft's link says about it in the panel's listing. */
+type Linked = Pick<LinkedDraft, "from" | "quote">;
+
+/** A link just made, in the guide the panel shows. */
+function fresh(link: DraftLink | null): Linked {
+  return { from: link?.from ?? null, quote: quoteOf(link ?? undefined, false) };
+}
+
+function quoteOf(link: DraftLink | undefined, earlier: boolean): LinkedDraft["quote"] {
+  return link?.quote === undefined ? null : { text: link.quote, earlier };
+}
+
+/** A general comment in GitHub's review body, as the panel lists it beside the forge's drafts. */
 function paragraphDraft(paragraph: BodyParagraph): Draft {
   return { id: paragraph.id, body: paragraph.body, location: { kind: "general" } };
 }

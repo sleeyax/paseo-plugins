@@ -101,6 +101,10 @@ async function regenerate(service: ReviewService): Promise<StartProgress> {
   return service.startProgress({ reviewId: REVIEW_ID });
 }
 
+function node(nodeId: string) {
+  return { kind: "node", nodeId } as const;
+}
+
 function mark(service: ReviewService, subject: GuideSubject, headSha = OLD) {
   return service.setUnderstood({ reviewId: REVIEW_ID, headSha, subject, understood: true });
 }
@@ -369,17 +373,36 @@ test("after Regenerate a comment is anchored in the new head's diff, one from th
 test("after Regenerate a draft's node is the new guide's node with the same code, and none where the code changed", async (t) => {
   const { service, forge } = await withGuide(t);
   const general = { kind: "general" } as const;
-  await service.createDraft({ reviewId: REVIEW_ID, headSha: OLD, location: general, body: "About the upload loop: why?", nodeId: "uploader" });
-  await service.createDraft({ reviewId: REVIEW_ID, headSha: OLD, location: general, body: "About the retry handling: why?", nodeId: "retry-policy" });
+  await service.createDraft({ reviewId: REVIEW_ID, headSha: OLD, location: general, body: "About the upload loop: why?", from: node("uploader") });
+  await service.createDraft({ reviewId: REVIEW_ID, headSha: OLD, location: general, body: "About the retry handling: why?", from: node("retry-policy") });
 
   forge.changeRequests.set(URL, atNewHead());
   await regenerate(service);
 
   assert.deepEqual(
-    (await service.listDrafts({ reviewId: REVIEW_ID })).drafts.map((draft) => [draft.body, draft.nodeId]),
+    (await service.listDrafts({ reviewId: REVIEW_ID })).drafts.map((draft) => [draft.body, draft.from]),
     [
-      ["About the upload loop: why?", "upload-loop"],
+      ["About the upload loop: why?", node("upload-loop")],
       ["About the retry handling: why?", null],
+    ],
+  );
+});
+
+test("after Regenerate a comment on the overview stays on the overview, and its passage is marked as from an earlier guide", async (t) => {
+  const { service, forge } = await withGuide(t);
+  const general = { kind: "general" } as const;
+  const passage = "An upload is retried only when the failure is transient";
+  await service.createDraft({ reviewId: REVIEW_ID, headSha: OLD, location: general, body: "Why not on a 429?", from: { kind: "overview" }, quote: passage });
+  await service.createDraft({ reviewId: REVIEW_ID, headSha: OLD, location: general, body: "Why here?", from: node("uploader"), quote: "the upload loop" });
+
+  forge.changeRequests.set(URL, atNewHead());
+  await regenerate(service);
+
+  assert.deepEqual(
+    (await service.listDrafts({ reviewId: REVIEW_ID })).drafts.map((draft) => [draft.body, draft.from, draft.quote]),
+    [
+      ["Why not on a 429?", { kind: "overview" }, { text: passage, earlier: true }],
+      ["Why here?", node("upload-loop"), { text: "the upload loop", earlier: true }],
     ],
   );
 });
