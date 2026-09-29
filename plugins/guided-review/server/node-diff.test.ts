@@ -371,8 +371,12 @@ test("a node's lines carry Paseo's syntax tokens, read from the hunks where the 
   );
 });
 
-test("the diffs are coloured with Paseo's default syntax palettes", async () => {
-  const { darkHighlightColors, lightHighlightColors } = await import("@getpaseo/highlight");
+test("the diffs are coloured with the syntax theme the setting names, Paseo's default for one it does not have", async () => {
+  const { darkHighlightColors, lightHighlightColors, resolveSyntaxColors } = await import("@getpaseo/highlight");
   const service = new ReviewService({ forges: [], workspaces: fakeWorkspaces(), guideAgents: fakeGuideAgents(), dataDirectory: os.tmpdir() });
-  assert.deepEqual(await service.syntaxColors(), { dark: darkHighlightColors, light: lightHighlightColors });
+  assert.deepEqual(await service.syntaxColors({ theme: "dracula" }), { dark: resolveSyntaxColors("dracula", "dark"), light: resolveSyntaxColors("dracula", "light") });
+  assert.deepEqual(await service.syntaxColors({ theme: "no-such-theme" }), { dark: darkHighlightColors, light: lightHighlightColors });
+  const { themes } = await service.syntaxThemes();
+  assert.deepEqual(themes[0], { id: "github", label: "GitHub" });
+  assert.ok(themes.some((theme) => theme.id === "dracula"));
 });

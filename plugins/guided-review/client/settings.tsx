@@ -1,8 +1,11 @@
 import type { PluginSurfaceProps, SettingsState } from "@getpaseo/plugin/client";
-import { useSettings } from "@getpaseo/plugin/client";
-import { SettingsAction, SettingsCard, SettingsInput, SettingsSection } from "@getpaseo/plugin/client/ui";
+import { useRpc, useSettings } from "@getpaseo/plugin/client";
+import { SettingsAction, SettingsCard, SettingsInput, SettingsSection, SettingsSelect } from "@getpaseo/plugin/client/ui";
+import { useQuery } from "@tanstack/react-query";
 import React, { useState } from "react";
 import { Text } from "react-native";
+import * as contracts from "../shared/contracts.ts";
+import { PLUGIN_ID } from "../shared/identity.ts";
 import { settingsDocument } from "../shared/settings.ts";
 import { GuideAgentSettings } from "./guide-agent-settings.tsx";
 import { fontSize, leading, spacing } from "./theme.ts";
@@ -32,6 +35,7 @@ export function GuidedReviewSettings({ theme }: PluginSurfaceProps) {
     <>
       <ForgeClis theme={theme} settings={settings} />
       <GuideAgentSettings theme={theme} settings={settings} />
+      <SyntaxThemeSetting theme={theme} settings={settings} />
     </>
   );
 }
@@ -101,5 +105,30 @@ function ForgeClis({ theme, settings }: { theme: PluginSurfaceProps["theme"]; se
 function Note({ color, children }: { color: string; children: React.ReactNode }) {
   return (
     <Text style={{ color, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm), marginTop: spacing[2] }}>{children}</Text>
+  );
+}
+
+/** Paseo's syntax themes, which the server lists, since the client bundle cannot take the package that has them. */
+function SyntaxThemeSetting({ theme, settings }: { theme: PluginSurfaceProps["theme"]; settings: Saved }) {
+  const listSyntaxThemes = useRpc(contracts.listSyntaxThemes);
+  const themes = useQuery({
+    queryKey: [PLUGIN_ID, "syntax-themes"],
+    queryFn: () => listSyntaxThemes({}),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  return (
+    <SettingsSection title="Diffs">
+      {themes.isError ? <Note color={theme.colors.statusDanger}>{themes.error instanceof Error ? themes.error.message : String(themes.error)}</Note> : null}
+      <SettingsCard>
+        <SettingsSelect
+          label="Syntax theme"
+          hint="The one picked under Appearance in Paseo's settings, which plugins cannot read"
+          value={settings.values.syntaxTheme}
+          options={(themes.data?.themes ?? []).map(({ id, label }) => ({ value: id, label }))}
+          disabled={settings.saving || themes.data === undefined}
+          onValueChange={(syntaxTheme) => void settings.save({ ...settings.values, syntaxTheme }, settings.revision)}
+        />
+      </SettingsCard>
+    </SettingsSection>
   );
 }
