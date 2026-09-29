@@ -172,10 +172,18 @@ export const SyntaxPaletteSchema = z.record(z.string(), z.string());
 /** The syntax palettes the diffs are coloured with, one for a dark theme and one for a light one. */
 export const SyntaxColorsSchema = z.object({ dark: SyntaxPaletteSchema, light: SyntaxPaletteSchema });
 
+/** The palettes of the syntax theme `theme` names, Paseo's default for one it does not have. */
 export const getSyntaxColors = defineRpc({
   name: "guided-review.syntax-colors",
-  input: z.object({}),
+  input: z.object({ theme: z.string() }),
   output: SyntaxColorsSchema,
+});
+
+/** Paseo's syntax themes, which the setting offers. */
+export const listSyntaxThemes = defineRpc({
+  name: "guided-review.syntax-themes",
+  input: z.object({}),
+  output: z.object({ themes: z.array(z.object({ id: z.string(), label: z.string() })) }),
 });
 
 /**

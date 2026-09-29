@@ -20,7 +20,7 @@ import { coveredPaths, type CoveredCode, type GuideState, type LayeredGuide } fr
 import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
 import type { SubmitResult, Verdict, VerdictOption } from "../shared/submit.ts";
 import { askPrompt, codeReferencesOf, type AskSubjectContext } from "./ask-prompt.ts";
-import { DiffHighlighter, syntaxColors } from "./diff-highlight.ts";
+import { DiffHighlighter, syntaxColors, syntaxThemes } from "./diff-highlight.ts";
 import { entryCode, resolveCode } from "./diff.ts";
 import { errorMessage } from "./error-message.ts";
 import { ForgeError, type BranchChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
@@ -315,9 +315,14 @@ export class ReviewService {
     return { headSha, files: highlighted };
   }
 
-  /** The palettes the panel colours the diffs' syntax tokens with. */
-  async syntaxColors(): Promise<SyntaxColors> {
-    return syntaxColors();
+  /** The palettes the panel colours the diffs' syntax tokens with, from the syntax theme `theme` names. */
+  async syntaxColors({ theme }: { theme: string }): Promise<SyntaxColors> {
+    return syntaxColors(theme);
+  }
+
+  /** The syntax themes the setting offers. */
+  async syntaxThemes(): Promise<{ themes: { id: string; label: string }[] }> {
+    return { themes: syntaxThemes() };
   }
 
   /**

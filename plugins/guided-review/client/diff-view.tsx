@@ -1,5 +1,5 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import { useRpc } from "@getpaseo/plugin/client";
+import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
 import React, { createContext, useContext, useId, useRef, useState } from "react";
 import { Platform, Pressable, Text, View, type GestureResponderEvent } from "react-native";
@@ -8,6 +8,7 @@ import { subjectKey, type GuideSubject, type SyntaxPalette } from "../shared/con
 import type { DiffHunk, DiffLine, FileDiff, SyntaxToken } from "../shared/diff.ts";
 import { isLine, lastLineOf, lineRefOf, pathOf, type DraftLocation, type LineRef } from "../shared/drafts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
+import { DEFAULT_SYNTAX_THEME, settingsDocument } from "../shared/settings.ts";
 import { CommentNodeContext, DraftCard, DraftsContext, NewCommentBox, type DraftsControl } from "./drafts.tsx";
 import { fontSize, isDark, leading, radius, spacing, tint, type Colors } from "./theme.ts";
 
@@ -33,11 +34,14 @@ const MARKERS = { added: "+", removed: "−", context: " " } as const;
 const SyntaxContext = createContext<SyntaxPalette | null>(null);
 
 function useSyntaxPalette(colors: Colors): SyntaxPalette | null {
+  const settings = useSettings(settingsDocument);
+  const theme = settings.status === "ready" ? settings.values.syntaxTheme : DEFAULT_SYNTAX_THEME;
   const getSyntaxColors = useRpc(contracts.getSyntaxColors);
   const palettes = useQuery({
-    queryKey: [PLUGIN_ID, "syntax-colors"],
-    queryFn: () => getSyntaxColors({}),
+    queryKey: [PLUGIN_ID, "syntax-colors", theme],
+    queryFn: () => getSyntaxColors({ theme }),
     staleTime: Number.POSITIVE_INFINITY,
+    enabled: settings.status !== "loading",
   });
   if (palettes.data === undefined) return null;
   return isDark(colors.surface0) ? palettes.data.dark : palettes.data.light;

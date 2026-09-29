@@ -11,6 +11,9 @@ export const FALLBACK_GUIDE_AGENT = "claude";
 
 export const DEFAULT_GLAB_PATH = "glab";
 
+/** Paseo's own default syntax theme. */
+export const DEFAULT_SYNTAX_THEME = "github";
+
 /**
  * Host settings, owned by the host's store. Every field has a default, so `schema.parse({})` is the
  * defaults document and a field added later reads as its default from a document saved before it.
@@ -37,6 +40,12 @@ export const settingsDocument = defineSettings({
     guideAgentEffort: z.string().default(""),
     /** The guide agent's mode, one that asks before a tool runs; blank for the provider's read-only mode. */
     guideAgentMode: z.string().default(""),
+    /**
+     * The syntax theme the diffs are coloured with, one of Paseo's by its ID. A plugin cannot read
+     * the one picked in Paseo's own appearance settings, so the reviewer picks it here too. An ID
+     * Paseo does not have reads as the default.
+     */
+    syntaxTheme: z.string().default(DEFAULT_SYNTAX_THEME),
   }),
 });
 

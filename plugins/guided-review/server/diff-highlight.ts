@@ -1,6 +1,7 @@
-import { darkHighlightColors, highlightCode, isLanguageSupported, lightHighlightColors } from "@getpaseo/highlight";
+import { highlightCode, isLanguageSupported, isSyntaxThemeId, resolveSyntaxColors, SYNTAX_THEME_OPTIONS } from "@getpaseo/highlight";
 import type { SyntaxColors } from "../shared/contracts.ts";
 import type { DiffLine, FileDiff, SyntaxToken } from "../shared/diff.ts";
+import { DEFAULT_SYNTAX_THEME } from "../shared/settings.ts";
 import { parsePatch } from "./diff.ts";
 import type { ChangedFile } from "./forge/port.ts";
 
@@ -17,9 +18,15 @@ export type FileAt = (sha: string, path: string) => Promise<string | null>;
 type SideTokens = Map<number, SyntaxToken[]>;
 type FileTokens = { old: SideTokens; new: SideTokens };
 
-/** The palettes of Paseo's default syntax theme. */
-export function syntaxColors(): SyntaxColors {
-  return { dark: darkHighlightColors, light: lightHighlightColors };
+/** The dark and light palettes of one of Paseo's syntax themes, its default for an ID it does not have. */
+export function syntaxColors(theme: string): SyntaxColors {
+  const id = isSyntaxThemeId(theme) ? theme : DEFAULT_SYNTAX_THEME;
+  return { dark: resolveSyntaxColors(id, "dark"), light: resolveSyntaxColors(id, "light") };
+}
+
+/** Paseo's syntax themes, by ID and the name its appearance settings show. */
+export function syntaxThemes(): { id: string; label: string }[] {
+  return SYNTAX_THEME_OPTIONS.map(({ id, label }) => ({ id, label }));
 }
 
 /**

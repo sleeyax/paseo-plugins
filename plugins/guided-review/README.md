@@ -59,6 +59,7 @@ Requires Paseo 0.9 or newer.
 | Guide agent provider and model | `claude-tty` | The agent that writes guides: a provider for its default model, or `provider/model` as Paseo names them, like `codex/gpt-5.5`. The default is the provider of the [claude-tty](../claude-tty) plugin, and the built-in `claude` takes its place on a host where that is not available. Applies to guides generated after the change. |
 | Guide agent effort | _blank_ | One of the model's effort levels as Paseo names them, like `high`; blank for the model's default. |
 | Guide agent mode | _blank_ | The mode the guide agent runs in; blank for its provider's plan or read-only mode. Only a mode that asks before a tool runs is taken, like Claude's `default`, since the plugin can deny only what the agent asks for; `acceptEdits`, `auto` and the like are refused. |
+| Syntax theme | GitHub | The syntax theme the diffs are highlighted with, one of Paseo's own, in its dark or light variant to suit Paseo's theme. Plugins cannot read the one picked under Appearance in Paseo's settings, so pick the same one here. |
 
 ## Troubleshooting
 
