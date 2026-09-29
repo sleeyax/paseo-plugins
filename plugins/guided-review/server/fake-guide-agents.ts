@@ -60,8 +60,8 @@ export function sampleLayeredGuide(): LayeredGuide {
   return {
     ...guide,
     nodes: [
-      { ...guide.nodes[0]!, layer: 0 },
-      { ...guide.nodes[1]!, layer: 1 },
+      { ...guide.nodes[0]!, layer: 0, leaf: false },
+      { ...guide.nodes[1]!, layer: 1, leaf: true },
     ],
     unsorted: [],
   };
