@@ -27,7 +27,7 @@ export function sampleGuide(): Guide {
     overview: {
       idea: "Uploads that fail on a flaky network are retried with exponential backoff instead of failing at once.",
       needToKnows: ["An upload is retried only when the failure is transient: a timeout or a 5xx."],
-      decisions: [{ choice: "Retry inside the uploader.", rejected: "Retrying in every caller, which would repeat the policy." }],
+      decisions: [{ choice: "Retry inside the uploader.", alternative: null }],
       attention: [{ nodeId: "retry-policy", reason: "Every retry decision is made here." }],
     },
     nodes: [
@@ -37,7 +37,12 @@ export function sampleGuide(): Guide {
         summary: "Decides whether and when a failed upload is tried again.",
         explanation: "A pure function from the attempt number and the failure to a delay, or to giving up.",
         covers: [{ path: "src/retry.ts", hunks: [], lines: [] }],
-        decisions: [{ choice: "Full jitter on the backoff.", rejected: "A fixed delay, which makes clients retry in lockstep." }],
+        decisions: [
+          {
+            choice: "Full jitter on the backoff.",
+            alternative: { text: "A fixed delay, which makes clients retry in lockstep.", quote: "a fixed delay would make clients retry in lockstep" },
+          },
+        ],
         dependencies: [],
       },
       {

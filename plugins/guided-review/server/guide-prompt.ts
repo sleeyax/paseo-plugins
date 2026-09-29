@@ -63,7 +63,7 @@ const RULES = `Rules:
 - Do not change anything. Do not edit or write files, and do not run commands. Your working directory is the repository checked out at the change's head commit; read files there when the diff alone does not explain something.
 - Split the change into concepts ("nodes"): a node is a named group of changes, possibly spanning several files, that does one thing. List the foundations first and the code built on them after.
 - Describe why the change exists and how it works, using the description, the commits and the linked issues, not just what the lines say.
-- The overview's idea is two or three sentences. Each need-to-know is one new invariant, contract or concept. Each decision names what the author chose and the alternative they plausibly rejected.
+- The overview's idea is two or three sentences. Each need-to-know is one new invariant, contract or concept. Each decision names what the author chose. Give its alternative only when the description, a commit message, a linked issue or an added line of the diff names the alternative the author rejected, and quote those words exactly; otherwise leave it null. Never guess an alternative: one whose quote is not found in those texts is dropped.
 - Attention names the one or two foundational nodes that matter most, by their id.
 - A node's summary is one line; its explanation is a short paragraph or two.
 - Write the text of the guide as prose with inline Markdown only: backticks around code, identifiers and paths, and \`**\` or \`*\` for emphasis. The panel draws nothing else, so use no headings, lists, links, tables or code blocks; separate paragraphs with a blank line.

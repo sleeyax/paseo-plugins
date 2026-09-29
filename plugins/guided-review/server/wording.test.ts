@@ -361,7 +361,7 @@ test("a passage highlighted in the overview is worded as a general comment about
           "It goes on the pull request as a whole, not on any line or file: it is about the overview of your guide, which says:",
           "- Idea: Uploads that fail on a flaky network are retried with exponential backoff instead of failing at once.",
           "- Need to know: An upload is retried only when the failure is transient: a timeout or a 5xx.",
-          "- Decision: Retry inside the uploader. Rather than: Retrying in every caller, which would repeat the policy.",
+          "- Decision: Retry inside the uploader.",
           '- Where to spend attention: "Retry policy": Every retry decision is made here.',
         ].join("\n"),
         highlighted("only when the failure is transient"),

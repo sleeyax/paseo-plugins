@@ -215,7 +215,7 @@ export function sampleChangeRequest(url: string, overrides: Partial<Omit<ChangeR
     additions: 42,
     deletions: 7,
     commits: [
-      { sha: "c".repeat(40), headline: "Retry uploads", body: "", author: "author", authoredAt: "2026-09-01T10:00:00Z" },
+      { sha: "c".repeat(40), headline: "Retry uploads", body: "Full jitter, since a fixed delay would make clients retry in lockstep.", author: "author", authoredAt: "2026-09-01T10:00:00Z" },
     ],
     linkedIssues: [{ number: 12, url: `https://github.com/${ref.project}/issues/12`, title: "Uploads fail", body: "", state: "OPEN" }],
     files: [

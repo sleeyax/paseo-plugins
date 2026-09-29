@@ -5,7 +5,7 @@ import { coveredPaths, type Guide, type GuideNode } from "../shared/guide.ts";
 import { anchorAt } from "./anchors.ts";
 import { parsePatch, resolveCode } from "./diff.ts";
 import type { ChangedFile, ChangeRequestRef } from "./forge/port.ts";
-import { nodeContext, type CodeReference } from "./ask-prompt.ts";
+import { decisionLine, nodeContext, type CodeReference } from "./ask-prompt.ts";
 
 /** What "Suggest wording" asks the guide agent for: the comment's text, which the panel puts in the box. */
 export const WordingSchema = z.object({
@@ -144,7 +144,7 @@ function overviewContext(ref: ChangeRequestRef, overview: Guide["overview"], tit
     `- Idea: ${oneLine(overview.idea)}`,
   ];
   for (const item of overview.needToKnows) lines.push(`- Need to know: ${oneLine(item)}`);
-  for (const decision of overview.decisions) lines.push(`- Decision: ${decision.choice} Rather than: ${decision.rejected}`);
+  for (const decision of overview.decisions) lines.push(decisionLine(decision));
   for (const entry of overview.attention) lines.push(`- Where to spend attention: "${titles.get(entry.nodeId) ?? entry.nodeId}": ${entry.reason}`);
   return lines.join("\n");
 }
