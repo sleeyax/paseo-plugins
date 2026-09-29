@@ -1,4 +1,5 @@
 import type { PaseoAgent, PaseoAgentHandle, PaseoAgentPermissionResponse, PaseoApi } from "@getpaseo/client";
+import { DEFAULT_GUIDE_AGENT, FALLBACK_GUIDE_AGENT } from "../../shared/settings.ts";
 import { GUIDE_AGENT_LABEL, GuideAgentError, type GuideAgentPort } from "./port.ts";
 
 export type PermissionRequest = PaseoAgent["pendingPermissions"][number];
@@ -146,7 +147,7 @@ export function createPaseoGuideAgents(options: PaseoGuideAgentsOptions): PaseoG
   return {
     async create({ workspace, title, labels, prompt, outputSchema }) {
       const paseo = options.paseo();
-      const { provider, model } = parseAgentSetting(await options.agent());
+      const { provider, model } = parseAgentSetting(await availableAgent(paseo, await options.agent()));
       if (provider === "") throw new GuideAgentError("No guide agent provider is configured.");
       const resolvedModel = model ?? (await defaultModel(paseo, provider, workspace.directory));
       const modes = await paseo.providers.listModes(provider, { cwd: workspace.directory }).catch(() => null);
@@ -199,6 +200,17 @@ export function createPaseoGuideAgents(options: PaseoGuideAgentsOptions): PaseoG
       await respond(handle, request.id, response);
     },
   };
+}
+
+/**
+ * The setting, unless it is the default and the claude-tty plugin that provides it is not available here.
+ * A listing that fails leaves the setting as it is, so the creation says what went wrong with it.
+ */
+async function availableAgent(paseo: PaseoApi, setting: string): Promise<string> {
+  if (setting.trim() !== DEFAULT_GUIDE_AGENT) return setting;
+  const listed = await paseo.providers.listAvailable().catch(() => null);
+  if (listed === null) return setting;
+  return listed.providers.some((entry) => entry.provider === DEFAULT_GUIDE_AGENT && entry.available) ? setting : FALLBACK_GUIDE_AGENT;
 }
 
 async function defaultModel(paseo: PaseoApi, provider: string, cwd: string): Promise<string> {

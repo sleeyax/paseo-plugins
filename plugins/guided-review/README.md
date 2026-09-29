@@ -52,7 +52,7 @@ Requires Paseo 0.9 or newer.
 | --- | --- | --- |
 | gh path | `gh` | The `gh` the daemon runs: a command on the daemon's `PATH`, or an absolute path. |
 | glab path | `glab` | The `glab` the daemon runs, read the same way. |
-| Guide agent provider and model | `claude` | The agent that writes guides: a provider for its default model, or `provider/model` as Paseo names them, like `codex/gpt-5.5`. Applies to guides generated after the change. |
+| Guide agent provider and model | `claude-tty` | The agent that writes guides: a provider for its default model, or `provider/model` as Paseo names them, like `codex/gpt-5.5`. The default is the provider of the [claude-tty](../claude-tty) plugin, and the built-in `claude` takes its place on a host where that is not available. Applies to guides generated after the change. |
 
 ## Troubleshooting
 
