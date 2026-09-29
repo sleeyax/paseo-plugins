@@ -21,6 +21,8 @@ export type CommentBoxProps = {
   title: string;
   /** The text of the guide the comment is about, when the reviewer highlighted some. */
   quote?: string | undefined;
+  /** Whether the box takes focus as it opens, which it does unless that would clear a highlight the reviewer may want to copy. */
+  autoFocus?: boolean;
   initialBody?: string;
   saveLabel?: string;
   /** Saves the text, trimmed; a failure is shown in the box, which stays open with the text. */
@@ -30,7 +32,17 @@ export type CommentBoxProps = {
 };
 
 /** The one box every comment is written and edited in, wherever it is anchored. */
-export function CommentBox({ colors, title, quote, initialBody = "", saveLabel = "Save draft", onSave, onCancel, actions = [] }: CommentBoxProps) {
+export function CommentBox({
+  colors,
+  title,
+  quote,
+  autoFocus = true,
+  initialBody = "",
+  saveLabel = "Save draft",
+  onSave,
+  onCancel,
+  actions = [],
+}: CommentBoxProps) {
   const [body, setBody] = useState(initialBody);
   /** What is running: "save", or an action's label. */
   const [running, setRunning] = useState<string | null>(null);
@@ -66,7 +78,7 @@ export function CommentBox({ colors, title, quote, initialBody = "", saveLabel =
         value={body}
         onChangeText={setBody}
         multiline
-        autoFocus
+        autoFocus={autoFocus}
         editable={running === null}
         placeholder="Leave a comment"
         placeholderTextColor={colors.foregroundMuted}

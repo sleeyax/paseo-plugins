@@ -4,7 +4,7 @@ import { Pressable, Text, View } from "react-native";
 import { coveredPaths, type Guide, type GuideDecision, type GuideState, type LayeredGuide, type LayeredNode } from "../shared/guide.ts";
 import { AskAction, type AskControl } from "./ask-action.tsx";
 import { NodeCode } from "./diff-view.tsx";
-import { NodeComments, OverviewComments, useCommentOnHold } from "./drafts.tsx";
+import { NodeComments, OverviewComments, useCommentOnHold, useCommentOnRelease } from "./drafts.tsx";
 import { ProgressContext, ProgressSummary, UnderstoodToggle, type ProgressControl } from "./progress.tsx";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
@@ -151,7 +151,7 @@ function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
   const { overview } = guide;
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
   const prose = useRef<View>(null);
-  const selected = useSelectedText(prose);
+  const selected = useSelectedText(prose, useCommentOnRelease({ kind: "overview" }));
   const hold = useCommentOnHold({ kind: "overview" });
   return (
     <Card colors={colors}>
@@ -212,7 +212,7 @@ function NodeCard({
 }) {
   const files = coveredPaths(node);
   const prose = useRef<View>(null);
-  const selected = useSelectedText(prose);
+  const selected = useSelectedText(prose, useCommentOnRelease({ kind: "node", nodeId: node.id }));
   const hold = useCommentOnHold({ kind: "node", nodeId: node.id });
   return (
     <Card colors={colors} light={node.leaf}>
