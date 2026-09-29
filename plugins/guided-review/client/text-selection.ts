@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Platform } from "react-native";
-import { MAX_QUOTE_LENGTH } from "../shared/drafts.ts";
 
 /** Whether the reviewer can highlight the guide's text to comment on it: a native `Text` reports nothing about what is selected in it. */
 export const HIGHLIGHTS_TEXT = Platform.OS === "web";
@@ -20,9 +19,8 @@ export type HighlightOptions = {
 };
 
 /**
- * What the reviewer has selected within `ref`'s element: null when nothing is, when the selection
- * reaches outside it or into an excluded part, or when it is longer than a comment keeps. Always
- * null off the web.
+ * What the reviewer has selected within `ref`'s element: null when nothing is, or when the
+ * selection reaches outside it or into an excluded part. Always null off the web.
  */
 export function useHighlight(ref: RefObject<unknown>, options: HighlightOptions = {}): Highlight | null {
   const [selected, setSelected] = useState<Highlight | null>(null);
@@ -71,7 +69,7 @@ function selectedIn(element: Node | null, excluded: readonly Node[]): Highlight 
   const range = selection.getRangeAt(0);
   if (excluded.some((part) => range.intersectsNode(part))) return null;
   const text = selection.toString().trim();
-  return text === "" || text.length > MAX_QUOTE_LENGTH ? null : { text, end: lastSelected(range) };
+  return text === "" ? null : { text, end: lastSelected(range) };
 }
 
 /** The node a selection ends in; one that ends at the very start of a node, as a triple click's does, ends in the node before. */

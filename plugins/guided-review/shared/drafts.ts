@@ -43,10 +43,7 @@ export const CommentOriginSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("overview") }),
 ]);
 
-/** The longest passage of the guide a comment keeps as the text it was written about. */
-export const MAX_QUOTE_LENGTH = 2000;
-
-export const QuoteSchema = z.string().trim().min(1).max(MAX_QUOTE_LENGTH);
+export const QuoteSchema = z.string().trim().min(1);
 
 /**
  * A draft as the panel lists it: as the forge has it, with the part of the guide it was written from
