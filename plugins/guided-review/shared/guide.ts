@@ -135,13 +135,14 @@ export type LayeredGuide = z.output<typeof LayeredGuideSchema>;
 export type LayeredNode = z.output<typeof LayeredNodeSchema>;
 
 /**
- * Supporting's tests apart from the rest of it, since the panel shows and tallies them as a Tests group of their own.
+ * Supporting's tests and docs apart from the rest of it, since the panel shows and tallies each as a group of its own.
  * The stored guide keeps them in Supporting, so guides and marks written before the split read the same.
  */
-export function splitTests(supporting: readonly SupportingEntry[]): { tests: SupportingEntry[]; supporting: SupportingEntry[] } {
+export function splitSupporting(entries: readonly SupportingEntry[]): { tests: SupportingEntry[]; docs: SupportingEntry[]; supporting: SupportingEntry[] } {
   return {
-    tests: supporting.filter((entry) => entry.category === "test"),
-    supporting: supporting.filter((entry) => entry.category !== "test"),
+    tests: entries.filter((entry) => entry.category === "test"),
+    docs: entries.filter((entry) => entry.category === "docs"),
+    supporting: entries.filter((entry) => entry.category !== "test" && entry.category !== "docs"),
   };
 }
 
