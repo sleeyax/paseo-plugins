@@ -51,7 +51,7 @@ export function BranchStartView({ workspaceId, branch, theme, openWorkspace, onS
         <>
           <Line colors={colors} muted>
             No guided review lives in this workspace. Guide the PR or MR this workspace's branch is the source of, or start one
-            from any URL with "Guided Review: start from a PR or MR URL" in the Command Center.
+            from any URL with Guided Review in the sidebar.
           </Line>
           <View style={{ alignItems: "flex-start" }}>{guideButton("Guide this branch's PR/MR")}</View>
         </>

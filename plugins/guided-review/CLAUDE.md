@@ -28,7 +28,7 @@ On the client, `client/theme.ts` holds Paseo's design scale and the one `Colors`
 
 ## Constraints that are not obvious
 
-A Command Center item cannot take text, so the global item opens the `start` surface, which holds the URL field.
+A Command Center item cannot take text, so starting from a URL is the `start` surface, which the sidebar item opens.
 A surface is not handed the client context, so `createStartSurface` takes the panel opener through its closure, and `client/open-panel.ts` retries it: `client.openPanel` throws until the app's cache has the workspace, which a just-created one reaches a moment later.
 
 Paseo cuts every plugin RPC off after 30 seconds and does not stop the handler.

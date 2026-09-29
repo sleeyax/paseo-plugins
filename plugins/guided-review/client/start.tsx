@@ -14,8 +14,8 @@ import { fontSize, leading, MAX_CONTENT_WIDTH, spacing } from "./theme.ts";
 const POLL_MS = 1_000;
 
 /**
- * Where a PR or MR URL is pasted. The Command Center cannot take text, so its item opens this surface, and
- * a surface is not handed the client context, so the panel opener comes in through the closure.
+ * Where a PR or MR URL is pasted, opened from the sidebar.
+ * A surface is not handed the client context, so the panel opener comes in through the closure.
  */
 export function createStartSurface(openPanel: (workspaceId: string) => void) {
   return function StartSurface({ theme, layout }: PluginSurfaceProps) {
