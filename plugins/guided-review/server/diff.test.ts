@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { DiffLine } from "../shared/diff.ts";
-import { fileDiffOf, parsePatch, resolveCode, splitHunks } from "./diff.ts";
+import { entryCode, fileDiffOf, parsePatch, resolveCode, splitHunks, uncoveredCode } from "./diff.ts";
 import type { ChangedFile } from "./forge/port.ts";
 
 /** A line as `kind old new oldPos newPos`, which is what a hunk's numbering comes down to. */
@@ -162,4 +162,25 @@ test("names what a node covers that the diff does not have, and leaves it out", 
     "covers.1.lines.1: the range 5–4 ends before it starts",
   ]);
   assert.deepEqual(files.map((file) => [file.path, file.hunks.length]), [["src/a.ts", 0]]);
+});
+
+/** A new file of two blocks with a blank line between them and one after, covered block by block. */
+const BLOCKS = changed("src/blocks.ts", "@@ -0,0 +1,6 @@\n+a\n+b\n+\n+c\n+d\n+ ", { status: "added" });
+const BY_BLOCK = [{ path: BLOCKS.path, hunks: [], lines: [{ start: 1, end: 2 }, { start: 4, end: 5 }] }];
+
+test("blank lines left between the ranges a node covers are nothing left to review", () => {
+  assert.equal(uncoveredCode(BLOCKS, BY_BLOCK), null);
+  assert.deepEqual(
+    uncoveredCode(BLOCKS, [{ path: BLOCKS.path, hunks: [], lines: [{ start: 1, end: 2 }] }])?.hunks.map((hunk) => hunk.lines.map((line) => line.text)),
+    [["", "c", "d", " "]],
+  );
+});
+
+test("an entry a guide listed for a file with only blank lines left shows those lines, not the whole file", () => {
+  const code = entryCode([BLOCKS], [{ covers: BY_BLOCK }], BLOCKS.path);
+
+  assert.deepEqual(
+    code?.hunks.map((hunk) => hunk.lines.map((line) => line.text)),
+    [[""], [" "]],
+  );
 });

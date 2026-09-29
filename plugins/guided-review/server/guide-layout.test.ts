@@ -229,6 +229,26 @@ test("a file some node covers part of keeps the rest in its Supporting entry, or
   assert.deepEqual(guide.guide.unsorted, ["src/retry.ts"]);
 });
 
+test("a file whose ranges leave only blank lines uncovered is placed, and one with more left over is not", async (t) => {
+  const blocks = "@@ -0,0 +1,5 @@\n+a\n+\n+b\n+\n+c";
+  const { service, agents } = await withHost(t, [file("src/blocks.ts", blocks), file("src/more.ts", blocks)]);
+
+  const guide = await generated(
+    service,
+    agents,
+    guideOf([
+      node("blocks", [
+        { path: "src/blocks.ts", hunks: [], lines: [{ start: 1, end: 1 }, { start: 3, end: 3 }, { start: 5, end: 5 }] },
+        { path: "src/more.ts", hunks: [], lines: [{ start: 1, end: 1 }] },
+      ]),
+    ]),
+  );
+
+  assert.equal(guide?.status, "ready");
+  if (guide?.status !== "ready") return;
+  assert.deepEqual(guide.guide.unsorted, ["src/more.ts"]);
+});
+
 test("a lockfile a node covers stays in Supporting, where the paths put it, and leaves the node", async (t) => {
   const { service, agents } = await withHost(t, [file("src/upload.ts"), file("src/retry.ts"), file("pnpm-lock.yaml")]);
 
