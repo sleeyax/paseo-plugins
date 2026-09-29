@@ -32,7 +32,7 @@ paseo plugin add sleeyax/paseo-plugins --path plugins/discord-rich-presence
 paseo plugin ls
 ```
 
-Paseo clones the repository itself and tracks the default branch, so `paseo plugin update <id>` and `paseo plugin status` keep an installation current. `claude-tty` is the one that asks something of the host: it runs an adapter that has to be built, so installing and updating it run the `build` commands in its manifest and it needs `pnpm` on the daemon's `PATH` — or a path to an adapter built elsewhere, in its own **Adapter executable** setting.
+Paseo clones the repository itself and tracks the default branch, so `paseo plugin update <id>` and `paseo plugin status` keep an installation current. Two plugins ask something of the host: `claude-tty` runs an adapter that has to be built, and `guided-review` bundles Paseo's syntax highlighter, an npm dependency. Installing and updating either runs the `build` commands in its manifest, so both need `pnpm` on the daemon's `PATH`; `claude-tty` can instead take a path to an adapter built elsewhere, in its own **Adapter executable** setting.
 
 To work on a plugin, install it from the working copy instead. A directory installation runs no `build`, so build what it needs first:
 

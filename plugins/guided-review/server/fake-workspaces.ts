@@ -26,6 +26,8 @@ export type FakeWorkspaces = WorkspacePort & {
   archive(workspaceId: string): void;
   /** When set, the next creation fails with it. */
   failCreate: Error | null;
+  /** The files `fileAt` shows, by `sha:path`, in any workspace. */
+  files: Map<string, string>;
 };
 
 export function fakeWorkspaces(): FakeWorkspaces {
@@ -36,6 +38,7 @@ export function fakeWorkspaces(): FakeWorkspaces {
     fastForwards: [],
     created: [],
     failCreate: null,
+    files: new Map(),
     archive(workspaceId) {
       active.delete(workspaceId);
     },
@@ -57,6 +60,9 @@ export function fakeWorkspaces(): FakeWorkspaces {
       const checkout = workspaces.checkouts.get(workspace.id);
       if (checkout === undefined) return { status: "failed", message: `No checkout at ${workspace.directory}.` };
       return checkout.outcome;
+    },
+    async fileAt({ sha, path }) {
+      return workspaces.files.get(`${sha}:${path}`) ?? null;
     },
     async isActive(workspaceId) {
       return active.has(workspaceId);

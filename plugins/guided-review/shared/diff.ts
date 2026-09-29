@@ -6,6 +6,9 @@ import { z } from "zod";
  * for GitHub's side and line, and GitLab's running counters for a `line_code`.
  */
 
+/** A run of a line's text and the syntax role Paseo's highlighter gave it, null for none. */
+export const SyntaxTokenSchema = z.object({ text: z.string(), style: z.string().nullable() });
+
 export const DiffLineSchema = z.object({
   kind: z.enum(["added", "removed", "context"]),
   /** The line without its `+`, `-` or space. */
@@ -24,6 +27,8 @@ export const DiffLineSchema = z.object({
   newPos: z.number().int(),
   /** The diff marks this line "\ No newline at end of file". */
   noNewlineAtEnd: z.boolean(),
+  /** The line's text cut into syntax tokens; absent where the language is not one Paseo highlights. */
+  tokens: z.array(SyntaxTokenSchema).optional(),
 });
 
 export const DiffHunkSchema = z.object({
@@ -60,5 +65,6 @@ export const FileDiffSchema = z.object({
 
 export type DiffLineKind = z.output<typeof DiffLineSchema>["kind"];
 export type DiffLine = z.output<typeof DiffLineSchema>;
+export type SyntaxToken = z.output<typeof SyntaxTokenSchema>;
 export type DiffHunk = z.output<typeof DiffHunkSchema>;
 export type FileDiff = z.output<typeof FileDiffSchema>;

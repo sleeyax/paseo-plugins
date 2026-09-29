@@ -1,7 +1,7 @@
 import type { PaseoApi } from "@getpaseo/client";
 import type { CommandRunner } from "../command-runner.ts";
 import { changeRequestHeadRef } from "../forge/port.ts";
-import { fastForward, readCheckout } from "./checkout.ts";
+import { fastForward, readCheckout, showFile } from "./checkout.ts";
 import type { WorkspacePort } from "./port.ts";
 import { isSameRepository, parseRemoteUrl } from "./remotes.ts";
 
@@ -33,6 +33,9 @@ export function createPaseoWorkspaces(options: PaseoWorkspacesOptions): Workspac
       };
     },
 
+    async fileAt({ workspace, sha, path }) {
+      return showFile(options.run, workspace.directory, sha, path);
+    },
     async fastForward({ workspace, branch, ref, headSha }) {
       return fastForward(options.run, { directory: workspace.directory, branch, fetchRef: changeRequestHeadRef(ref), headSha });
     },

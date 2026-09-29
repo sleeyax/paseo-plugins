@@ -43,6 +43,8 @@ export interface WorkspacePort {
    * and says why.
    */
   fastForward(input: { workspace: ReviewWorkspace; branch: string; ref: ChangeRequestRef; headSha: string }): Promise<FastForwardResult>;
+  /** A file's text at a commit of the workspace's repository; null when git cannot show it there. */
+  fileAt(input: { workspace: ReviewWorkspace; sha: string; path: string }): Promise<string | null>;
   /** The root of a Paseo project whose `origin` is this repository, if there is one. */
   findRepository(repository: RemoteRepository): Promise<string | null>;
   /**
