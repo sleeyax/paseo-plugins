@@ -44,7 +44,7 @@ export type GuideAgentCreateInput = {
   /** Tells the plugin's own agents apart from the reviewer's, across plugin restarts. */
   labels: Record<string, string>;
   prompt: string;
-  /** Passed on to providers that enforce a schema natively; the prompt carries it for the rest. */
+  /** Passed on only to providers that enforce a schema natively; the prompt carries it for every provider. */
   outputSchema?: Record<string, unknown>;
 };
 

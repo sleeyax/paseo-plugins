@@ -6,6 +6,7 @@ import { GuideAgentError, type GuideAgentPort } from "./port.ts";
  * prompt of a new agent, and only Codex and OpenCode enforce it, so the schema also goes in the
  * prompt and the reply is parsed here: the JSON is found in whatever the agent wrote around it, then
  * validated with zod. Paseo's own CLI does the same.
+ * The native schema goes only to the providers that enforce it, since a plugin provider that does not declare it, like claude-tty, refuses the agent outright.
  */
 
 export type JsonSchema = Record<string, unknown>;

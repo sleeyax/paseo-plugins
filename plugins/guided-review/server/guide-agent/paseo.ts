@@ -27,6 +27,11 @@ export type PaseoGuideAgents = GuideAgentPort & {
 export const DEFAULT_TURN_TIMEOUT_MS = 30 * 60_000;
 /** Each round answers every request pending at once, so this many means the agent is looping on them. */
 const MAX_PERMISSION_ROUNDS = 50;
+/**
+ * The providers that enforce Paseo's native output schema.
+ * Paseo does not tell a plugin which providers take one, and a provider that does not refuses the agent, so the schema goes to these alone.
+ */
+const NATIVE_SCHEMA_PROVIDERS = new Set(["codex", "opencode"]);
 /** Paseo caps an explicit agent title at 200 characters. */
 const MAX_TITLE = 200;
 
@@ -192,7 +197,7 @@ export function createPaseoGuideAgents(options: PaseoGuideAgentsOptions): PaseoG
           title: title.length <= MAX_TITLE ? title : `${title.slice(0, MAX_TITLE - 1)}…`,
           labels,
           prompt,
-          ...(outputSchema === undefined ? {} : { outputSchema }),
+          ...(outputSchema === undefined || !NATIVE_SCHEMA_PROVIDERS.has(provider) ? {} : { outputSchema }),
         });
         return { id: handle.id };
       } catch (error) {
