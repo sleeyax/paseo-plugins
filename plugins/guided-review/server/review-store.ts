@@ -71,7 +71,7 @@ export type DraftLink = { from: CommentOrigin; quote?: string; headSha: string; 
 /**
  * What the plugin keeps about the reviewer's drafts, which themselves live on the forge: the node
  * each was written from, by the forge's draft ID (or a paragraph's minted one), and on GitHub the
- * node comments in the pending review's body. None of it is ever posted.
+ * general comments a submit adds to the review body. Nothing else of it is ever posted.
  */
 export type DraftsRecord = { links: Record<string, DraftLink>; paragraphs: BodyParagraph[] };
 
@@ -167,8 +167,8 @@ export class ReviewStore {
   }
 
   /**
-   * The review body the reviewer has written so far, for a forge that keeps none before submit
-   * (GitLab); empty when there is none. It belongs to the review, not to a head.
+   * The review body the reviewer has written so far, kept here until submit; empty when there is
+   * none. It belongs to the review, not to a head.
    */
   async getReviewBody(id: string): Promise<string> {
     return (await readJson<{ body: string }>(path.join(this.directoryOf(id), REVIEW_BODY_FILE)))?.body ?? "";

@@ -307,7 +307,7 @@ test("a node's comment is worded about its concept, to stand on its own with no 
     ),
   ]);
   assert.deepEqual(forge.created, []);
-  assert.equal(forge.bodies.get(URL), undefined, "nothing is written to the review body");
+  assert.deepEqual((await service.listDrafts({ reviewId: REVIEW_ID })).drafts, [], "no draft is kept");
 });
 
 test("on GitLab a node's comment is worded as a thread of its own on the merge request", () => {

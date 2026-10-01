@@ -41,8 +41,10 @@ export type FakeForge = Forge & {
   failFetchHead: Error | null;
   /** How many times the head alone was read. */
   headReads: number;
-  /** The review body the forge keeps, by change request URL, as GitHub keeps it on the pending review. */
-  bodies: Map<string, string>;
+  /** Every comment posted outside a review, by change request URL, in order. */
+  comments: { url: string; body: string }[];
+  /** When set, the comment post after this many more fails with it. */
+  failComment: { after: number; error: Error } | null;
   /** Every submit, with what it was sent. */
   submissions: { target: DraftTarget; submission: ReviewSubmission }[];
   /** When set, the next submit answers with it; otherwise a submit lands whole, in one step. */
@@ -79,7 +81,8 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     created: [],
     failFetchHead: null,
     headReads: 0,
-    bodies: new Map(),
+    comments: [],
+    failComment: null,
     submissions: [],
     submitOutcome: null,
     discarded: [],
@@ -148,18 +151,18 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
         drafts.filter((draft) => draft.id !== draftId),
       );
     },
-    // GitHub keeps the body on the pending review; GitLab keeps none, so the service does.
-    reviewBody:
-      kind === "github"
-        ? {
-            async read(ref) {
-              return forge.bodies.get(ref.url) ?? "";
-            },
-            async write(target, body) {
-              forge.bodies.set(target.ref.url, body);
-            },
-          }
-        : null,
+    takesGeneralDrafts: kind === "gitlab",
+    async postComment(ref, body) {
+      if (forge.failComment) {
+        if (forge.failComment.after === 0) {
+          const { error } = forge.failComment;
+          forge.failComment = null;
+          throw error;
+        }
+        forge.failComment.after -= 1;
+      }
+      forge.comments.push({ url: ref.url, body });
+    },
     async submitReview(target, submission) {
       forge.submissions.push(structuredClone({ target, submission }));
       const outcome = forge.submitOutcome ?? {
@@ -169,14 +172,12 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
       forge.submitOutcome = null;
       if (outcome.published) {
         forge.drafts.delete(target.ref.url);
-        forge.bodies.delete(target.ref.url);
       }
       return structuredClone(outcome);
     },
     async discardReview(ref) {
       forge.discarded.push(ref.url);
       forge.drafts.delete(ref.url);
-      forge.bodies.delete(ref.url);
     },
   };
   return forge;

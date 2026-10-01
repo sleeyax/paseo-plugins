@@ -92,7 +92,7 @@ test("on GitLab a node's comment is an MR-level draft note, and only the plugin 
   assert.deepEqual(await kept(host), { links: {}, paragraphs: [] });
 });
 
-test("on GitHub a node's comment is a paragraph of the pending review's body, after the reviewer's own text", async (t) => {
+test("on GitHub a node's comment is kept here until a submit posts it as a comment of its own", async (t) => {
   const host = await withGuide(t, "github");
   const { forge, service, url, reviewId } = host;
   await service.saveReviewBody({ reviewId, body: "Looks good overall." });
@@ -101,7 +101,6 @@ test("on GitHub a node's comment is a paragraph of the pending review's body, af
   const upload = await commentOn(host, "uploader", "About the upload loop: is every attempt logged?");
 
   assert.deepEqual(forge.created, [], "no thread is started");
-  assert.equal(forge.bodies.get(url), "Looks good overall.\n\nAbout the retry handling: why full jitter?\n\nAbout the upload loop: is every attempt logged?");
   assert.match(retry.id, /^paragraph-/);
   assert.deepEqual(retry, { id: retry.id, body: "About the retry handling: why full jitter?", location: GENERAL, from: node("retry-policy"), quote: null });
   assert.deepEqual((await service.listDrafts({ reviewId })).drafts, [retry, upload]);
@@ -109,46 +108,93 @@ test("on GitHub a node's comment is a paragraph of the pending review's body, af
   // Finish review shows and saves the reviewer's own text; the node comments stay where they are.
   assert.equal((await service.finish({ reviewId })).body, "Looks good overall.");
   await service.saveReviewBody({ reviewId, body: "Looks good.\n\nTwo questions." });
-  assert.equal(forge.bodies.get(url), `Looks good.\n\nTwo questions.\n\n${retry.body}\n\n${upload.body}`);
+  assert.equal((await service.finish({ reviewId })).body, "Looks good.\n\nTwo questions.");
 
   await service.updateDraft({ reviewId, draftId: retry.id, body: "About the retry handling: why jitter at all?" });
   await service.deleteDraft({ reviewId, draftId: upload.id });
-  assert.equal(forge.bodies.get(url), "Looks good.\n\nTwo questions.\n\nAbout the retry handling: why jitter at all?");
   assert.deepEqual((await host.restart().listDrafts({ reviewId })).drafts, [{ ...retry, body: "About the retry handling: why jitter at all?" }]);
   assert.deepEqual(await kept(host), {
     links: { [retry.id]: { from: node("retry-policy"), headSha: HEAD, agentId: "agent-1" } },
     paragraphs: [{ id: retry.id, body: "About the retry handling: why jitter at all?" }],
   });
+
+  await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Looks good.\n\nTwo questions." });
+  assert.deepEqual(forge.comments, [{ url, body: "About the retry handling: why jitter at all?" }]);
+  assert.deepEqual(forge.submissions[0]?.submission, { verdict: "comment", body: "Looks good.\n\nTwo questions." });
+  assert.deepEqual(await kept(host), { links: {}, paragraphs: [] }, "a published comment is gone");
 });
 
-test("on GitHub a node comment edited on the web becomes part of the reviewer's own text, which loses nothing", async (t) => {
+test("on GitHub each node comment is posted on its own before the review, which carries only the reviewer's text", async (t) => {
   const host = await withGuide(t, "github");
   const { forge, service, url, reviewId } = host;
-  const retry = await commentOn(host, "retry-policy", "About the retry handling: why full jitter?");
-  const upload = await commentOn(host, "uploader", "About the upload loop: is every attempt logged?");
-
-  // GitHub's web page keeps what it is sent with CRLF line ends.
-  forge.bodies.set(url, `Written on the web.\r\n\r\n${retry.body} And the cap?\r\n\r\n${upload.body}`);
-
-  assert.deepEqual((await service.listDrafts({ reviewId })).drafts, [upload]);
-  assert.equal((await service.finish({ reviewId })).body, `Written on the web.\n\n${retry.body} And the cap?`);
-  await assert.rejects(
-    service.updateDraft({ reviewId, draftId: retry.id, body: "Anything." }),
-    new Error("This comment is no longer in your pending review's body as it was written; it was edited or removed on GitHub."),
-  );
-});
-
-test("on GitHub the node comments are published with the body, and nothing is kept of them after", async (t) => {
-  const host = await withGuide(t, "github");
-  const { forge, service, reviewId } = host;
   await commentOn(host, "retry-policy", "About the retry handling: why full jitter?");
+  await commentOn(host, "uploader", "About the upload loop:\n\nis every attempt logged?");
 
-  const result = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Looks good overall." });
+  const result = await service.submit({ reviewId, headSha: HEAD, verdict: "approve", body: "Looks good overall." });
 
-  assert.equal(result.status, "submitted");
-  assert.equal(forge.submissions[0]?.submission.body, "Looks good overall.\n\nAbout the retry handling: why full jitter?");
+  assert.deepEqual(result, {
+    status: "submitted",
+    published: true,
+    steps: [
+      { id: "comment", label: 'Post your comment "About the retry handling: why full jitter?"', status: "done", message: null },
+      { id: "comment", label: 'Post your comment "About the upload loop:…"', status: "done", message: null },
+      { id: "submit", label: "Publish the review", status: "done", message: null },
+    ],
+  });
+  assert.deepEqual(forge.comments, [
+    { url, body: "About the retry handling: why full jitter?" },
+    { url, body: "About the upload loop:\n\nis every attempt logged?" },
+  ]);
+  assert.deepEqual(forge.submissions[0]?.submission, { verdict: "approve", body: "Looks good overall." });
   assert.deepEqual(await kept(host), { links: {}, paragraphs: [] });
   assert.deepEqual((await service.listDrafts({ reviewId })).drafts, []);
+});
+
+test("on GitHub a comment that is not posted stops the submit, and trying again posts none twice", async (t) => {
+  const host = await withGuide(t, "github");
+  const { forge, service, url, reviewId } = host;
+  await commentOn(host, "retry-policy", "About the retry handling: why full jitter?");
+  const upload = await commentOn(host, "uploader", "About the upload loop: is every attempt logged?");
+  forge.failComment = { after: 1, error: new Error("gh failed: HTTP 502") };
+
+  const failed = await service.submit({ reviewId, headSha: HEAD, verdict: "approve", body: "Looks good overall." });
+
+  assert.deepEqual(failed, {
+    status: "partial",
+    published: false,
+    steps: [
+      { id: "comment", label: 'Post your comment "About the retry handling: why full jitter?"', status: "done", message: null },
+      { id: "comment", label: 'Post your comment "About the upload loop: is every attempt logged?"', status: "failed", message: "gh failed: HTTP 502" },
+      { id: "submit", label: "Publish the review", status: "skipped", message: "Not tried, since a comment was not posted." },
+    ],
+  });
+  assert.deepEqual(forge.submissions, []);
+  assert.deepEqual((await service.listDrafts({ reviewId })).drafts, [upload], "the posted comment is no longer a draft");
+  assert.equal((await service.finish({ reviewId })).body, "Looks good overall.");
+
+  const retried = await service.submit({ reviewId, headSha: HEAD, verdict: "approve", body: "Looks good overall." });
+
+  assert.equal(retried.status, "submitted");
+  assert.deepEqual(forge.comments, [
+    { url, body: "About the retry handling: why full jitter?" },
+    { url, body: "About the upload loop: is every attempt logged?" },
+  ]);
+  assert.equal(forge.submissions.length, 1);
+});
+
+test("on GitHub a Comment with nothing but node comments posts them and no empty review", async (t) => {
+  const host = await withGuide(t, "github");
+  const { forge, service, url, reviewId } = host;
+  await commentOn(host, "retry-policy", "About the retry handling: why full jitter?");
+
+  const result = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "" });
+
+  assert.equal(result.status, "submitted");
+  assert.equal(result.published, true);
+  assert.deepEqual(forge.comments, [{ url, body: "About the retry handling: why full jitter?" }]);
+  assert.deepEqual(forge.submissions, []);
+  assert.deepEqual(forge.discarded, [url], "a pending review left empty is thrown away");
+  assert.deepEqual(await kept(host), { links: {}, paragraphs: [] });
 });
 
 test("on GitLab the node comments are MR-level drafts the publish takes along, so the body sent is the reviewer's alone", async (t) => {
@@ -165,23 +211,21 @@ test("on GitLab the node comments are MR-level drafts the publish takes along, s
   assert.deepEqual((await service.listDrafts({ reviewId })).drafts, []);
 });
 
-test("a submit that did not publish keeps every node comment and link, on either forge", async (t) => {
-  for (const kind of ["github", "gitlab"] as const) {
-    const host = await withGuide(t, kind);
-    const { forge, service, reviewId } = host;
-    const draft = await commentOn(host, "retry-policy", "About the retry handling: why full jitter?");
-    const before = await kept(host);
-    forge.submitOutcome = {
-      published: false,
-      steps: [{ id: "publish", label: "Publish your drafts", status: "failed", message: "HTTP 500" }],
-    };
+test("on GitLab a submit that did not publish keeps every node comment and link", async (t) => {
+  const host = await withGuide(t, "gitlab");
+  const { forge, service, reviewId } = host;
+  const draft = await commentOn(host, "retry-policy", "About the retry handling: why full jitter?");
+  const before = await kept(host);
+  forge.submitOutcome = {
+    published: false,
+    steps: [{ id: "publish", label: "Publish your drafts", status: "failed", message: "HTTP 500" }],
+  };
 
-    const result = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Looks good overall." });
+  const result = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Looks good overall." });
 
-    assert.equal(result.status, "failed", kind);
-    assert.deepEqual(await kept(host), before, kind);
-    assert.deepEqual((await service.listDrafts({ reviewId })).drafts, [draft], kind);
-  }
+  assert.equal(result.status, "failed");
+  assert.deepEqual(await kept(host), before);
+  assert.deepEqual((await service.listDrafts({ reviewId })).drafts, [draft]);
 });
 
 test("a discard the forge failed keeps every node comment and link, on either forge", async (t) => {
@@ -253,7 +297,7 @@ test("a comment on the overview is a general draft on either forge, and the pass
       from: { kind: "overview" },
       quote: { text: passage, earlier: false },
     }, kind);
-    if (kind === "github") assert.equal(forge.bodies.get(url), "Why is a 429 not transient?", kind);
+    if (kind === "github") assert.deepEqual(forge.created, [], kind);
     else assert.deepEqual(forge.created.map(({ anchor, body }) => ({ anchor, body })), [{ anchor: GENERAL, body: "Why is a 429 not transient?" }], kind);
     assert.deepEqual((await kept(host) as { links: unknown }).links, {
       [draft.id]: { from: { kind: "overview" }, quote: passage, headSha: HEAD, agentId: "agent-1" },

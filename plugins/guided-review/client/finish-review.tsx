@@ -108,6 +108,8 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate, onC
       setResult(answer);
       if (answer.status === "refused") await finish.refetch();
       else if (answer.published) await afterPublishing();
+      // GitHub's general comments are posted before the review, so some may be out even when it is not.
+      else drafts.refresh();
     },
   });
   const discard = useMutation({

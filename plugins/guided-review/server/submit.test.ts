@@ -54,11 +54,11 @@ function allowed(verdicts: VerdictOption[]): string[] {
 }
 
 test("on someone else's open PR at the guide's head every verdict is on offer, and a submit sends the body with it", async (t) => {
-  const { service, forge, reviewId, url, changeRequest } = await withReview(t);
-  forge.bodies.set(url, "Started on github.com");
+  const { service, forge, reviewId, changeRequest } = await withReview(t);
+  await service.saveReviewBody({ reviewId, body: "Started earlier" });
 
   const finish = await service.finish({ reviewId });
-  assert.equal(finish.body, "Started on github.com");
+  assert.equal(finish.body, "Started earlier");
   assert.deepEqual(allowed(finish.verdicts), ["approve", "request-changes", "comment"]);
   assert.equal(finish.head.moved, false);
 
@@ -212,12 +212,11 @@ test("a submit whose later steps fail says which landed and which did not", asyn
   });
 });
 
-test("the body is written to the forge where it keeps one, and discarding throws the review away", async (t) => {
+test("discarding throws the review away with its drafts and body", async (t) => {
   const { service, forge, reviewId, url } = await withReview(t);
   await service.createDraft({ reviewId, headSha: HEAD, location: { kind: "file", path: "src/retry.ts" }, body: "Why a new file?" });
 
   await service.saveReviewBody({ reviewId, body: " Mostly questions.\n" });
-  assert.equal(forge.bodies.get(url), "Mostly questions.");
   assert.equal((await service.finish({ reviewId })).body, "Mostly questions.");
 
   await service.discard({ reviewId });
@@ -226,30 +225,32 @@ test("the body is written to the forge where it keeps one, and discarding throws
   assert.equal((await service.finish({ reviewId })).body, "");
 });
 
-test("on a forge that keeps no body before submit, the body is kept here until it is published", async (t) => {
-  const { service, forge, reviewId, restart } = await withReview(t, { kind: "gitlab" });
+for (const kind of ["github", "gitlab"] as const) {
+  test(`on ${kind} the body is kept here until it is published`, async (t) => {
+    const { service, forge, reviewId, restart } = await withReview(t, { kind });
 
-  await service.saveReviewBody({ reviewId, body: "Mostly questions." });
-  assert.equal((await restart().finish({ reviewId })).body, "Mostly questions.", "it survives a restart");
+    await service.saveReviewBody({ reviewId, body: "Mostly questions." });
+    assert.equal((await restart().finish({ reviewId })).body, "Mostly questions.", "it survives a restart");
 
-  // A submit whose publish failed keeps the body it was sent, edits included.
-  forge.submitOutcome = {
-    published: false,
-    steps: [{ id: "publish", label: "Publish the drafts and the review body", status: "failed", message: "glab failed: 500" }],
-  };
-  const failed = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Mostly questions, and one ask." });
-  assert.equal(failed.status, "failed");
-  assert.equal((await service.finish({ reviewId })).body, "Mostly questions, and one ask.");
+    // A submit whose publish failed keeps the body it was sent, edits included.
+    forge.submitOutcome = {
+      published: false,
+      steps: [{ id: "publish", label: "Publish the drafts and the review body", status: "failed", message: "HTTP 500" }],
+    };
+    const failed = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Mostly questions, and one ask." });
+    assert.equal(failed.status, "failed");
+    assert.equal((await service.finish({ reviewId })).body, "Mostly questions, and one ask.");
 
-  const submitted = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Mostly questions, and one ask." });
-  assert.equal(submitted.status, "submitted");
-  assert.equal(forge.submissions[1]?.submission.body, "Mostly questions, and one ask.");
-  assert.equal((await service.finish({ reviewId })).body, "", "a published body is gone");
+    const submitted = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Mostly questions, and one ask." });
+    assert.equal(submitted.status, "submitted");
+    assert.equal(forge.submissions[1]?.submission.body, "Mostly questions, and one ask.");
+    assert.equal((await service.finish({ reviewId })).body, "", "a published body is gone");
 
-  await service.saveReviewBody({ reviewId, body: "Second round." });
-  await service.discard({ reviewId });
-  assert.equal((await service.finish({ reviewId })).body, "", "a discarded body is gone");
-});
+    await service.saveReviewBody({ reviewId, body: "Second round." });
+    await service.discard({ reviewId });
+    assert.equal((await service.finish({ reviewId })).body, "", "a discarded body is gone");
+  });
+}
 
 test("on an MR the reasons say MR", async (t) => {
   const { service, reviewId } = await withReview(t, { kind: "gitlab", viewer: "author" });

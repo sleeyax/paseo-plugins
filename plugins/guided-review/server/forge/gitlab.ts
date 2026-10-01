@@ -507,8 +507,11 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       await deleteDraftNote(ref, draftNoteId(draftId));
     },
 
-    // GitLab has no draft review body, so the service keeps it until submit.
-    reviewBody: null,
+    takesGeneralDrafts: true,
+
+    async postComment(ref, body) {
+      await post(ref, `${await mergeRequest(ref)}/notes`, { body });
+    },
 
     /**
      * Publishes every draft note at once with `bulk_publish`, the body as its `note` and the verdict
