@@ -3,7 +3,15 @@ import React, { createContext, useContext, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
 import type { CommentOrigin } from "../shared/drafts.ts";
-import { coveredPaths, type Guide, type GuideDecision, type GuideState, type LayeredGuide, type LayeredNode } from "../shared/guide.ts";
+import {
+  coveredPaths,
+  type Guide,
+  type GuideDecision,
+  type GuideDependency,
+  type GuideState,
+  type LayeredGuide,
+  type LayeredNode,
+} from "../shared/guide.ts";
 import { EntryLinksContext } from "./entry-links.ts";
 import { guideGroups, layerTitle, type Entry } from "./guide-entries.ts";
 import { AskAction, type AskControl } from "./ask-action.tsx";
@@ -213,20 +221,7 @@ export function NodeCard({
             <Body colors={colors} muted item={{ key: "summary", text: node.summary }}>
               <GuideText text={node.summary} colors={colors} />
             </Body>
-            {node.dependencies.length > 0 ? (
-              <>
-                <Label colors={colors}>Builds on</Label>
-                {node.dependencies.map((dependency) => {
-                  const title = titles.get(dependency.nodeId) ?? dependency.nodeId;
-                  return (
-                    <Bullet key={dependency.nodeId} colors={colors} item={{ key: `dependency:${dependency.nodeId}`, text: `${title}: ${dependency.reason}` }}>
-                      <NodeLink nodeId={dependency.nodeId} title={title} colors={colors} />
-                      : <GuideText text={dependency.reason} colors={colors} />
-                    </Bullet>
-                  );
-                })}
-              </>
-            ) : null}
+            {node.dependencies.length > 0 ? <Dependencies dependencies={node.dependencies} titles={titles} colors={colors} /> : null}
             <Body colors={colors} item={{ key: "explanation", text: node.explanation }}>
               <GuideText text={node.explanation} colors={colors} />
             </Body>
@@ -248,6 +243,39 @@ export function NodeCard({
         <NodeComments nodeId={node.id} colors={colors} selected={selected} />
       </Collapsible>
     </Card>
+  );
+}
+
+/** The nodes a node builds on: on one line when none has a reason to give, else a bullet each. */
+function Dependencies({ dependencies, titles, colors }: { dependencies: readonly GuideDependency[]; titles: ReadonlyMap<string, string>; colors: Colors }) {
+  const titled = dependencies.map((dependency) => ({ ...dependency, title: titles.get(dependency.nodeId) ?? dependency.nodeId }));
+  if (titled.every((dependency) => dependency.reason === null)) {
+    return (
+      <Body colors={colors} muted item={{ key: "dependencies", text: `Builds on ${titled.map((dependency) => dependency.title).join(", ")}` }}>
+        {"Builds on "}
+        {titled.map((dependency, index) => (
+          <React.Fragment key={dependency.nodeId}>
+            {index > 0 ? ", " : null}
+            <NodeLink nodeId={dependency.nodeId} title={dependency.title} colors={colors} />
+          </React.Fragment>
+        ))}
+      </Body>
+    );
+  }
+  return (
+    <>
+      <Label colors={colors}>Builds on</Label>
+      {titled.map(({ nodeId, title, reason }) => (
+        <Bullet key={nodeId} colors={colors} item={{ key: `dependency:${nodeId}`, text: reason === null ? title : `${title}: ${reason}` }}>
+          <NodeLink nodeId={nodeId} title={title} colors={colors} />
+          {reason === null ? null : (
+            <>
+              : <GuideText text={reason} colors={colors} />
+            </>
+          )}
+        </Bullet>
+      ))}
+    </>
   );
 }
 
