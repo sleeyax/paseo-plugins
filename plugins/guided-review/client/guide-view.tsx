@@ -1,9 +1,10 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import React, { createContext, useContext, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
-import type { GuideSubject } from "../shared/contracts.ts";
+import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
 import type { CommentOrigin } from "../shared/drafts.ts";
 import { coveredPaths, type Guide, type GuideDecision, type GuideState, type LayeredGuide, type LayeredNode } from "../shared/guide.ts";
+import { EntryLinksContext } from "./entry-links.ts";
 import { guideGroups, layerTitle, type Entry } from "./guide-entries.ts";
 import { AskAction, type AskControl } from "./ask-action.tsx";
 import { NodeCode } from "./diff-view.tsx";
@@ -158,9 +159,7 @@ export function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
             const title = titles.get(entry.nodeId) ?? entry.nodeId;
             return (
               <Bullet key={index} colors={colors} item={{ key: `attention:${index}`, text: `${title}: ${entry.reason}` }}>
-                <Text style={{ fontWeight: "600" }}>
-                  <GuideText text={title} colors={colors} />
-                </Text>
+                <NodeLink nodeId={entry.nodeId} title={title} colors={colors} />
                 : <GuideText text={entry.reason} colors={colors} />
               </Bullet>
             );
@@ -228,9 +227,7 @@ export function NodeCard({
                   const title = titles.get(dependency.nodeId) ?? dependency.nodeId;
                   return (
                     <Bullet key={dependency.nodeId} colors={colors} item={{ key: `dependency:${dependency.nodeId}`, text: `${title}: ${dependency.reason}` }}>
-                      <Text style={{ fontWeight: "600" }}>
-                        <GuideText text={title} colors={colors} />
-                      </Text>
+                      <NodeLink nodeId={dependency.nodeId} title={title} colors={colors} />
                       : <GuideText text={dependency.reason} colors={colors} />
                     </Bullet>
                   );
@@ -258,6 +255,21 @@ export function NodeCard({
         <NodeComments nodeId={node.id} colors={colors} selected={selected} />
       </Collapsible>
     </Card>
+  );
+}
+
+/** A concept's title in another part of the guide, which selects that concept where there is a navigator to select it in. */
+function NodeLink({ nodeId, title, colors }: { nodeId: string; title: string; colors: Colors }) {
+  const links = useContext(EntryLinksContext);
+  const key = subjectKey({ kind: "node", nodeId });
+  const linked = links !== null && links.groups.some((group) => group.entries.some((entry) => entry.key === key));
+  return (
+    <Text
+      style={{ fontWeight: "600", ...(linked ? { color: colors.accent } : {}) }}
+      {...(linked ? { onPress: () => links.select(key), accessibilityRole: "link" as const } : {})}
+    >
+      <GuideText text={title} colors={colors} />
+    </Text>
   );
 }
 

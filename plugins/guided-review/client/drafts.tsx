@@ -9,6 +9,8 @@ import type { CommentSubject } from "../shared/contracts.ts";
 import { CommentBox, Quote, type CommentBoxAction } from "./comment-box.tsx";
 import { GuideText } from "./guide-text.tsx";
 import { plainText } from "./inline-markdown.ts";
+import { EntryLinksContext } from "./entry-links.ts";
+import { draftEntry } from "./guide-entries.ts";
 import { HIGHLIGHTS_TEXT } from "./text-selection.ts";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
@@ -245,6 +247,7 @@ export function DraftCard({
   place,
   colors,
   showPath,
+  onShow,
 }: {
   control: DraftsControl;
   draft: LinkedDraft;
@@ -253,6 +256,8 @@ export function DraftCard({
   colors: Colors;
   /** Name the file too, as the list does; beside its line in the diff the file goes without saying. */
   showPath?: boolean;
+  /** Selects the entry the draft was written from, which its place line then links to. */
+  onShow?: (() => void) | undefined;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -299,7 +304,13 @@ export function DraftCard({
         backgroundColor: colors.surface1,
       }}
     >
-      <Text style={{ ...small, color: colors.foregroundMuted }}>{where}</Text>
+      {onShow ? (
+        <Pressable onPress={onShow} accessibilityRole="link" style={{ alignSelf: "flex-start" }}>
+          <Text style={{ ...small, color: colors.accent }}>{where}</Text>
+        </Pressable>
+      ) : (
+        <Text style={{ ...small, color: colors.foregroundMuted }}>{where}</Text>
+      )}
       {draft.quote ? <Quote colors={colors} text={draft.quote.text} earlier={draft.quote.earlier} /> : null}
       <Text selectable style={{ color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>
         {draft.body}
@@ -487,6 +498,11 @@ function CommentOnSelection({ colors, onOpen }: { colors: Colors; onOpen: () => 
 
 /** Every draft of the review, grouped by the node it was written from, above the guide. */
 export function DraftsSection({ control, colors }: { control: DraftsControl; colors: Colors }) {
+  const links = useContext(EntryLinksContext);
+  const showOf = (draft: LinkedDraft) => {
+    const key = links === null ? null : draftEntry(links.groups, draft);
+    return key === null ? undefined : () => links!.select(key);
+  };
   const body = { fontSize: fontSize.base, lineHeight: leading(fontSize.base) };
   const small = { fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) };
   const count = control.drafts.length;
@@ -527,7 +543,7 @@ export function DraftsSection({ control, colors }: { control: DraftsControl; col
                 <GuideText text={group.title} colors={colors} />
               </Text>
               {group.drafts.map((draft) => (
-                <DraftCard key={draft.id} control={control} draft={draft} place="list" colors={colors} showPath />
+                <DraftCard key={draft.id} control={control} draft={draft} place="list" colors={colors} showPath onShow={showOf(draft)} />
               ))}
             </View>
           ))}
@@ -537,7 +553,7 @@ export function DraftsSection({ control, colors }: { control: DraftsControl; col
                 <Text style={{ ...small, color: colors.foreground, fontWeight: "600" }}>Not from a concept of this guide</Text>
               ) : null}
               {unlinked.map((draft) => (
-                <DraftCard key={draft.id} control={control} draft={draft} place="list" colors={colors} showPath />
+                <DraftCard key={draft.id} control={control} draft={draft} place="list" colors={colors} showPath onShow={showOf(draft)} />
               ))}
             </View>
           ) : null}

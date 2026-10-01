@@ -6,6 +6,8 @@ import * as contracts from "../shared/contracts.ts";
 import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { isUnderstood, type GuideProgress, type Tally } from "../shared/progress.ts";
+import { EntryLinksContext } from "./entry-links.ts";
+import { firstOpenInGroup, nextNotUnderstood, OVERVIEW_KEY } from "./guide-entries.ts";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 
 /**
@@ -129,7 +131,17 @@ function MarkToggle({ place, subjects, label, colors }: { place: string; subject
 /** Progress through the guide trunk first: each layer from the foundations up, then Tests, Documentation, Supporting, Unsorted and overall. */
 export function ProgressSummary({ colors, layerTitle }: { colors: Colors; layerTitle: (layer: number) => string }) {
   const progress = useContext(ProgressContext)?.progress ?? null;
+  const links = useContext(EntryLinksContext);
   if (progress === null) return null;
+  /** Selects the group's first entry not yet understood, or for the overall row, the guide's; undefined where nothing is linked. */
+  const open = (groupId: string | null) => {
+    if (links === null) return undefined;
+    const target =
+      groupId === null
+        ? nextNotUnderstood(links.groups, OVERVIEW_KEY, progress)
+        : ((group) => (group === undefined ? null : firstOpenInGroup(group, progress)))(links.groups.find((group) => group.id === groupId));
+    return target === null ? undefined : () => links.select(target);
+  };
   const next =
     progress.nextLayer === null
       ? "Every concept is understood."
@@ -147,26 +159,31 @@ export function ProgressSummary({ colors, layerTitle }: { colors: Colors; layerT
         backgroundColor: colors.surface1,
       }}
     >
-      <Row colors={colors} label="Understood" tally={progress.overall} strong />
+      <Row colors={colors} label="Understood" tally={progress.overall} strong onPress={open(null)} />
       {progress.layers.map((tally, layer) => (
-        <Row key={layer} colors={colors} label={layerTitle(layer)} tally={tally} />
+        <Row key={layer} colors={colors} label={layerTitle(layer)} tally={tally} onPress={open(`layer:${layer}`)} />
       ))}
-      {progress.tests.total > 0 ? <Row colors={colors} label="Tests" tally={progress.tests} /> : null}
-      {progress.docs.total > 0 ? <Row colors={colors} label="Documentation" tally={progress.docs} /> : null}
-      {progress.supporting.total > 0 ? <Row colors={colors} label="Supporting" tally={progress.supporting} /> : null}
-      {progress.unsorted.total > 0 ? <Row colors={colors} label="Unsorted" tally={progress.unsorted} /> : null}
+      {progress.tests.total > 0 ? <Row colors={colors} label="Tests" tally={progress.tests} onPress={open("tests")} /> : null}
+      {progress.docs.total > 0 ? <Row colors={colors} label="Documentation" tally={progress.docs} onPress={open("docs")} /> : null}
+      {progress.supporting.total > 0 ? <Row colors={colors} label="Supporting" tally={progress.supporting} onPress={open("supporting")} /> : null}
+      {progress.unsorted.total > 0 ? <Row colors={colors} label="Unsorted" tally={progress.unsorted} onPress={open("unsorted")} /> : null}
       <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>{next}</Text>
     </View>
   );
 }
 
-function Row({ colors, label, tally, strong }: { colors: Colors; label: string; tally: Tally; strong?: boolean }) {
+function Row({ colors, label, tally, strong, onPress }: { colors: Colors; label: string; tally: Tally; strong?: boolean; onPress?: (() => void) | undefined }) {
   const done = tally.total > 0 && tally.understood === tally.total;
   const size = strong ? fontSize.base : fontSize.sm;
   const text = { fontSize: size, lineHeight: leading(size), fontWeight: strong ? ("600" as const) : ("400" as const) };
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[3] }}>
-      <Text style={{ ...text, width: 110, color: colors.foreground }} numberOfLines={1}>
+    <Pressable
+      onPress={onPress}
+      disabled={onPress === undefined}
+      accessibilityRole={onPress === undefined ? undefined : "button"}
+      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: spacing[3], opacity: pressed ? 0.85 : 1 })}
+    >
+      <Text style={{ ...text, width: 110, color: onPress === undefined ? colors.foreground : colors.accent }} numberOfLines={1}>
         {label}
       </Text>
       <View style={{ flex: 1, height: 6, borderRadius: radius.full, backgroundColor: colors.surface2, overflow: "hidden" }}>
@@ -181,6 +198,6 @@ function Row({ colors, label, tally, strong }: { colors: Colors; label: string; 
       <Text style={{ ...text, minWidth: 40, textAlign: "right", color: done ? colors.statusSuccess : colors.foregroundMuted }}>
         {tally.understood}/{tally.total}
       </Text>
-    </View>
+    </Pressable>
   );
 }
