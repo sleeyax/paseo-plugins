@@ -3,7 +3,8 @@ import React, { createContext, useContext, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { GuideSubject } from "../shared/contracts.ts";
 import type { CommentOrigin } from "../shared/drafts.ts";
-import { coveredPaths, splitSupporting, type Guide, type GuideDecision, type GuideState, type LayeredGuide, type LayeredNode, type SupportingEntry } from "../shared/guide.ts";
+import { coveredPaths, type Guide, type GuideDecision, type GuideState, type LayeredGuide, type LayeredNode } from "../shared/guide.ts";
+import { guideGroups, layerTitle, type Entry } from "./guide-entries.ts";
 import { AskAction, type AskControl } from "./ask-action.tsx";
 import { NodeCode } from "./diff-view.tsx";
 import { ItemCommentBox, NodeComments, OverviewComments, useCommentOnHold, useCommentOnRelease, type Selected } from "./drafts.tsx";
@@ -87,96 +88,34 @@ function Tree({
   ask: AskControl;
 }) {
   const colors = theme.colors;
-  const fileCode = (file: string) => <NodeCode reviewId={reviewId} agentId={agentId} subject={{ kind: "file", path: file }} theme={theme} />;
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
-  const layers: LayeredNode[][] = [];
-  for (const node of guide.nodes) (layers[node.layer] ??= []).push(node);
-  const { tests, docs, supporting } = splitSupporting(guide.supporting);
+  const code = (entry: Entry) => <NodeCode reviewId={reviewId} agentId={agentId} subject={entry.subject} theme={theme} />;
   return (
     <>
       <ProgressSummary colors={colors} layerTitle={layerTitle} />
-      {/* A node's layer is one past a node's it builds on, so no layer is empty. */}
-      {layers.map((nodes, layer) => (
-        <React.Fragment key={layer}>
-          <Heading colors={colors} subjects={nodes.map((node) => ({ kind: "node", nodeId: node.id }))}>
-            {layerTitle(layer)}
+      {guideGroups(guide).map((group) => (
+        <React.Fragment key={group.id}>
+          <Heading colors={colors} subjects={group.entries.map((entry) => entry.subject)}>
+            {group.title}
           </Heading>
-          {nodes.map((node) => (
-            <NodeCard
-              key={node.id}
-              node={node}
-              titles={titles}
-              colors={colors}
-              ask={ask}
-              code={<NodeCode reviewId={reviewId} agentId={agentId} subject={{ kind: "node", nodeId: node.id }} theme={theme} />}
-            />
-          ))}
+          {group.kind === "layer" ? (
+            group.entries.map((entry) =>
+              entry.kind === "node" ? <NodeCard key={entry.key} node={entry.node} titles={titles} colors={colors} ask={ask} code={code(entry)} /> : null,
+            )
+          ) : (
+            <Card colors={colors} light={group.kind !== "unsorted"}>
+              {group.kind === "unsorted" ? (
+                <Body colors={colors} muted>
+                  The guide agent placed these changes nowhere, so no concept explains them. Where a concept covers part of a file, only the rest is here.
+                </Body>
+              ) : null}
+              {group.entries.map((entry) => (entry.kind === "file" ? <FileEntry key={entry.key} colors={colors} entry={entry} ask={ask} code={code(entry)} /> : null))}
+            </Card>
+          )}
         </React.Fragment>
       ))}
-      {(
-        [
-          ["Tests", tests],
-          ["Documentation", docs],
-        ] as const
-      ).map(([title, entries]) =>
-        entries.length > 0 ? (
-          <React.Fragment key={title}>
-            <Heading colors={colors} subjects={filesOf(entries)}>
-              {title}
-            </Heading>
-            <Card colors={colors} light>
-              {entries.map((entry) => (
-                <FileEntry key={entry.path} colors={colors} path={entry.path} ask={ask} code={fileCode(entry.path)} />
-              ))}
-            </Card>
-          </React.Fragment>
-        ) : null,
-      )}
-      {supporting.length > 0 ? (
-        <>
-          <Heading colors={colors} subjects={filesOf(supporting)}>
-            Supporting
-          </Heading>
-          <Card colors={colors} light>
-            {supporting.map((entry) => (
-              <FileEntry
-                key={entry.path}
-                colors={colors}
-                path={entry.path}
-                note={entry.category}
-                ask={ask}
-                folded={entry.category === "lockfile" || entry.category === "generated"}
-                code={fileCode(entry.path)}
-              />
-            ))}
-          </Card>
-        </>
-      ) : null}
-      {guide.unsorted.length > 0 ? (
-        <>
-          <Heading colors={colors} subjects={guide.unsorted.map((path) => ({ kind: "file", path }))}>
-            Unsorted
-          </Heading>
-          <Card colors={colors}>
-            <Body colors={colors} muted>
-              The guide agent placed these changes nowhere, so no concept explains them. Where a concept covers part of a file, only the rest is here.
-            </Body>
-            {guide.unsorted.map((file) => (
-              <FileEntry key={file} colors={colors} path={file} ask={ask} code={fileCode(file)} />
-            ))}
-          </Card>
-        </>
-      ) : null}
     </>
   );
-}
-
-function filesOf(entries: readonly SupportingEntry[]): GuideSubject[] {
-  return entries.map((entry) => ({ kind: "file", path: entry.path }));
-}
-
-function layerTitle(layer: number): string {
-  return `Layer ${layer + 1}`;
 }
 
 /** The overview, whose text the reviewer can highlight, or hold in the phone app, to comment on. */
@@ -315,25 +254,13 @@ function NodeCard({
 /**
  * A Supporting or Unsorted file, which the reviewer can ask about and mark understood on its own and
  * read the diff of, since tests and wiring get review comments too: the whole of it, or the rest of a
- * file some nodes cover part of. A `folded` entry, a
- * lockfile or a generated file, starts with its diff hidden, as it is long and seldom read.
+ * file some nodes cover part of. A lockfile or a generated file starts with its diff hidden, as it is long and seldom read.
  */
-function FileEntry({
-  colors,
-  path,
-  note,
-  ask,
-  code,
-  folded,
-}: {
-  colors: Colors;
-  path: string;
-  note?: string;
-  ask: AskControl;
-  code: React.ReactNode;
-  folded?: boolean;
-}) {
-  const [open, setOpen] = React.useState(!folded);
+function FileEntry({ colors, entry, ask, code }: { colors: Colors; entry: Extract<Entry, { kind: "file" }>; ask: AskControl; code: React.ReactNode }) {
+  const { path, category } = entry;
+  // Tests and Documentation are groups of their own, so only the rest of Supporting names its category.
+  const note = category === null || category === "test" || category === "docs" ? undefined : category;
+  const [open, setOpen] = React.useState(category !== "lockfile" && category !== "generated");
   const [collapsed, setCollapsed] = useCollapsed({ kind: "file", path });
   return (
     <View style={{ gap: spacing[1] }}>
