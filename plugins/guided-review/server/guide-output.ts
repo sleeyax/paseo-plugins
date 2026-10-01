@@ -64,7 +64,7 @@ export function parseGuide(reply: string, sent: readonly ChangedFile[], setAside
  * words in `changeRequest`: its title, description, commit messages, linked issues, and the added lines
  * of the `sent` files' diffs. Case, curly quotes, Markdown emphasis and whitespace are not compared.
  * A node keeps only the decisions left with an alternative whose quote no overview decision has, since
- * any other restates its explanation or the overview.
+ * any other restates the node's own text or the overview.
  */
 export function keepQuotedDecisions(guide: Guide, changeRequest: ChangeRequest, sent: readonly ChangedFile[]): Guide {
   const words = comparable(

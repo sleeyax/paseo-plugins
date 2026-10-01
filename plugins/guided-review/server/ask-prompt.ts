@@ -84,7 +84,8 @@ export function answerRules(scope: string): string {
 
 /** What the guide says about `node`, and the code it covers, for a prompt that names the node. */
 export function nodeContext(node: GuideNode, code: readonly CodeReference[]): string {
-  const lines = [`What the guide says about it:`, `- Summary: ${node.summary}`, `- Explanation: ${oneParagraph(node.explanation)}`];
+  const lines = [`What the guide says about it:`, `- Summary: ${node.summary}`, `- Why: ${oneParagraph(node.why)}`];
+  for (const fact of node.behaviour) lines.push(`- What it does: ${oneParagraph(fact)}`);
   for (const decision of node.decisions) lines.push(decisionLine(decision));
   if (code.length > 0) {
     lines.push("", "The code it covers:");

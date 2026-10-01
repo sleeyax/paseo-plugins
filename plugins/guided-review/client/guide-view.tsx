@@ -223,10 +223,20 @@ export function NodeCard({
               <GuideText text={node.summary} colors={colors} />
             </Body>
             {node.dependencies.length > 0 ? <Dependencies dependencies={node.dependencies} titles={titles} colors={colors} /> : null}
-            <Label colors={colors}>Explanation</Label>
-            <Body colors={colors} item={{ key: "explanation", text: node.explanation }}>
-              <GuideText text={node.explanation} colors={colors} />
+            <Label colors={colors}>Why</Label>
+            <Body colors={colors} item={{ key: "why", text: node.why }}>
+              <GuideText text={node.why} colors={colors} />
             </Body>
+            {node.behaviour.length > 0 ? (
+              <>
+                <Label colors={colors}>What it does</Label>
+                {node.behaviour.map((fact, index) => (
+                  <Bullet key={index} colors={colors} item={{ key: `behaviour:${index}`, text: fact }}>
+                    <GuideText text={fact} colors={colors} />
+                  </Bullet>
+                ))}
+              </>
+            ) : null}
             {node.decisions.length > 0 ? (
               <>
                 <Label colors={colors}>Decisions</Label>

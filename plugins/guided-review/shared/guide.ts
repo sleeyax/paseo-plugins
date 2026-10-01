@@ -82,11 +82,11 @@ export const GuideNodeSchema = z.object({
   id: z.string().min(1).describe("A short slug, unique within the guide, such as `retry-policy`."),
   title: z.string().min(1).describe("The concept's name, a few words."),
   summary: z.string().min(1).describe("What the concept does, in one line."),
-  explanation: z
-    .string()
-    .min(1)
+  why: z.string().min(1).describe("Why the concept exists, what it fixes or makes possible, in one or two sentences."),
+  behaviour: z
+    .array(z.string().min(1))
     .describe(
-      "Why the concept exists and what its code does not make obvious, in at most three sentences a reviewer reads just before the code. Never walk through what the code does, and never repeat the summary.",
+      "What the concept does, one observable fact per entry, for a reviewer who never opens its code: when it runs, what it reads and writes, its side effects, what else in the repository uses what changed, and the names and limits that matter after merge. Say what happens, never how the lines make it happen, and repeat nothing the summary says.",
     ),
   covers: z
     .array(CoveredCodeSchema)
@@ -95,7 +95,7 @@ export const GuideNodeSchema = z.object({
   decisions: z
     .array(DecisionSchema)
     .describe(
-      "Decisions local to this concept whose rejected alternative the author names, each with that alternative. A choice with no such alternative belongs in the explanation, if anywhere, and a decision in the overview is not repeated here.",
+      "Decisions local to this concept whose rejected alternative the author names, each with that alternative. A choice with no such alternative belongs in `why` or `behaviour`, if anywhere, and a decision in the overview is not repeated here.",
     ),
   dependencies: z
     .array(DependencySchema)
