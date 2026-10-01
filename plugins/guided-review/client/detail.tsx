@@ -7,7 +7,7 @@ import { isUnderstood } from "../shared/progress.ts";
 import type { AskControl } from "./ask-action.tsx";
 import { Button } from "./button.tsx";
 import { NodeCode } from "./diff-view.tsx";
-import { nextNotUnderstood, OVERVIEW_KEY, stepEntry, type Entry, type EntryGroup } from "./guide-entries.ts";
+import { FINISH_KEY, nextNotUnderstood, OVERVIEW_KEY, stepEntry, type Entry, type EntryGroup } from "./guide-entries.ts";
 import { Card, FileEntry, Link, NodeCard, Overview, UnsortedNote } from "./guide-view.tsx";
 import { ProgressContext } from "./progress.tsx";
 import { fontSize, leading, spacing, type Colors } from "./theme.ts";
@@ -22,6 +22,8 @@ export type DetailProps = {
   theme: PluginTheme;
   ask: AskControl;
   openAgent?: (agentId: string) => void;
+  /** The Finish review page, shown for `FINISH_KEY`. */
+  finish: React.ReactNode;
 };
 
 /**
@@ -29,7 +31,7 @@ export type DetailProps = {
  * An entry is drawn the first time it is selected and kept, hidden, after, so a comment half written
  * in it and where it was scrolled to are still there when the reviewer comes back.
  */
-export function Detail({ reviewId, agentId, guide, groups, selected, select, theme, ask, openAgent }: DetailProps) {
+export function Detail({ reviewId, agentId, guide, groups, selected, select, theme, ask, openAgent, finish }: DetailProps) {
   const colors = theme.colors;
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
   const visited = useRef(new Set<string>());
@@ -37,6 +39,7 @@ export function Detail({ reviewId, agentId, guide, groups, selected, select, the
   const entries = new Map(groups.flatMap((group) => group.entries.map((entry) => [entry.key, { entry, group }] as const)));
 
   const page = (key: string): React.ReactNode => {
+    if (key === FINISH_KEY) return finish;
     if (key === OVERVIEW_KEY) {
       return (
         <>
@@ -83,7 +86,7 @@ export function Detail({ reviewId, agentId, guide, groups, selected, select, the
           </ScrollView>
         );
       })}
-      <Steps groups={groups} selected={selected} select={select} entry={entries.get(selected)?.entry ?? null} colors={colors} />
+      {selected === FINISH_KEY ? null : <Steps groups={groups} selected={selected} select={select} entry={entries.get(selected)?.entry ?? null} colors={colors} />}
     </View>
   );
 }

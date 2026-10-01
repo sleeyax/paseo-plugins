@@ -5,7 +5,6 @@ import { Text, View } from "react-native";
 import type { ReviewHeader } from "../shared/contracts.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { DraftsSection, type DraftsControl } from "./drafts.tsx";
-import { FinishReview } from "./finish-review.tsx";
 import { layerTitle } from "./guide-entries.ts";
 import { StaleGuideBanner, type RegenerateControl } from "./head-check.tsx";
 import { ProgressSummary } from "./progress.tsx";
@@ -23,7 +22,7 @@ export type SidebarProps = {
   theme: PluginTheme;
 };
 
-/** What stays in view beside the guide: the change request, whether the guide is still current, the reviewer's progress and their drafts. */
+/** What stays in view beside the guide: the change request, whether the guide is still current, the reviewer's progress and their drafts. Finish review is pinned under it by the panel. */
 export function Sidebar({ reviewId, header, note, drafts, regenerate, theme }: SidebarProps) {
   const colors = theme.colors;
   return (
@@ -33,7 +32,6 @@ export function Sidebar({ reviewId, header, note, drafts, regenerate, theme }: S
       {note ? <Note color={colors.statusWarning}>{note}</Note> : null}
       <ProgressSummary colors={colors} layerTitle={layerTitle} />
       {drafts ? <DraftsSection control={drafts} colors={colors} /> : null}
-      {drafts ? <FinishReview reviewId={reviewId} header={header} drafts={drafts} colors={colors} regenerate={regenerate} /> : null}
     </>
   );
 }

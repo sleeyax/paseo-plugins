@@ -19,15 +19,44 @@ export type FinishReviewProps = {
   colors: Colors;
   /** The panel's one Regenerate, offered here when the head moved. */
   regenerate: RegenerateControl;
+  onClose: () => void;
 };
+
+/** Finish review in the stack: the bar, opening into the form in its place. */
+export function InlineFinishReview(props: Omit<FinishReviewProps, "onClose">) {
+  const [open, setOpen] = useState(false);
+  return open ? (
+    <FinishReview {...props} onClose={() => setOpen(false)} />
+  ) : (
+    <FinishBar drafts={props.drafts} colors={props.colors} onOpen={() => setOpen(true)} />
+  );
+}
+
+/**
+ * What is waiting to be submitted, and the button that opens Finish review. It takes the accent once
+ * every entry is `understood`, as the step the reviewer is on.
+ */
+export function FinishBar({ drafts, colors, onOpen, understood }: { drafts: DraftsControl; colors: Colors; onOpen: () => void; understood?: boolean }) {
+  const count = drafts.drafts.length;
+  const text = { fontSize: fontSize.base, lineHeight: leading(fontSize.base) };
+  return (
+    <Card colors={colors} accent={understood}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: spacing[2] }}>
+        <Text style={{ ...text, color: understood ? colors.foreground : colors.foregroundMuted, flexShrink: 1 }}>
+          {count > 0 ? `${count === 1 ? "1 draft" : `${count} drafts`} waiting to be submitted.` : understood ? "Everything is understood." : "Done reading?"}
+        </Text>
+        <Button small colors={colors} primary label="Finish review" onPress={onOpen} />
+      </View>
+    </Card>
+  );
+}
 
 /**
  * "Finish review": the review body and every draft with where it sits, then Approve, Request changes
  * or Comment, or Discard. The server decides which verdicts are on offer and checks again at submit;
  * this only shows what it says, and after a submit, which of its steps landed.
  */
-export function FinishReview({ reviewId, header, drafts, colors, regenerate }: FinishReviewProps) {
-  const [open, setOpen] = useState(false);
+export function FinishReview({ reviewId, header, drafts, colors, regenerate, onClose }: FinishReviewProps) {
   const getFinish = useRpc(contracts.getFinish);
   const saveReviewBody = useRpc(contracts.saveReviewBody);
   const submitReview = useRpc(contracts.submitReview);
@@ -36,7 +65,6 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate }: F
   const finish = useQuery({
     queryKey: [PLUGIN_ID, "finish", reviewId, header.headSha],
     queryFn: () => getFinish({ reviewId }),
-    enabled: open,
   });
   /** The body as edited here; null while it is the one the server has. */
   const [edited, setEdited] = useState<string | null>(null);
@@ -94,19 +122,6 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate }: F
   const busy = save.isPending || submit.isPending || discard.isPending;
   const count = drafts.drafts.length;
 
-  if (!open) {
-    return (
-      <Card colors={colors}>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: spacing[2] }}>
-          <Text style={{ ...text, color: colors.foregroundMuted, flexShrink: 1 }}>
-            {count === 0 ? "Done reading?" : `${count === 1 ? "1 draft" : `${count} drafts`} waiting to be submitted.`}
-          </Text>
-          <Button small colors={colors} primary label="Finish review" onPress={() => setOpen(true)} />
-        </View>
-      </Card>
-    );
-  }
-
   const verdicts = finish.data?.verdicts ?? [];
   const reasons = [...new Set(verdicts.flatMap((option) => (option.reason === null ? [] : [option.reason])))];
   const offerRegenerate = verdicts.some((option) => option.regenerate);
@@ -116,7 +131,7 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate }: F
     <Card colors={colors}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing[2] }}>
         <Text style={{ ...text, color: colors.foreground, fontWeight: "600" }}>Finish review</Text>
-        <TextLink colors={colors} label="Close" onPress={() => setOpen(false)} />
+        <TextLink colors={colors} label="Close" onPress={onClose} />
       </View>
 
       {finish.isPending ? (
@@ -253,7 +268,7 @@ function SubmitReport({ result, colors }: { result: SubmitResult; colors: Colors
   );
 }
 
-function Card({ colors, children }: { colors: Colors; children: React.ReactNode }) {
+function Card({ colors, accent, children }: { colors: Colors; accent?: boolean | undefined; children: React.ReactNode }) {
   return (
     <View
       style={{
@@ -261,7 +276,7 @@ function Card({ colors, children }: { colors: Colors; children: React.ReactNode 
         padding: spacing[4],
         borderRadius: radius.lg,
         borderWidth: 1,
-        borderColor: colors.border,
+        borderColor: accent ? colors.accent : colors.border,
         backgroundColor: colors.surface1,
       }}
     >
