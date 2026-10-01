@@ -35,7 +35,8 @@ export function sampleGuide(): Guide {
         id: "retry-policy",
         title: "Retry policy",
         summary: "Decides whether and when a failed upload is tried again.",
-        explanation: "A pure function from the attempt number and the failure to a delay, or to giving up.",
+        why: "Retries happen in one place, so every caller backs off the same way.",
+        behaviour: ["A pure function from the attempt number and the failure to a delay, or to giving up."],
         covers: [{ path: "src/retry.ts", hunks: [], lines: [] }],
         decisions: [
           {
@@ -49,7 +50,8 @@ export function sampleGuide(): Guide {
         id: "uploader",
         title: "Uploader uses the policy",
         summary: "The upload loop asks the policy after each failure.",
-        explanation: "The loop sleeps for the delay the policy returns and stops when it says to give up.",
+        why: "The uploader stops deciding retries itself.",
+        behaviour: ["The loop sleeps for the delay the policy returns and stops when it says to give up."],
         covers: [{ path: "src/upload.ts", hunks: [1], lines: [] }],
         decisions: [],
         dependencies: [{ nodeId: "retry-policy", reason: "The loop only does what the policy decides." }],

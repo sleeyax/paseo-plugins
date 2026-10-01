@@ -2,7 +2,7 @@ import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ReviewHeader } from "../shared/contracts.ts";
 import type { CommentOrigin } from "../shared/drafts.ts";
-import type { LayeredGuide } from "../shared/guide.ts";
+import type { LayeredGuide, LayeredNode } from "../shared/guide.ts";
 import type { ChangeRequest, ChangeRequestRef, ForgeUser } from "./forge/port.ts";
 import type { BodyParagraph } from "./review-body.ts";
 import type { ReviewWorkspace } from "./workspaces/port.ts";
@@ -82,6 +82,15 @@ function fromNode({ nodeId, headSha, agentId }: NodeOnlyLink): DraftLink {
   return { from: { kind: "node", nodeId }, headSha, agentId };
 }
 
+/** A node as a guide kept it before its one `explanation` was split into `why` and `behaviour`. */
+type ExplainedNode = Omit<LayeredNode, "why" | "behaviour"> & { explanation: string };
+
+function fromExplained(node: LayeredNode | ExplainedNode): LayeredNode {
+  if (!("explanation" in node)) return node;
+  const { explanation, ...rest } = node;
+  return { ...rest, why: explanation, behaviour: [] };
+}
+
 const RECORD_FILE = "review.json";
 const GUIDES = "guides";
 const PROGRESS = "progress";
@@ -150,7 +159,10 @@ export class ReviewStore {
   }
 
   async getGuide(id: string, headSha: string): Promise<GuideRecord | null> {
-    return readJson<GuideRecord>(path.join(this.directoryOf(id), GUIDES, `${headSha}.json`));
+    const record = await readJson<GuideRecord>(path.join(this.directoryOf(id), GUIDES, `${headSha}.json`));
+    if (record?.guide == null) return record;
+    const nodes: (LayeredNode | ExplainedNode)[] = record.guide.nodes;
+    return { ...record, guide: { ...record.guide, nodes: nodes.map(fromExplained) } };
   }
 
   async saveGuide(id: string, record: GuideRecord): Promise<void> {

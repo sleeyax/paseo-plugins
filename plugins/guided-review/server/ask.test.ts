@@ -78,7 +78,8 @@ test("asking about a node sends the guide agent a prompt naming it, with what th
       [
         "What the guide says about it:",
         "- Summary: Decides whether and when a failed upload is tried again.",
-        "- Explanation: A pure function from the attempt number and the failure to a delay, or to giving up.",
+        "- Why: Retries happen in one place, so every caller backs off the same way.",
+        "- What it does: A pure function from the attempt number and the failure to a delay, or to giving up.",
         "- Decision: Full jitter on the backoff. Rather than: A fixed delay, which makes clients retry in lockstep.",
         "",
         "The code it covers:",
