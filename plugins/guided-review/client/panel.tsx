@@ -2,7 +2,7 @@ import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import React, { useMemo, useRef, useState } from "react";
-import { ScrollView, View, type LayoutChangeEvent } from "react-native";
+import { ScrollView, Text, View, type LayoutChangeEvent } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import type { GuideState } from "../shared/guide.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
@@ -17,8 +17,9 @@ import { EntryLinksContext } from "./entry-links.ts";
 import { FINISH_KEY, guideGroups, layoutFor, OVERVIEW_KEY } from "./guide-entries.ts";
 import { Navigator, NAVIGATOR_WIDTH, useSelection } from "./navigator.tsx";
 import { ProgressContext, useProgress } from "./progress.tsx";
+import { FlatContext, Strip } from "./section.tsx";
 import { Header, Note, Sidebar, SIDEBAR_WIDTH } from "./sidebar.tsx";
-import { MAX_PANEL_WIDTH, spacing } from "./theme.ts";
+import { fontSize, leading, MAX_PANEL_WIDTH, spacing } from "./theme.ts";
 
 const POLL_MS = 2_000;
 /** An empty panel is asked again now and then, since the Command Center item starts a branch's guide from outside it. */
@@ -127,15 +128,25 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
 
   const { reviewId, header, note, guide } = panel.data;
   const sidebar = <Sidebar reviewId={reviewId} header={header} note={note} drafts={drafts} regenerate={regenerate} theme={theme} />;
-  const navigator =
-    guide.status === "ready" ? <Navigator groups={groups} selected={selected} select={select} drafts={drafts?.drafts ?? []} colors={colors} /> : null;
+  const navigator = (
+    <View style={{ borderBottomWidth: shape === "two" ? 1 : 0, borderColor: colors.border }}>
+      <Strip colors={colors} title="Guide" />
+      {guide.status === "ready" ? (
+        <Navigator groups={groups} selected={selected} select={select} drafts={drafts?.drafts ?? []} colors={colors} />
+      ) : (
+        <Text style={{ paddingHorizontal: spacing[3], paddingBottom: spacing[3], color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>
+          {guide.status === "generating" ? "Its entries appear once the guide is written." : "No guide to list."}
+        </Text>
+      )}
+    </View>
+  );
   const divider = { borderColor: colors.border, flexGrow: 0, flexShrink: 0 } as const;
   const finishReview = drafts ? (
     <FinishReview reviewId={reviewId} header={header} drafts={drafts} colors={colors} regenerate={regenerate} onClose={() => select(lastEntry.current)} />
   ) : null;
   const overall = progress.progress?.overall;
   const finishBar = drafts ? (
-    <View style={{ padding: spacing[3], borderTopWidth: 1, borderColor: colors.border }}>
+    <View style={{ borderTopWidth: 1, borderColor: colors.border }}>
       <FinishBar
         drafts={drafts}
         colors={colors}
@@ -146,50 +157,50 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
   ) : null;
   return (
     <View onLayout={measure} style={{ flex: 1, flexDirection: "row", backgroundColor: colors.surface0 }}>
-      <ProgressContext.Provider value={progress}>
-        <DraftsContext.Provider value={drafts}>
-          <EntryLinksContext.Provider value={guide.status === "ready" ? links : null}>
-            {shape === "three" ? (
-              <ScrollView style={{ ...divider, width: NAVIGATOR_WIDTH, borderRightWidth: 1 }}>{navigator}</ScrollView>
-            ) : (
-              <View style={{ ...divider, width: SIDEBAR_WIDTH, borderRightWidth: 1 }}>
-                <ScrollView style={{ flex: 1 }}>
-                  {navigator}
-                  <View style={{ gap: spacing[3], padding: spacing[3] }}>{sidebar}</View>
+      <FlatContext.Provider value={true}>
+        <ProgressContext.Provider value={progress}>
+          <DraftsContext.Provider value={drafts}>
+            <EntryLinksContext.Provider value={guide.status === "ready" ? links : null}>
+              {shape === "three" ? (
+                <ScrollView style={{ ...divider, width: NAVIGATOR_WIDTH, borderRightWidth: 1 }}>{navigator}</ScrollView>
+              ) : (
+                <View style={{ ...divider, width: SIDEBAR_WIDTH, borderRightWidth: 1 }}>
+                  <ScrollView style={{ flex: 1 }}>
+                    {navigator}
+                    {sidebar}
+                  </ScrollView>
+                  {finishBar}
+                </View>
+              )}
+              {guide.status === "ready" ? (
+                <Detail
+                  key={guide.agentId}
+                  reviewId={reviewId}
+                  agentId={guide.agentId}
+                  guide={guide.guide}
+                  groups={groups}
+                  selected={selected}
+                  select={select}
+                  theme={theme}
+                  ask={ask}
+                  {...(openAgent ? { openAgent } : {})}
+                  finish={finishReview}
+                />
+              ) : (
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[4] }}>
+                  {selected === FINISH_KEY ? finishReview : guideView(reviewId, guide, false)}
                 </ScrollView>
-                {finishBar}
-              </View>
-            )}
-            {guide.status === "ready" ? (
-              <Detail
-                key={guide.agentId}
-                reviewId={reviewId}
-                agentId={guide.agentId}
-                guide={guide.guide}
-                groups={groups}
-                selected={selected}
-                select={select}
-                theme={theme}
-                ask={ask}
-                {...(openAgent ? { openAgent } : {})}
-                finish={finishReview}
-              />
-            ) : (
-              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[4] }}>
-                {selected === FINISH_KEY ? finishReview : guideView(reviewId, guide, false)}
-              </ScrollView>
-            )}
-            {shape === "three" ? (
-              <View style={{ ...divider, width: SIDEBAR_WIDTH, borderLeftWidth: 1 }}>
-                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[3] }}>
-                  {sidebar}
-                </ScrollView>
-                {finishBar}
-              </View>
-            ) : null}
-          </EntryLinksContext.Provider>
-        </DraftsContext.Provider>
-      </ProgressContext.Provider>
+              )}
+              {shape === "three" ? (
+                <View style={{ ...divider, width: SIDEBAR_WIDTH, borderLeftWidth: 1 }}>
+                  <ScrollView style={{ flex: 1 }}>{sidebar}</ScrollView>
+                  {finishBar}
+                </View>
+              ) : null}
+            </EntryLinksContext.Provider>
+          </DraftsContext.Provider>
+        </ProgressContext.Provider>
+      </FlatContext.Provider>
     </View>
   );
 

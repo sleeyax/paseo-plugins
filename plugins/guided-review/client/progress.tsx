@@ -8,6 +8,7 @@ import { PLUGIN_ID } from "../shared/identity.ts";
 import { isUnderstood, type GuideProgress, type Tally } from "../shared/progress.ts";
 import { EntryLinksContext } from "./entry-links.ts";
 import { firstOpenInGroup, nextNotUnderstood, OVERVIEW_KEY } from "./guide-entries.ts";
+import { Section } from "./section.tsx";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 
 /**
@@ -149,16 +150,7 @@ export function ProgressSummary({ colors, layerTitle }: { colors: Colors; layerT
         ? `Next: ${layerTitle(0)}, which everything else builds on.`
         : `Next: ${layerTitle(progress.nextLayer)}. Everything it builds on is understood.`;
   return (
-    <View
-      style={{
-        gap: spacing[2],
-        padding: spacing[4],
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: colors.border,
-        backgroundColor: colors.surface1,
-      }}
-    >
+    <Section colors={colors} title="Progress">
       <Row colors={colors} label="Understood" tally={progress.overall} strong onPress={open(null)} />
       {progress.layers.map((tally, layer) => (
         <Row key={layer} colors={colors} label={layerTitle(layer)} tally={tally} onPress={open(`layer:${layer}`)} />
@@ -168,7 +160,7 @@ export function ProgressSummary({ colors, layerTitle }: { colors: Colors; layerT
       {progress.supporting.total > 0 ? <Row colors={colors} label="Supporting" tally={progress.supporting} onPress={open("supporting")} /> : null}
       {progress.unsorted.total > 0 ? <Row colors={colors} label="Unsorted" tally={progress.unsorted} onPress={open("unsorted")} /> : null}
       <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>{next}</Text>
-    </View>
+    </Section>
   );
 }
 

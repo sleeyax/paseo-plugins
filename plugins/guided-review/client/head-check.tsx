@@ -7,7 +7,8 @@ import * as contracts from "../shared/contracts.ts";
 import type { HeadCheck, ReviewHeader } from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { describeProgress, isFinished } from "./start-progress.ts";
-import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
+import { Section, useFlat } from "./section.tsx";
+import { fontSize, leading, spacing, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
 
 /** How often an open panel asks the forge whether the head has moved. */
@@ -133,25 +134,19 @@ export type StaleGuideBannerProps = {
 export function StaleGuideBanner({ reviewId, header, theme, regenerate }: StaleGuideBannerProps) {
   const colors = theme.colors;
   const head = useHeadCheck(reviewId);
+  const flat = useFlat();
   if (!regenerate.active && (head === null || !head.moved)) return null;
 
   const kind = header.forge === "gitlab" ? "MR" : "PR";
   const { busy, status, error } = regenerate;
 
   return (
-    <View
-      style={{
-        gap: spacing[2],
-        padding: spacing[4],
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: colors.statusWarning,
-        backgroundColor: colors.surface1,
-      }}
-    >
-      <Line colors={colors} color={colors.statusWarning}>
-        {kind} updated since this guide
-      </Line>
+    <Section colors={colors} title={`${kind} updated since this guide`} tone={colors.statusWarning}>
+      {flat ? null : (
+        <Line colors={colors} color={colors.statusWarning}>
+          {kind} updated since this guide
+        </Line>
+      )}
       <Line colors={colors} muted>
         {head?.forgeHeadSha
           ? `New commits were pushed: the guide explains ${short(head.guideHeadSha)}, the ${kind} is at ${short(head.forgeHeadSha)}. `
@@ -176,7 +171,7 @@ export function StaleGuideBanner({ reviewId, header, theme, regenerate }: StaleG
           onPress={regenerate.run}
         />
       </View>
-    </View>
+    </Section>
   );
 }
 

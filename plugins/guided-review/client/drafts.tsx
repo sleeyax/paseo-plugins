@@ -10,6 +10,7 @@ import { CommentBox, Quote, type CommentBoxAction } from "./comment-box.tsx";
 import { GuideText } from "./guide-text.tsx";
 import { plainText } from "./inline-markdown.ts";
 import { EntryLinksContext } from "./entry-links.ts";
+import { Section, useFlat } from "./section.tsx";
 import { draftEntry } from "./guide-entries.ts";
 import { HIGHLIGHTS_TEXT } from "./text-selection.ts";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
@@ -499,6 +500,7 @@ function CommentOnSelection({ colors, onOpen }: { colors: Colors; onOpen: () => 
 /** Every draft of the review, grouped by the node it was written from, above the guide. */
 export function DraftsSection({ control, colors }: { control: DraftsControl; colors: Colors }) {
   const links = useContext(EntryLinksContext);
+  const flat = useFlat();
   const showOf = (draft: LinkedDraft) => {
     const key = links === null ? null : draftEntry(links.groups, draft);
     return key === null ? undefined : () => links!.select(key);
@@ -508,23 +510,16 @@ export function DraftsSection({ control, colors }: { control: DraftsControl; col
   const count = control.drafts.length;
   const { overview, groups, unlinked } = groupDrafts(control.drafts, control.titles);
   const grouped = [...(overview.length > 0 ? [{ key: "overview", title: "Overview", drafts: overview }] : []), ...groups.map((group) => ({ key: group.nodeId, ...group }))];
+  const title = `Your drafts${count > 0 ? ` (${count})` : ""}`;
+  const refresh = <TextLink colors={colors} label="Refresh" onPress={control.refresh} />;
   return (
-    <View
-      style={{
-        gap: spacing[2],
-        padding: spacing[4],
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: colors.border,
-        backgroundColor: colors.surface1,
-      }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing[2] }}>
-        <Text style={{ ...body, color: colors.foreground, fontWeight: "600" }}>
-          Your drafts{count > 0 ? ` (${count})` : ""}
-        </Text>
-        <TextLink colors={colors} label="Refresh" onPress={control.refresh} />
-      </View>
+    <Section colors={colors} title={title} action={refresh}>
+      {flat ? null : (
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing[2] }}>
+          <Text style={{ ...body, color: colors.foreground, fontWeight: "600" }}>{title}</Text>
+          {refresh}
+        </View>
+      )}
       {control.loading ? (
         <Text style={{ ...body, color: colors.foregroundMuted }}>Reading your drafts…</Text>
       ) : control.error ? (
@@ -559,7 +554,7 @@ export function DraftsSection({ control, colors }: { control: DraftsControl; col
           ) : null}
         </>
       )}
-    </View>
+    </Section>
   );
 }
 

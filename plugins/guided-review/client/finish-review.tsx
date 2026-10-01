@@ -8,7 +8,8 @@ import { PLUGIN_ID } from "../shared/identity.ts";
 import { VERDICT_LABELS, type SubmitResult, type SubmitStep, type Verdict } from "../shared/submit.ts";
 import { DraftCard, TextLink, type DraftsControl } from "./drafts.tsx";
 import { useSetHeadCheck, type RegenerateControl } from "./head-check.tsx";
-import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
+import { useFlat } from "./section.tsx";
+import { fontSize, leading, radius, spacing, tint, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
 import { GrowingTextInput } from "./growing-text-input.tsx";
 
@@ -37,16 +38,21 @@ export function InlineFinishReview(props: Omit<FinishReviewProps, "onClose">) {
  * every entry is `understood`, as the step the reviewer is on.
  */
 export function FinishBar({ drafts, colors, onOpen, understood }: { drafts: DraftsControl; colors: Colors; onOpen: () => void; understood?: boolean }) {
+  const flat = useFlat();
   const count = drafts.drafts.length;
   const text = { fontSize: fontSize.base, lineHeight: leading(fontSize.base) };
+  const row = (
+    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: spacing[2] }}>
+      <Text style={{ ...text, color: understood ? colors.foreground : colors.foregroundMuted, flexShrink: 1 }}>
+        {count > 0 ? `${count === 1 ? "1 draft" : `${count} drafts`} waiting to be submitted.` : understood ? "Everything is understood." : "Done reading?"}
+      </Text>
+      <Button small colors={colors} primary label="Finish review" onPress={onOpen} />
+    </View>
+  );
+  if (flat) return <View style={{ padding: spacing[3], backgroundColor: understood ? tint(colors.accent, colors.surface0, 0.12) : undefined }}>{row}</View>;
   return (
     <Card colors={colors} accent={understood}>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: spacing[2] }}>
-        <Text style={{ ...text, color: understood ? colors.foreground : colors.foregroundMuted, flexShrink: 1 }}>
-          {count > 0 ? `${count === 1 ? "1 draft" : `${count} drafts`} waiting to be submitted.` : understood ? "Everything is understood." : "Done reading?"}
-        </Text>
-        <Button small colors={colors} primary label="Finish review" onPress={onOpen} />
-      </View>
+      {row}
     </Card>
   );
 }
