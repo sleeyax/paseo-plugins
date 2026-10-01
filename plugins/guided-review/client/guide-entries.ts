@@ -17,6 +17,8 @@ export type EntryGroup = {
 };
 
 export const OVERVIEW_KEY = "overview";
+/** Finish review, which the detail pane shows like an entry though the navigator does not list it. */
+export const FINISH_KEY = "finish";
 
 /** The guide's groups trunk first: each layer from the foundations up, then Tests, Documentation, Supporting and Unsorted, leaving out empty ones. */
 export function guideGroups(guide: LayeredGuide): EntryGroup[] {

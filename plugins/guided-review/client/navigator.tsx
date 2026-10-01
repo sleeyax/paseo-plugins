@@ -3,7 +3,7 @@ import { Pressable, Text, View } from "react-native";
 import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
 import type { LinkedDraft } from "../shared/drafts.ts";
 import { isUnderstood, type GuideProgress } from "../shared/progress.ts";
-import { draftCounts, OVERVIEW_KEY, resolveSelection, type Entry, type EntryGroup } from "./guide-entries.ts";
+import { draftCounts, FINISH_KEY, OVERVIEW_KEY, resolveSelection, type Entry, type EntryGroup } from "./guide-entries.ts";
 import { plainText } from "./inline-markdown.ts";
 import { ProgressContext } from "./progress.tsx";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
@@ -18,7 +18,7 @@ export const NAVIGATOR_WIDTH = 280;
  */
 export function useSelection(groups: readonly EntryGroup[], progress: GuideProgress | null): [string, (key: string) => void] {
   const [selected, setSelected] = useState<string | null>(null);
-  const resolved = resolveSelection(selected, groups, progress);
+  const resolved = resolveSelection(selected, groups, progress, [FINISH_KEY]);
   if (progress !== null && resolved !== selected) setSelected(resolved);
   return [resolved, setSelected];
 }

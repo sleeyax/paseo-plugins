@@ -1,7 +1,7 @@
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { ScrollView, View, type LayoutChangeEvent } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import type { GuideState } from "../shared/guide.ts";
@@ -10,11 +10,11 @@ import { useAskAbout } from "./ask-action.tsx";
 import { BranchStartView, isBranchRunning } from "./branch-start.tsx";
 import { DraftsContext, DraftsSection, useDrafts } from "./drafts.tsx";
 import { GuideView } from "./guide-view.tsx";
-import { FinishReview } from "./finish-review.tsx";
+import { FinishBar, FinishReview, InlineFinishReview } from "./finish-review.tsx";
 import { StaleGuideBanner, useRegenerate } from "./head-check.tsx";
 import { Detail } from "./detail.tsx";
 import { EntryLinksContext } from "./entry-links.ts";
-import { guideGroups, layoutFor } from "./guide-entries.ts";
+import { FINISH_KEY, guideGroups, layoutFor, OVERVIEW_KEY } from "./guide-entries.ts";
 import { Navigator, NAVIGATOR_WIDTH, useSelection } from "./navigator.tsx";
 import { ProgressContext, useProgress } from "./progress.tsx";
 import { Header, Note, Sidebar, SIDEBAR_WIDTH } from "./sidebar.tsx";
@@ -68,6 +68,9 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
   const groups = useMemo(() => (readyGuide === null ? [] : guideGroups(readyGuide)), [readyGuide]);
   const [selected, select] = useSelection(groups, progress.progress);
   const links = useMemo(() => ({ groups, select }), [groups, select]);
+  /** Where Finish review's Close goes back to. */
+  const lastEntry = useRef(OVERVIEW_KEY);
+  if (selected !== FINISH_KEY) lastEntry.current = selected;
   const [width, setWidth] = useState<number | null>(null);
   // Until the web panel has been measured nothing is drawn, rather than the stack for a frame.
   const shape = layout.platform !== "web" ? "stack" : width === null ? null : layoutFor(width, layout.platform);
@@ -97,7 +100,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
           <StaleGuideBanner reviewId={reviewId} header={panel.data.header} theme={theme} regenerate={regenerate} />
           {panel.data.note ? <Note color={colors.statusWarning}>{panel.data.note}</Note> : null}
           {drafts ? <DraftsSection control={drafts} colors={colors} /> : null}
-          {drafts ? <FinishReview reviewId={reviewId} header={panel.data.header} drafts={drafts} colors={colors} regenerate={regenerate} /> : null}
+          {drafts ? <InlineFinishReview reviewId={reviewId} header={panel.data.header} drafts={drafts} colors={colors} regenerate={regenerate} /> : null}
           {guideView(reviewId, panel.data.guide, true)}
         </View>
       );
@@ -127,6 +130,20 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
   const navigator =
     guide.status === "ready" ? <Navigator groups={groups} selected={selected} select={select} drafts={drafts?.drafts ?? []} colors={colors} /> : null;
   const divider = { borderColor: colors.border, flexGrow: 0, flexShrink: 0 } as const;
+  const finishReview = drafts ? (
+    <FinishReview reviewId={reviewId} header={header} drafts={drafts} colors={colors} regenerate={regenerate} onClose={() => select(lastEntry.current)} />
+  ) : null;
+  const overall = progress.progress?.overall;
+  const finishBar = drafts ? (
+    <View style={{ padding: spacing[3], borderTopWidth: 1, borderColor: colors.border }}>
+      <FinishBar
+        drafts={drafts}
+        colors={colors}
+        onOpen={() => select(FINISH_KEY)}
+        understood={overall !== undefined && overall.total > 0 && overall.understood === overall.total}
+      />
+    </View>
+  ) : null;
   return (
     <View onLayout={measure} style={{ flex: 1, flexDirection: "row", backgroundColor: colors.surface0 }}>
       <ProgressContext.Provider value={progress}>
@@ -135,10 +152,13 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
             {shape === "three" ? (
               <ScrollView style={{ ...divider, width: NAVIGATOR_WIDTH, borderRightWidth: 1 }}>{navigator}</ScrollView>
             ) : (
-              <ScrollView style={{ ...divider, width: SIDEBAR_WIDTH, borderRightWidth: 1 }}>
-                {navigator}
-                <View style={{ gap: spacing[3], padding: spacing[3] }}>{sidebar}</View>
-              </ScrollView>
+              <View style={{ ...divider, width: SIDEBAR_WIDTH, borderRightWidth: 1 }}>
+                <ScrollView style={{ flex: 1 }}>
+                  {navigator}
+                  <View style={{ gap: spacing[3], padding: spacing[3] }}>{sidebar}</View>
+                </ScrollView>
+                {finishBar}
+              </View>
             )}
             {guide.status === "ready" ? (
               <Detail
@@ -152,16 +172,20 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
                 theme={theme}
                 ask={ask}
                 {...(openAgent ? { openAgent } : {})}
+                finish={finishReview}
               />
             ) : (
               <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[4] }}>
-                {guideView(reviewId, guide, false)}
+                {selected === FINISH_KEY ? finishReview : guideView(reviewId, guide, false)}
               </ScrollView>
             )}
             {shape === "three" ? (
-              <ScrollView style={{ ...divider, width: SIDEBAR_WIDTH, borderLeftWidth: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[3] }}>
-                {sidebar}
-              </ScrollView>
+              <View style={{ ...divider, width: SIDEBAR_WIDTH, borderLeftWidth: 1 }}>
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[3] }}>
+                  {sidebar}
+                </ScrollView>
+                {finishBar}
+              </View>
             ) : null}
           </EntryLinksContext.Provider>
         </DraftsContext.Provider>
