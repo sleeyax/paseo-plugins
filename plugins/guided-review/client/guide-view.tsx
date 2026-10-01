@@ -172,7 +172,7 @@ export function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
 }
 
 /**
- * A node, labelled a leaf when nothing builds on it, whose code (`code`) comes before its comments, which sit at the foot of the card.
+ * A node, whose code (`code`) comes before its comments, which sit at the foot of the card.
  * The reviewer can highlight its text, not its code, or hold it in the phone app, to comment on.
  * A card that is not `collapsible` stands alone in the detail pane, where folding it would leave nothing to read.
  */
@@ -201,19 +201,12 @@ export function NodeCard({
         <View ref={prose} style={{ gap: spacing[2] }}>
           <View style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing[2] }}>
             {collapsible ? <CollapseToggle colors={colors} collapsed={collapsed} onPress={() => setCollapsed(!collapsed)} /> : null}
-            <View style={{ flex: 1 }}>
-              <Text
-                selectable={HIGHLIGHTS_TEXT}
-                style={{ color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base), fontWeight: "600" }}
-              >
-                <GuideText text={node.title} colors={colors} />
-              </Text>
-              {node.leaf ? (
-                <Text selectable={false} style={{ color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>
-                  Leaf · nothing builds on this
-                </Text>
-              ) : null}
-            </View>
+            <Text
+              selectable={HIGHLIGHTS_TEXT}
+              style={{ flex: 1, color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base), fontWeight: "600" }}
+            >
+              <GuideText text={node.title} colors={colors} />
+            </Text>
             <UnderstoodToggle subject={{ kind: "node", nodeId: node.id }} colors={colors} />
           </View>
           <Collapsible collapsed={collapsed}>
@@ -333,13 +326,12 @@ function Decisions({ decisions, colors }: { decisions: readonly GuideDecision[];
         <Bullet
           key={index}
           colors={colors}
-          item={{ key: `decision:${index}`, text: alternative ? `${choice} Rather than: ${alternative.text}` : choice }}
+          item={{ key: `decision:${index}`, text: alternative ? `${choice} Rather than: “${alternative.quote}”` : choice }}
           sub={
             alternative ? (
               <>
                 {"Rather than: "}
-                <GuideText text={alternative.text} colors={colors} />
-                <Text style={{ fontStyle: "italic" }}> (“{alternative.quote}”)</Text>
+                <Text style={{ fontStyle: "italic" }}>“{alternative.quote}”</Text>
               </>
             ) : undefined
           }
