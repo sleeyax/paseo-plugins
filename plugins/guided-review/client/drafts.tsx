@@ -187,7 +187,9 @@ export function NewCommentBox({
       ? `Comment on ${describeLocation(location)}`
       : quote !== undefined
         ? "Comment on the highlighted text, posted on the change as a whole"
-        : "Comment on this concept, posted on the change as a whole";
+        : origin?.kind === "overview"
+          ? "Comment on the overview, posted on the change as a whole"
+          : "Comment on this concept, posted on the change as a whole";
   return (
     <CommentBox
       colors={colors}
@@ -208,14 +210,12 @@ function nodeOf(draft: LinkedDraft): string | null {
 }
 
 /**
- * What "Suggest wording" words a comment at `location` from: its code, or for a general one, the
- * node or overview it came from with the text highlighted there. The overview is worded only from
- * highlighted text, which every comment on it has.
+ * What "Suggest wording" words a comment at `location` from: its code, or for a general one, the node or overview it came from with the text highlighted there, if any.
  */
 function subjectOf(location: DraftLocation, from: CommentOrigin | null, quote: string | undefined): CommentSubject | null {
   if (location.kind !== "general") return { kind: "code", location };
   if (from?.kind === "node") return { kind: "node", nodeId: from.nodeId, quote: quote ?? null };
-  return from?.kind === "overview" && quote !== undefined ? { kind: "overview", quote } : null;
+  return from?.kind === "overview" ? { kind: "overview", quote: quote ?? null } : null;
 }
 
 /** Where a draft is, for its card: its place in a file, or for a general draft, the part of the guide it was written from. */
@@ -393,8 +393,8 @@ export function NodeComments({ nodeId, colors, selected }: { nodeId: string; col
 }
 
 /**
- * The comments on the overview, and the action that writes one on the text of it the reviewer has
- * `selected`, which is the only way to write one. Nothing outside a review, or with neither.
+ * The comments on the overview, on the change as a whole, and the actions that write one: on the overview, or on the text of it the reviewer has `selected`.
+ * Nothing outside a review.
  */
 export function OverviewComments({ colors, selected }: { colors: Colors; selected: Selected | null }) {
   const control = useContext(DraftsContext);
@@ -402,7 +402,6 @@ export function OverviewComments({ colors, selected }: { colors: Colors; selecte
   const from: CommentOrigin = { kind: "overview" };
   const comments = control.drafts.filter((draft) => draft.from?.kind === "overview");
   const box = boxAt(control, from, undefined);
-  if (comments.length === 0 && box === null && selected === null) return null;
   return (
     <View style={{ gap: spacing[2] }}>
       {comments.map((draft) => (
@@ -410,8 +409,11 @@ export function OverviewComments({ colors, selected }: { colors: Colors; selecte
       ))}
       {box ? (
         <FromBox control={control} box={box} from={from} colors={colors} />
-      ) : selected === null ? null : (
-        <CommentOnSelection colors={colors} onOpen={() => openOn(control, from, selected)} />
+      ) : (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing[3] }}>
+          <TextLink colors={colors} label="Comment on the overview" onPress={() => control.setOpen({ kind: "new", place: placeOf(from), location: { kind: "general" } })} />
+          {selected === null ? null : <CommentOnSelection colors={colors} onOpen={() => openOn(control, from, selected)} />}
+        </View>
       )}
     </View>
   );

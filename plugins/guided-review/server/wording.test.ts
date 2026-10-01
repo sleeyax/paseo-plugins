@@ -374,6 +374,16 @@ test("a passage highlighted in the overview is worded as a general comment about
   assert.deepEqual(forge.created, []);
 });
 
+test("a comment on the overview with nothing highlighted is worded from the overview alone", async (t) => {
+  const { service, agents } = await withGuide(t);
+
+  await suggest(service, { kind: "overview", quote: null }, "looks good, one question about 429s");
+
+  const prompt = agents.created[0]!.sent[0]!;
+  assert.match(prompt, /it is about the overview of your guide, which says:\n- Idea: /);
+  assert.doesNotMatch(prompt, /highlighted/);
+});
+
 test("a passage highlighted in a node follows what the guide says about the node", async (t) => {
   const { service, agents } = await withGuide(t);
 

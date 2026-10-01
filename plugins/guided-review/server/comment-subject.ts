@@ -17,7 +17,7 @@ import type { ChangedFile } from "./forge/port.ts";
 export type CommentSubjectContext =
   | CodeSubjectContext
   | { kind: "node"; node: GuideNode; code: readonly CodeReference[]; quote: string | null }
-  | { kind: "overview"; overview: Guide["overview"]; titles: ReadonlyMap<string, string>; quote: string };
+  | { kind: "overview"; overview: Guide["overview"]; titles: ReadonlyMap<string, string>; quote: string | null };
 
 export type CodeSubjectContext = {
   kind: "code";
@@ -38,7 +38,7 @@ export function commentSubjectContext(files: readonly ChangedFile[], guide: Pick
     }
     case "overview": {
       const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
-      return { kind: "overview", overview: guide.overview, titles, quote: subject.quote.trim() };
+      return { kind: "overview", overview: guide.overview, titles, quote: subject.quote?.trim() || null };
     }
     case "code":
       return codeSubjectContext(files, guide.nodes, subject.location);

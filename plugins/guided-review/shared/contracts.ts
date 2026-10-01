@@ -337,15 +337,13 @@ export type FinishView = z.output<typeof FinishViewSchema>;
 export type HeadCheck = z.output<typeof HeadCheckSchema>;
 
 /**
- * What a comment box is for, as "Suggest wording" and "Ask agent" name it: a comment on code at a
- * draft location, or a general one, on the change as a whole, about a node or about a passage of the
- * overview the reviewer highlighted; a node's comment can come from a highlighted passage of it too.
+ * What a comment box is for, as "Suggest wording" and "Ask agent" name it: a comment on code at a draft location, or a general one, on the change as a whole, about a node or the overview, either of which can come from a passage of it the reviewer highlighted.
  * The server looks the lines and the guide's nodes up itself, as for "Ask about this".
  */
 export const CommentSubjectSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("code"), location: DraftLocationSchema }),
   z.object({ kind: z.literal("node"), nodeId: z.string(), quote: QuoteSchema.nullable().optional() }),
-  z.object({ kind: z.literal("overview"), quote: QuoteSchema }),
+  z.object({ kind: z.literal("overview"), quote: QuoteSchema.nullable().optional() }),
 ]);
 
 /**
