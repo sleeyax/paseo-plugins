@@ -13,6 +13,7 @@ import { GuideView } from "./guide-view.tsx";
 import { FinishReview } from "./finish-review.tsx";
 import { StaleGuideBanner, useRegenerate } from "./head-check.tsx";
 import { Detail } from "./detail.tsx";
+import { EntryLinksContext } from "./entry-links.ts";
 import { guideGroups, layoutFor } from "./guide-entries.ts";
 import { Navigator, NAVIGATOR_WIDTH, useSelection } from "./navigator.tsx";
 import { ProgressContext, useProgress } from "./progress.tsx";
@@ -66,6 +67,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
   const readyGuide = panel.data?.status === "ready" && panel.data.guide.status === "ready" ? panel.data.guide.guide : null;
   const groups = useMemo(() => (readyGuide === null ? [] : guideGroups(readyGuide)), [readyGuide]);
   const [selected, select] = useSelection(groups, progress.progress);
+  const links = useMemo(() => ({ groups, select }), [groups, select]);
   const [width, setWidth] = useState<number | null>(null);
   // Until the web panel has been measured nothing is drawn, rather than the stack for a frame.
   const shape = layout.platform !== "web" ? "stack" : width === null ? null : layoutFor(width, layout.platform);
@@ -129,37 +131,39 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
     <View onLayout={measure} style={{ flex: 1, flexDirection: "row", backgroundColor: colors.surface0 }}>
       <ProgressContext.Provider value={progress}>
         <DraftsContext.Provider value={drafts}>
-          {shape === "three" ? (
-            <ScrollView style={{ ...divider, width: NAVIGATOR_WIDTH, borderRightWidth: 1 }}>{navigator}</ScrollView>
-          ) : (
-            <ScrollView style={{ ...divider, width: SIDEBAR_WIDTH, borderRightWidth: 1 }}>
-              {navigator}
-              <View style={{ gap: spacing[3], padding: spacing[3] }}>{sidebar}</View>
-            </ScrollView>
-          )}
-          {guide.status === "ready" ? (
-            <Detail
-              key={guide.agentId}
-              reviewId={reviewId}
-              agentId={guide.agentId}
-              guide={guide.guide}
-              groups={groups}
-              selected={selected}
-              select={select}
-              theme={theme}
-              ask={ask}
-              {...(openAgent ? { openAgent } : {})}
-            />
-          ) : (
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[4] }}>
-              {guideView(reviewId, guide, false)}
-            </ScrollView>
-          )}
-          {shape === "three" ? (
-            <ScrollView style={{ ...divider, width: SIDEBAR_WIDTH, borderLeftWidth: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[3] }}>
-              {sidebar}
-            </ScrollView>
-          ) : null}
+          <EntryLinksContext.Provider value={guide.status === "ready" ? links : null}>
+            {shape === "three" ? (
+              <ScrollView style={{ ...divider, width: NAVIGATOR_WIDTH, borderRightWidth: 1 }}>{navigator}</ScrollView>
+            ) : (
+              <ScrollView style={{ ...divider, width: SIDEBAR_WIDTH, borderRightWidth: 1 }}>
+                {navigator}
+                <View style={{ gap: spacing[3], padding: spacing[3] }}>{sidebar}</View>
+              </ScrollView>
+            )}
+            {guide.status === "ready" ? (
+              <Detail
+                key={guide.agentId}
+                reviewId={reviewId}
+                agentId={guide.agentId}
+                guide={guide.guide}
+                groups={groups}
+                selected={selected}
+                select={select}
+                theme={theme}
+                ask={ask}
+                {...(openAgent ? { openAgent } : {})}
+              />
+            ) : (
+              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[4] }}>
+                {guideView(reviewId, guide, false)}
+              </ScrollView>
+            )}
+            {shape === "three" ? (
+              <ScrollView style={{ ...divider, width: SIDEBAR_WIDTH, borderLeftWidth: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[3] }}>
+                {sidebar}
+              </ScrollView>
+            ) : null}
+          </EntryLinksContext.Provider>
         </DraftsContext.Provider>
       </ProgressContext.Provider>
     </View>
