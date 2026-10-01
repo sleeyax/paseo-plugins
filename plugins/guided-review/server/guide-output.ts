@@ -63,8 +63,8 @@ export function parseGuide(reply: string, sent: readonly ChangedFile[], setAside
  * `guide` with the alternative of each decision kept only when its quote is found in the author's own
  * words in `changeRequest`: its title, description, commit messages, linked issues, and the added lines
  * of the `sent` files' diffs. Case, curly quotes, Markdown emphasis and whitespace are not compared.
- * A node keeps only the decisions left with an alternative whose quote no overview decision has, since
- * any other restates the node's own text or the overview.
+ * A node keeps only the decisions left with an alternative, since any other restates the node's own
+ * text, and the overview drops a decision whose quote a node has, since that decision is the node's.
  */
 export function keepQuotedDecisions(guide: Guide, changeRequest: ChangeRequest, sent: readonly ChangedFile[]): Guide {
   const words = comparable(
@@ -82,16 +82,10 @@ export function keepQuotedDecisions(guide: Guide, changeRequest: ChangeRequest, 
       const quote = quoteOf(decision);
       return quote.split(" ").length >= MIN_QUOTE_WORDS && words.includes(quote) ? decision : { ...decision, alternative: null };
     });
-  const overview = keep(guide.overview.decisions);
-  const inOverview = new Set(overview.filter((decision) => decision.alternative !== null).map(quoteOf));
-  return {
-    ...guide,
-    overview: { ...guide.overview, decisions: overview },
-    nodes: guide.nodes.map((node) => ({
-      ...node,
-      decisions: keep(node.decisions).filter((decision) => decision.alternative !== null && !inOverview.has(quoteOf(decision))),
-    })),
-  };
+  const nodes = guide.nodes.map((node) => ({ ...node, decisions: keep(node.decisions).filter((decision) => decision.alternative !== null) }));
+  const onNodes = new Set(nodes.flatMap((node) => node.decisions.map(quoteOf)));
+  const overview = keep(guide.overview.decisions).filter((decision) => decision.alternative === null || !onNodes.has(quoteOf(decision)));
+  return { ...guide, overview: { ...guide.overview, decisions: overview }, nodes };
 }
 
 /** A shorter quote, a name or a word, backs nothing: it is in the author's text whatever the alternative. */
