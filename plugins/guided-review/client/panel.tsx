@@ -75,7 +75,12 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
   const [width, setWidth] = useState<number | null>(null);
   // Until the web panel has been measured nothing is drawn, rather than the stack for a frame.
   const shape = layout.platform !== "web" ? "stack" : width === null ? null : layoutFor(width, layout.platform);
-  const measure = (event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width);
+  // One element measures the panel whatever is drawn in it, so switching layouts never remounts what reports the width.
+  const frame = (children?: React.ReactNode) => (
+    <View onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width)} style={{ flex: 1, backgroundColor: colors.surface0 }}>
+      {children}
+    </View>
+  );
 
   if (panel.isPending || panel.isError || panel.data.status === "none" || shape === "stack") {
     let body: React.ReactNode;
@@ -106,10 +111,9 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
         </View>
       );
     }
-    return (
+    return frame(
       <ScrollView
-        onLayout={measure}
-        style={{ flex: 1, backgroundColor: colors.surface0 }}
+        style={{ flex: 1 }}
         contentContainerStyle={{
           width: "100%",
           maxWidth: MAX_PANEL_WIDTH,
@@ -124,7 +128,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
     );
   }
 
-  if (shape === null) return <View onLayout={measure} style={{ flex: 1, backgroundColor: colors.surface0 }} />;
+  if (shape === null) return frame();
 
   const { reviewId, header, note, guide } = panel.data;
   const sidebar = <Sidebar reviewId={reviewId} header={header} note={note} drafts={drafts} regenerate={regenerate} theme={theme} />;
@@ -155,8 +159,8 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
       />
     </View>
   ) : null;
-  return (
-    <View onLayout={measure} style={{ flex: 1, flexDirection: "row", backgroundColor: colors.surface0 }}>
+  return frame(
+    <View style={{ flex: 1, flexDirection: "row" }}>
       <FlatContext.Provider value={true}>
         <ProgressContext.Provider value={progress}>
           <DraftsContext.Provider value={drafts}>
