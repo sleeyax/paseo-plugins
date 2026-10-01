@@ -554,13 +554,13 @@ export class ReviewService {
    */
   async finish({ reviewId }: { reviewId: string }): Promise<FinishView> {
     const record = await this.#record(reviewId);
-    const [head, body] = await Promise.all([this.checkHead({ reviewId }), this.#drafts.ownBody(record, this.#forgeFor(record.ref))]);
+    const [head, body] = await Promise.all([this.checkHead({ reviewId }), this.#drafts.ownBody(record)]);
     return { body, verdicts: verdictsFor(record, head), head };
   }
 
   async saveReviewBody({ reviewId, body }: { reviewId: string; body: string }): Promise<null> {
     const record = await this.#record(reviewId);
-    await this.#drafts.saveOwnBody(record, this.#forgeFor(record.ref), body.trim());
+    await this.#drafts.saveOwnBody(record, body.trim());
     return null;
   }
 
@@ -573,7 +573,7 @@ export class ReviewService {
     const record = await this.#record(reviewId);
     const forge = this.#forgeFor(record.ref);
     const text = body.trim();
-    await this.#drafts.holdBody(record, forge, text);
+    await this.#drafts.saveOwnBody(record, text);
     const head = await this.checkHead({ reviewId });
     const verdicts = verdictsFor(record, head);
     if (headSha !== record.header.headSha) {

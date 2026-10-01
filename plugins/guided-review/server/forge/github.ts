@@ -241,21 +241,6 @@ const DraftsResponse = z.object({
   }),
 });
 
-/** The viewer's pending review with its body, which is the review body until it is submitted. */
-export const REVIEW_BODY_QUERY = `query GuidedReviewReviewBody($owner: String!, $name: String!, $number: Int!) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      reviews(states: PENDING, first: 1) { nodes { id viewerDidAuthor body } }
-    }
-  }
-}`;
-
-export const UPDATE_REVIEW_MUTATION = `mutation GuidedReviewUpdateBody($id: ID!, $body: String!) {
-  updatePullRequestReview(input: { pullRequestReviewId: $id, body: $body }) {
-    pullRequestReview { id }
-  }
-}`;
-
 /** Publishes the pending review, every comment on it included, with its body and verdict. */
 export const SUBMIT_REVIEW_MUTATION = `mutation GuidedReviewSubmit($id: ID!, $event: PullRequestReviewEvent!, $body: String!) {
   submitPullRequestReview(input: { pullRequestReviewId: $id, event: $event, body: $body }) {
@@ -269,18 +254,6 @@ export const DELETE_REVIEW_MUTATION = `mutation GuidedReviewDiscard($id: ID!) {
     pullRequestReview { id }
   }
 }`;
-
-const ReviewBodyResponse = z.object({
-  data: z.object({
-    repository: z
-      .object({
-        pullRequest: z
-          .object({ reviews: z.object({ nodes: z.array(z.object({ id: z.string(), viewerDidAuthor: z.boolean(), body: z.string() })) }) })
-          .nullable(),
-      })
-      .nullable(),
-  }),
-});
 
 const EVENTS: Record<Verdict, "APPROVE" | "REQUEST_CHANGES" | "COMMENT"> = {
   approve: "APPROVE",
@@ -317,32 +290,28 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
 
   /**
    * The viewer's pending review, started on `target`'s head when there is none. Two drafts saved at
-   * once would otherwise both find none and start two, and GitHub turns the second down. A body
-   * write, a submit and a discard queue here too, so none acts on a review another is starting.
+   * once would otherwise both find none and start two, and GitHub turns the second down. A submit
+   * and a discard queue here too, so neither acts on a review another is starting.
    */
   const creating = oneAtATimePer<string>();
   const oneAtATime = <T>(ref: ChangeRequestRef, run: () => Promise<T>): Promise<T> => creating(ref.url, run);
 
-  const pendingReview = async (target: DraftTarget): Promise<string> => {
-    const { ref } = target;
+  /** The pull request's node ID and the viewer's pending review on it, if any. */
+  const findPendingReview = async (ref: ChangeRequestRef): Promise<{ pullRequestId: string; reviewId: string | null }> => {
     const response = await graphql(ref, PendingReviewResponse, PENDING_REVIEW_QUERY, pullRequestVariables(ref));
     const pr = response.data.repository?.pullRequest;
     if (!pr) throw new ForgeError(`${ref.project} has no pull request #${ref.number}.`);
-    const own = pr.reviews.nodes.find((review) => review.viewerDidAuthor);
-    if (own) return own.id;
-    const started = await graphql(ref, StartReviewResponse, START_REVIEW_MUTATION, {
-      pullRequestId: pr.id,
+    return { pullRequestId: pr.id, reviewId: pr.reviews.nodes.find((review) => review.viewerDidAuthor)?.id ?? null };
+  };
+
+  const pendingReview = async (target: DraftTarget): Promise<string> => {
+    const { pullRequestId, reviewId } = await findPendingReview(target.ref);
+    if (reviewId !== null) return reviewId;
+    const started = await graphql(target.ref, StartReviewResponse, START_REVIEW_MUTATION, {
+      pullRequestId,
       commitOID: target.headSha,
     });
     return started.data.addPullRequestReview.pullRequestReview.id;
-  };
-
-  /** The viewer's pending review and its body, or null when there is none. */
-  const findPendingReview = async (ref: ChangeRequestRef): Promise<{ id: string; body: string } | null> => {
-    const response = await graphql(ref, ReviewBodyResponse, REVIEW_BODY_QUERY, pullRequestVariables(ref));
-    const pr = response.data.repository?.pullRequest;
-    if (!pr) throw new ForgeError(`${ref.project} has no pull request #${ref.number}.`);
-    return pr.reviews.nodes.find((review) => review.viewerDidAuthor) ?? null;
   };
 
   return {
@@ -470,7 +439,7 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
     },
 
     async createDraft(target, { anchor, body }) {
-      // A pending review has no comment on the pull request as a whole, only its body, which the service writes.
+      // A pending review has no comment on the pull request as a whole, only its body, which the service keeps.
       if (anchor.kind === "general") throw new ForgeError("GitHub keeps a comment on the pull request as a whole in the review body, not as a draft.");
       return oneAtATime(target.ref, async () => {
         const pullRequestReviewId = await pendingReview(target);
@@ -491,17 +460,14 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
       await graphql(ref, MutationResponse, DELETE_COMMENT_MUTATION, { id: draftId });
     },
 
-    reviewBody: {
-      async read(ref) {
-        return (await findPendingReview(ref))?.body ?? "";
-      },
-      async write(target, body) {
-        await oneAtATime(target.ref, async () => {
-          // An empty body is no reason to start a review; with none pending there is nothing to clear.
-          const id = body === "" ? (await findPendingReview(target.ref))?.id : await pendingReview(target);
-          if (id !== undefined) await graphql(target.ref, MutationResponse, UPDATE_REVIEW_MUTATION, { id, body });
-        });
-      },
+    // GitHub refuses to edit a pending review's body while it is empty, as it is on every review started without one.
+    takesGeneralDrafts: false,
+
+    async postComment(ref, body) {
+      // A pull request's conversation is its issue's, so a comment on it as a whole is an issue comment.
+      await gh.text(["api", "--hostname", ref.host, "--method", "POST", `repos/${ref.project}/issues/${ref.number}/comments`, "--input", "-"], {
+        input: JSON.stringify({ body }),
+      });
     },
 
     async submitReview(target, { verdict, body }) {
@@ -518,8 +484,8 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
 
     async discardReview(ref) {
       await oneAtATime(ref, async () => {
-        const review = await findPendingReview(ref);
-        if (review !== null) await graphql(ref, MutationResponse, DELETE_REVIEW_MUTATION, { id: review.id });
+        const { reviewId } = await findPendingReview(ref);
+        if (reviewId !== null) await graphql(ref, MutationResponse, DELETE_REVIEW_MUTATION, { id: reviewId });
       });
     },
   };

@@ -50,11 +50,12 @@ export interface Forge {
   deleteDraft(ref: ChangeRequestRef, draftId: string): Promise<void>;
 
   /**
-   * Where the forge keeps the review body until the review is submitted: the pending review's own
-   * body on GitHub. Null on a forge that keeps none (GitLab), whose body the service keeps instead.
-   * Either way the body a submit publishes is the one `submitReview` is handed.
+   * Whether `createDraft` takes a `general` anchor: GitLab's MR-level draft note. Where it does not
+   * (GitHub), the service keeps such a comment until submit and posts it then with `postComment`.
    */
-  readonly reviewBody: ReviewBodyStore | null;
+  readonly takesGeneralDrafts: boolean;
+  /** Publishes a comment on the change request as a whole at once, outside any review. */
+  postComment(ref: ChangeRequestRef, body: string): Promise<void>;
   /**
    * Publishes the reviewer's drafts and `body` with the verdict, in as many calls as the forge takes,
    * and says how each went rather than throwing at the first to fail, so the panel can say what
@@ -64,14 +65,6 @@ export interface Forge {
   /** Throws the reviewer's pending review away with every draft on it; nothing to discard is not a failure. */
   discardReview(ref: ChangeRequestRef): Promise<void>;
 }
-
-/** The review body a forge keeps on its pending review, before the review is submitted. */
-export type ReviewBodyStore = {
-  /** The body as the forge has it; empty when there is none, or no pending review. */
-  read(ref: ChangeRequestRef): Promise<string>;
-  /** Replaces the body, starting a pending review on `target`'s head for a non-empty one when there is none. */
-  write(target: DraftTarget, body: string): Promise<void>;
-};
 
 export type ReviewSubmission = { verdict: Verdict; body: string };
 
@@ -104,7 +97,7 @@ export type AnchorFile = { path: string; previousPath: string | null };
  * whole (`general`). The forge-neutral form a draft comes back in is `DraftLocation` in `shared/drafts.ts`.
  *
  * Only GitLab takes a `general` draft, as a draft note without a position. On GitHub such a comment
- * is a paragraph of the pending review's body, which the service writes through `reviewBody`.
+ * is kept by the service and posted as a comment of its own at submit.
  */
 export type DraftAnchor =
   | (AnchorFile & { kind: "line"; line: AnchorLine })

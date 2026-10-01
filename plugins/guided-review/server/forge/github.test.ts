@@ -12,11 +12,9 @@ import {
   PENDING_REVIEW_QUERY,
   PULL_REQUEST_HEAD_QUERY,
   PULL_REQUEST_QUERY,
-  REVIEW_BODY_QUERY,
   START_REVIEW_MUTATION,
   SUBMIT_REVIEW_MUTATION,
   UPDATE_COMMENT_MUTATION,
-  UPDATE_REVIEW_MUTATION,
 } from "./github.ts";
 import { ForgeError, type AnchorLine, type ChangeRequestRef, type DraftAnchor, type DraftTarget } from "./port.ts";
 
@@ -552,12 +550,6 @@ test("edits a draft's text and deletes a draft by its comment ID", async () => {
  * recording them would publish or delete a real review.
  */
 
-/** `REVIEW_BODY_QUERY`'s answer: the viewer's pending review with `body`, or none. */
-function reviewBody(body: string | null): string {
-  const nodes = body === null ? [] : [{ id: PENDING_REVIEW_ID, viewerDidAuthor: true, body }];
-  return JSON.stringify({ data: { repository: { pullRequest: { reviews: { nodes } } } } });
-}
-
 function submitted(state: string): string {
   return JSON.stringify({ data: { submitPullRequestReview: { pullRequestReview: { id: PENDING_REVIEW_ID, state } } } });
 }
@@ -627,42 +619,33 @@ test("a submit GitHub turns down is reported as a failed step in GitHub's words,
 
 test("discarding deletes the viewer's pending review, and with none pending changes nothing", async () => {
   const { forge, run } = forgeReplaying([
-    { stdout: reviewBody("Draft body") },
+    { stdout: fixture("pending-review.json") },
     { stdout: JSON.stringify({ data: { deletePullRequestReview: { pullRequestReview: { id: PENDING_REVIEW_ID } } } }) },
-    { stdout: reviewBody(null) },
+    { stdout: fixture("pending-review-none.json") },
   ]);
 
   await forge.discardReview(PR_105);
   await forge.discardReview(PR_105);
 
   assert.deepEqual(graphqlCalls(run), [
-    { query: REVIEW_BODY_QUERY, variables: { owner: "sleeyax", name: "paseo-plugins", number: 105 } },
+    { query: PENDING_REVIEW_QUERY, variables: { owner: "sleeyax", name: "paseo-plugins", number: 105 } },
     { query: DELETE_REVIEW_MUTATION, variables: { id: PENDING_REVIEW_ID } },
-    { query: REVIEW_BODY_QUERY, variables: { owner: "sleeyax", name: "paseo-plugins", number: 105 } },
+    { query: PENDING_REVIEW_QUERY, variables: { owner: "sleeyax", name: "paseo-plugins", number: 105 } },
   ]);
 });
 
-test("the review body is the pending review's own, read from it and written to it", async () => {
-  const { forge, run } = forgeReplaying([
-    { stdout: reviewBody("Started on github.com") },
-    { stdout: reviewBody(null) },
-    { stdout: fixture("pending-review.json") },
-    { stdout: JSON.stringify({ data: { updatePullRequestReview: { pullRequestReview: { id: PENDING_REVIEW_ID } } } }) },
-    { stdout: reviewBody(null) },
-  ]);
-  const body = forge.reviewBody!;
+test("a comment on the pull request as a whole is posted to its conversation, the text sent as JSON", async () => {
+  const { forge, run } = forgeReplaying([{ stdout: JSON.stringify({ id: 1, body: "42" }) }]);
 
-  assert.equal(await body.read(PR_105), "Started on github.com");
-  assert.equal(await body.read(PR_105), "", "no pending review has no body");
-  await body.write(PR_105_TARGET, "42");
-  // Clearing the body of a review that is not there starts none.
-  await body.write(PR_105_TARGET, "");
+  await forge.postComment(PR_105, "42");
 
-  const calls = graphqlCalls(run);
   assert.deepEqual(
-    calls.map((call) => call.query),
-    [REVIEW_BODY_QUERY, REVIEW_BODY_QUERY, PENDING_REVIEW_QUERY, UPDATE_REVIEW_MUTATION, REVIEW_BODY_QUERY],
+    run.calls.map((call) => ({ args: call.args, input: call.input })),
+    [
+      {
+        args: ["api", "--hostname", "github.com", "--method", "POST", "repos/sleeyax/paseo-plugins/issues/105/comments", "--input", "-"],
+        input: JSON.stringify({ body: "42" }),
+      },
+    ],
   );
-  // The text goes as a JSON string, so a body of "42" stays text.
-  assert.deepEqual(calls[3]?.variables, { id: PENDING_REVIEW_ID, body: "42" });
 });

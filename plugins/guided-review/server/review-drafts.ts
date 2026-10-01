@@ -3,21 +3,22 @@ import type { Verdict } from "../shared/submit.ts";
 import { anchorAt } from "./anchors.ts";
 import { followNode, type GuideAtHead } from "./carry-over.ts";
 import type { DraftTarget, Forge, SubmitOutcome } from "./forge/port.ts";
+import { SubmitSteps } from "./forge/submit-steps.ts";
 import { isReady, type GuideGenerations } from "./guide-generation.ts";
 import { oneAtATimePer } from "./one-at-a-time.ts";
-import { composeBody, isParagraphId, paragraphId, splitBody, type BodyParagraph } from "./review-body.ts";
-import type { DraftLink, DraftsRecord, ReviewRecord, ReviewStore } from "./review-store.ts";
+import { isParagraphId, paragraphId, type BodyParagraph } from "./review-body.ts";
+import type { DraftLink, ReviewRecord, ReviewStore } from "./review-store.ts";
 
 export type ReviewDraftsOptions = { store: ReviewStore; guides: GuideGenerations };
 
 /**
  * The reviewer's drafts and review body, and what the plugin keeps about them: the drafts live on
- * the forge, `drafts.json` links each to the node or overview it was written from, and on GitHub a general comment
- * is a paragraph of the pending review's body, after the reviewer's own text. On GitLab, which keeps
- * no body before submit, the body is kept here until a submit publishes it.
+ * the forge, `drafts.json` links each to the node or overview it was written from, and on GitHub,
+ * which has no draft on the pull request as a whole, a general comment is kept there until a submit
+ * posts it. Neither forge keeps a body before submit that the plugin can write, so the body is kept
+ * here until a submit publishes it.
  *
- * Every read-modify-write of the body or `drafts.json` goes through `#changing`, one at a time per
- * review: a general comment on GitHub rewrites the body the reviewer's own text shares, and both read it first.
+ * Every read-modify-write of `drafts.json` goes through `#changing`, one at a time per review.
  */
 export class ReviewDrafts {
   readonly #store: ReviewStore;
@@ -31,15 +32,14 @@ export class ReviewDrafts {
 
   /**
    * The reviewer's drafts, read from the forge every time: they live there, and may have been started
-   * on the web. On GitHub the general comments in the pending review's body are drafts too. Each comes
+   * on the web. On GitHub the general comments kept here are drafts too. Each comes
    * with the part of the guide the panel shows that it was written from, when it was written from one,
    * and the passage the reviewer highlighted for it.
    */
   async list(record: ReviewRecord, forge: Forge): Promise<DraftList> {
     const [drafts, kept] = await Promise.all([forge.listDrafts(record.ref), this.#store.getDrafts(record.id)]);
-    const { paragraphs } = await this.#readBody(record, forge, kept);
     const follow = await this.#linkFollower(record);
-    const all = [...drafts, ...paragraphs.map(paragraphDraft)];
+    const all = [...drafts, ...kept.paragraphs.map(paragraphDraft)];
     return { drafts: await Promise.all(all.map(async (draft) => ({ ...draft, ...(await follow(kept.links[draft.id])) }))) };
   }
 
@@ -50,7 +50,7 @@ export class ReviewDrafts {
    * on whatever line now has its number. It is linked to the node or overview `from` of the guide the
    * panel shows when it was written from one, with the passage `quote` the reviewer highlighted there.
    * A `general` comment, on the change as a whole, is a comment on a node or on the overview: an
-   * MR-level draft note on GitLab, and on GitHub a paragraph added to the pending review's body.
+   * MR-level draft note on GitLab, and on GitHub a comment kept here until submit.
    */
   async create(
     record: ReviewRecord,
@@ -73,12 +73,12 @@ export class ReviewDrafts {
     const link = from === null ? null : await this.#linkTo(record, from, passage);
     const { ref, baseSha, startSha, headSha } = changeRequest;
 
-    if (anchor.kind === "general" && forge.reviewBody) {
+    if (anchor.kind === "general" && !forge.takesGeneralDrafts) {
       const paragraph: BodyParagraph = { id: paragraphId(), body: text };
       return this.#changing(record.id, async () => {
         const kept = await this.#store.getDrafts(record.id);
-        const { own, paragraphs } = await this.#readBody(record, forge, kept);
-        await this.#writeBody(record, forge, own, [...paragraphs, paragraph], link === null ? kept.links : { ...kept.links, [paragraph.id]: link });
+        const links = link === null ? kept.links : { ...kept.links, [paragraph.id]: link };
+        await this.#store.saveDrafts(record.id, { links, paragraphs: [...kept.paragraphs, paragraph] });
         return { ...paragraphDraft(paragraph), ...fresh(link) };
       });
     }
@@ -96,14 +96,14 @@ export class ReviewDrafts {
   async update(record: ReviewRecord, forge: Forge, draftId: string, body: string): Promise<void> {
     const text = draftText(body);
     if (!isParagraphId(draftId)) return forge.updateDraft(record.ref, draftId, text);
-    await this.#changingParagraphs(record, forge, draftId, (paragraphs) =>
+    await this.#changingParagraphs(record, draftId, (paragraphs) =>
       paragraphs.map((paragraph) => (paragraph.id === draftId ? { ...paragraph, body: text } : paragraph)),
     );
   }
 
   async delete(record: ReviewRecord, forge: Forge, draftId: string): Promise<void> {
     if (isParagraphId(draftId)) {
-      return this.#changingParagraphs(record, forge, draftId, (paragraphs) => paragraphs.filter((paragraph) => paragraph.id !== draftId));
+      return this.#changingParagraphs(record, draftId, (paragraphs) => paragraphs.filter((paragraph) => paragraph.id !== draftId));
     }
     await forge.deleteDraft(record.ref, draftId);
     await this.#changing(record.id, async () => {
@@ -114,45 +114,47 @@ export class ReviewDrafts {
     });
   }
 
-  /**
-   * The review body so far, the reviewer's own text: the forge's, where it keeps one before submit,
-   * without the general comments GitHub keeps in it, else the one kept here.
-   */
-  async ownBody(record: ReviewRecord, forge: Forge): Promise<string> {
-    return (await this.#readBody(record, forge)).own;
+  /** The review body so far, the reviewer's own text, without GitHub's general comments. */
+  async ownBody(record: ReviewRecord): Promise<string> {
+    return this.#store.getReviewBody(record.id);
   }
 
-  /** Replaces the reviewer's own text of the body, leaving the general comments GitHub keeps after it. */
-  async saveOwnBody(record: ReviewRecord, forge: Forge, body: string): Promise<void> {
-    await this.#changing(record.id, async () => {
-      const kept = await this.#store.getDrafts(record.id);
-      const { paragraphs } = await this.#readBody(record, forge, kept);
-      await this.#writeBody(record, forge, body, paragraphs, kept.links);
-    });
+  /** Replaces the reviewer's own text of the body; a submit keeps it here first, so a refused or failed one loses none of it. */
+  async saveOwnBody(record: ReviewRecord, body: string): Promise<void> {
+    await this.#store.saveReviewBody(record.id, body);
   }
 
   /**
-   * Keeps the body a submit is about to send where the forge keeps none, before anything is sent, so
-   * a refused or failed submit loses none of it.
-   */
-  async holdBody(record: ReviewRecord, forge: Forge, body: string): Promise<void> {
-    if (forge.reviewBody === null) await this.#store.saveReviewBody(record.id, body);
-  }
-
-  /**
-   * Submits the review with `verdict`: the drafts, and the body, the reviewer's own text followed by
-   * the general comments GitHub keeps in it. Once the forge says they are published, nothing kept here
-   * about them is wanted any more.
+   * Submits the review with `verdict`: GitHub's general comments first, each a comment of its own,
+   * then the drafts and the reviewer's own text as the review. A comment is dropped from what is kept
+   * here as soon as it is posted, and the first that fails stops the submit, so trying again posts
+   * none twice. Once the forge says the review is published, nothing kept here is wanted any more.
    */
   async submit(record: ReviewRecord, forge: Forge, verdict: Verdict, body: string): Promise<SubmitOutcome> {
     const outcome = await this.#changing(record.id, async () => {
-      const kept = await this.#store.getDrafts(record.id);
-      const paragraphs = kept.paragraphs.length === 0 ? [] : (await this.#readBody(record, forge, kept)).paragraphs;
-      const outcome = await forge.submitReview(await this.#reviewTarget(record), { verdict, body: composeBody(body, paragraphs) });
+      const steps = new SubmitSteps();
+      let kept = await this.#store.getDrafts(record.id);
+      const comments = kept.paragraphs;
+      for (const [index, paragraph] of comments.entries()) {
+        if (!(await steps.run("comment", postLabel(paragraph), () => forge.postComment(record.ref, paragraph.body))).ok) {
+          for (const rest of comments.slice(index + 1)) steps.skip("comment", postLabel(rest), "Not tried, since a comment before it was not posted.");
+          steps.skip("submit", "Publish the review", "Not tried, since a comment was not posted.");
+          return { published: false, steps: steps.steps };
+        }
+        const { [paragraph.id]: _posted, ...links } = kept.links;
+        kept = { links, paragraphs: kept.paragraphs.filter((candidate) => candidate.id !== paragraph.id) };
+        await this.#store.saveDrafts(record.id, kept);
+      }
+      // GitHub turns down a Comment review with nothing in it, and the comments already said it all.
+      if (comments.length > 0 && verdict === "comment" && body === "" && (await forge.listDrafts(record.ref)).length === 0) {
+        await forge.discardReview(record.ref);
+        return { published: true, steps: steps.steps };
+      }
+      const outcome = await forge.submitReview(await this.#reviewTarget(record), { verdict, body });
       if (outcome.published) await this.#store.saveDrafts(record.id, { links: {}, paragraphs: [] });
-      return outcome;
+      return { published: outcome.published, steps: [...steps.steps, ...outcome.steps] };
     });
-    if (outcome.published) await this.holdBody(record, forge, "");
+    if (outcome.published) await this.saveOwnBody(record, "");
     return outcome;
   }
 
@@ -162,30 +164,17 @@ export class ReviewDrafts {
       await forge.discardReview(record.ref);
       await this.#store.saveDrafts(record.id, { links: {}, paragraphs: [] });
     });
-    await this.holdBody(record, forge, "");
+    await this.saveOwnBody(record, "");
   }
 
-  /**
-   * Rewrites the general comments in the GitHub pending review's body, one of which is `draftId`, and
-   * keeps the reviewer's own text as it is. A paragraph no longer in the body whole, edited or
-   * deleted on GitHub, cannot be found to change.
-   */
-  async #changingParagraphs(
-    record: ReviewRecord,
-    forge: Forge,
-    draftId: string,
-    change: (paragraphs: BodyParagraph[]) => BodyParagraph[],
-  ): Promise<void> {
-    if (!forge.reviewBody) throw new Error(`${draftId} is not one of your drafts on ${record.ref.url}.`);
+  /** Rewrites GitHub's general comments kept here, one of which is `draftId`. */
+  async #changingParagraphs(record: ReviewRecord, draftId: string, change: (paragraphs: BodyParagraph[]) => BodyParagraph[]): Promise<void> {
     await this.#changing(record.id, async () => {
       const kept = await this.#store.getDrafts(record.id);
-      const { own, paragraphs } = await this.#readBody(record, forge, kept);
-      if (!paragraphs.some((paragraph) => paragraph.id === draftId)) {
-        throw new Error("This comment is no longer in your pending review's body as it was written; it was edited or removed on GitHub.");
-      }
-      const next = change(paragraphs);
-      const links = Object.fromEntries(Object.entries(kept.links).filter(([id]) => !isParagraphId(id) || next.some((paragraph) => paragraph.id === id)));
-      await this.#writeBody(record, forge, own, next, links);
+      if (!kept.paragraphs.some((paragraph) => paragraph.id === draftId)) throw new Error(`${draftId} is not one of your drafts on ${record.ref.url}.`);
+      const paragraphs = change(kept.paragraphs);
+      const links = Object.fromEntries(Object.entries(kept.links).filter(([id]) => !isParagraphId(id) || paragraphs.some((paragraph) => paragraph.id === id)));
+      await this.#store.saveDrafts(record.id, { links, paragraphs });
     });
   }
 
@@ -237,31 +226,7 @@ export class ReviewDrafts {
     };
   }
 
-  /**
-   * The body as the forge keeps it, split into the reviewer's own text and the general comments kept
-   * here that are still in it, or on a forge that keeps none, the own text kept here and no paragraphs.
-   */
-  async #readBody(record: ReviewRecord, forge: Forge, kept?: DraftsRecord): Promise<{ own: string; paragraphs: BodyParagraph[] }> {
-    if (!forge.reviewBody) return { own: await this.#store.getReviewBody(record.id), paragraphs: [] };
-    const [body, drafts] = await Promise.all([forge.reviewBody.read(record.ref), kept ?? this.#store.getDrafts(record.id)]);
-    const { own, found } = splitBody(body, drafts.paragraphs);
-    return { own, paragraphs: found };
-  }
-
-  /**
-   * Writes the body, the forge's first, then what is kept here about it: the paragraphs it now holds
-   * and the draft links. Only ever called inside `#changing`.
-   */
-  async #writeBody(record: ReviewRecord, forge: Forge, own: string, paragraphs: BodyParagraph[], links: DraftsRecord["links"]): Promise<void> {
-    if (forge.reviewBody) {
-      await forge.reviewBody.write(await this.#reviewTarget(record), composeBody(own, paragraphs));
-      await this.#store.saveDrafts(record.id, { links, paragraphs });
-    } else {
-      await this.#store.saveReviewBody(record.id, own);
-    }
-  }
-
-  /** The change request at the review's head, which a pending review a write has to start is started on. */
+  /** The change request at the review's head, which a submit with no pending review starts one on. */
   async #reviewTarget(record: ReviewRecord): Promise<DraftTarget> {
     const changeRequest = await this.#store.snapshot(record.id, record.header.headSha);
     if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
@@ -298,7 +263,14 @@ function quoteOf(link: DraftLink | undefined, earlier: boolean): LinkedDraft["qu
   return link?.quote === undefined ? null : { text: link.quote, earlier };
 }
 
-/** A general comment in GitHub's review body, as the panel lists it beside the forge's drafts. */
+/** A general comment GitHub will get at submit, as the panel lists it beside the forge's drafts. */
 function paragraphDraft(paragraph: BodyParagraph): Draft {
   return { id: paragraph.id, body: paragraph.body, location: { kind: "general" } };
+}
+
+/** A submit step posting `paragraph`, named by its start. */
+function postLabel(paragraph: BodyParagraph): string {
+  const line = paragraph.body.split("\n")[0]!.trim();
+  const excerpt = line.length > 60 || paragraph.body.includes("\n") ? `${line.slice(0, 60).trimEnd()}…` : line;
+  return `Post your comment "${excerpt}"`;
 }
