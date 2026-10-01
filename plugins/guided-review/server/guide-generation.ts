@@ -5,7 +5,7 @@ import { setAside } from "./file-classes.ts";
 import type { ChangedFile } from "./forge/port.ts";
 import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, type GuideAgentPort } from "./guide-agent/port.ts";
 import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
-import { keepQuotedAlternatives, layOutGuide, parseGuide } from "./guide-output.ts";
+import { keepQuotedDecisions, layOutGuide, parseGuide } from "./guide-output.ts";
 import { guidePrompt } from "./guide-prompt.ts";
 import type { GuideRecord, ProgressRecord, ReviewRecord, ReviewStore } from "./review-store.ts";
 
@@ -135,7 +135,7 @@ export class GuideGenerations {
       const reply = await this.#guideAgents.reply(generation.agentId);
       const parsed = parseGuide(reply, files.sent, files.setAside.map((entry) => entry.path));
       if (!parsed.ok) return save({ status: "failed", guide: null, message: parsed.message });
-      const guide = layOutGuide(keepQuotedAlternatives(parsed.guide, changeRequest, files.sent), changeRequest.files, files.setAside);
+      const guide = layOutGuide(keepQuotedDecisions(parsed.guide, changeRequest, files.sent), changeRequest.files, files.setAside);
       // Before the guide reads as ready, so its first progress read already has what carried over.
       await this.#carryMarksOver(record, generation.agentId, guide, changeRequest.files);
       await save({ status: "ready", guide, message: null });

@@ -278,6 +278,33 @@ test("a decision keeps its alternative only when the author's words quoted for i
   );
 });
 
+test("a node keeps only the decisions whose quoted alternative the overview does not already give", async (t) => {
+  const { service, agents } = await withHost(t, [file("src/a.ts", "@@ -1,1 +1,1 @@\n-a\n+// Polling, not a webhook: the webhook drops events under load.")]);
+  const decision = (choice: string, quote: string) => ({ choice, alternative: { text: "Not that.", quote } });
+  const base = guideOf([node("a", ["src/a.ts"])]);
+
+  const guide = await generated(service, agents, {
+    ...base,
+    overview: { ...base.overview, decisions: [decision("Poll.", "the webhook drops events under load")] },
+    nodes: [
+      {
+        ...base.nodes[0]!,
+        decisions: [
+          decision("Jitter.", "a fixed delay would make clients retry in lockstep"),
+          decision("Poll here too.", "“The webhook drops events under load.”"),
+          decision("Cache.", "caching is out of scope here"),
+          { choice: "Retry.", alternative: null },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(guide?.status, "ready");
+  if (guide?.status !== "ready") return;
+  assert.deepEqual(guide.guide.nodes[0]!.decisions.map((entry) => entry.choice), ["Jitter."]);
+  assert.notEqual(guide.guide.overview.decisions[0]!.alternative, null);
+});
+
 test("a lockfile a node covers stays in Supporting, where the paths put it, and leaves the node", async (t) => {
   const { service, agents } = await withHost(t, [file("src/upload.ts"), file("src/retry.ts"), file("pnpm-lock.yaml")]);
 

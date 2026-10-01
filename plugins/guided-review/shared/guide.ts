@@ -21,7 +21,11 @@ const DecisionSchema = z.object({
 /** An edge of the node DAG: the node it sits on builds on `nodeId`, which comes earlier in `nodes`. */
 const DependencySchema = z.object({
   nodeId: z.string().min(1).describe("The `id` of a node listed earlier in `nodes`."),
-  reason: z.string().min(1).describe("Why that node has to be understood before this one, in one sentence."),
+  reason: z
+    .string()
+    .min(1)
+    .nullable()
+    .describe("Why that node has to be understood before this one, in one sentence, only when the two titles do not make it obvious; otherwise null."),
 });
 
 export const SUPPORTING_CATEGORIES = ["test", "docs", "lockfile", "generated", "wiring"] as const;
@@ -38,7 +42,7 @@ export const GuideOverviewSchema = z.object({
     .describe("Two or three sentences on the idea behind the change and why it exists, before any code."),
   needToKnows: z
     .array(z.string().min(1))
-    .describe("The new invariants, contracts and concepts a reviewer must hold in mind while reading, one per entry."),
+    .describe("The new invariants, contracts and concepts a reviewer must hold in mind while reading, one per entry, never restating a node's summary."),
   decisions: z.array(DecisionSchema).describe("The decisions the author made across the change, each with the alternative the author rejected where they say so."),
   attention: z
     .array(
@@ -78,12 +82,21 @@ export const GuideNodeSchema = z.object({
   id: z.string().min(1).describe("A short slug, unique within the guide, such as `retry-policy`."),
   title: z.string().min(1).describe("The concept's name, a few words."),
   summary: z.string().min(1).describe("What the concept does, in one line."),
-  explanation: z.string().min(1).describe("How it works: a short paragraph or two a reviewer reads before its code."),
+  explanation: z
+    .string()
+    .min(1)
+    .describe(
+      "Why the concept exists and what its code does not make obvious, in at most three sentences a reviewer reads just before the code. Never walk through what the code does, and never repeat the summary.",
+    ),
   covers: z
     .array(CoveredCodeSchema)
     .min(1)
     .describe("The code this node explains, one entry per file, in the order to read it."),
-  decisions: z.array(DecisionSchema).describe("Decisions local to this concept, each with the alternative the author rejected where they say so."),
+  decisions: z
+    .array(DecisionSchema)
+    .describe(
+      "Decisions local to this concept whose rejected alternative the author names, each with that alternative. A choice with no such alternative belongs in the explanation, if anywhere, and a decision in the overview is not repeated here.",
+    ),
   dependencies: z
     .array(DependencySchema)
     .describe("The earlier nodes this concept builds on, each with why; empty for a foundation."),
