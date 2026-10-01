@@ -354,11 +354,11 @@ function Decisions({ decisions, colors }: { decisions: readonly GuideDecision[];
         <Bullet
           key={index}
           colors={colors}
-          item={{ key: `decision:${index}`, text: alternative ? `${choice} Rather than: “${alternative.quote}”` : choice }}
+          item={{ key: `decision:${index}`, text: alternative ? `${choice} Author: “${alternative.quote}”` : choice }}
           sub={
             alternative ? (
               <>
-                {"Rather than: "}
+                {"Author: "}
                 <Text style={{ fontStyle: "italic" }}>“{alternative.quote}”</Text>
               </>
             ) : undefined
