@@ -41,7 +41,7 @@ export function Navigator({ groups, selected, select, drafts, colors }: Navigato
     progress !== null && group.entries.every((entry) => isUnderstood(progress, entry.subject)) && !group.entries.some((entry) => entry.key === selected);
 
   return (
-    <View accessibilityRole="list" style={{ paddingVertical: spacing[2] }}>
+    <View accessibilityRole="list" style={{ paddingBottom: spacing[2] }}>
       <Row colors={colors} selected={selected === OVERVIEW_KEY} onPress={() => select(OVERVIEW_KEY)} depth={0}>
         <Title colors={colors} strong>
           Overview

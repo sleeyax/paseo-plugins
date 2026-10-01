@@ -8,6 +8,7 @@ import { DraftsSection, type DraftsControl } from "./drafts.tsx";
 import { layerTitle } from "./guide-entries.ts";
 import { StaleGuideBanner, type RegenerateControl } from "./head-check.tsx";
 import { ProgressSummary } from "./progress.tsx";
+import { Section } from "./section.tsx";
 import { fontSize, leading, radius, spacing } from "./theme.ts";
 
 /** Wide enough for a draft card's text and the progress bars, narrow enough to leave the guide its room. */
@@ -22,14 +23,18 @@ export type SidebarProps = {
   theme: PluginTheme;
 };
 
-/** What stays in view beside the guide: the change request, whether the guide is still current, the reviewer's progress and their drafts. Finish review is pinned under it by the panel. */
+/** What stays in view beside the guide, as flat sections: the change request, whether the guide is still current, the reviewer's progress and their drafts. Finish review is pinned under it by the panel. */
 export function Sidebar({ reviewId, header, note, drafts, regenerate, theme }: SidebarProps) {
   const colors = theme.colors;
   return (
     <>
       <Header header={header} theme={theme} />
       <StaleGuideBanner reviewId={reviewId} header={header} theme={theme} regenerate={regenerate} />
-      {note ? <Note color={colors.statusWarning}>{note}</Note> : null}
+      {note ? (
+        <Section colors={colors} title="Workspace" tone={colors.statusWarning}>
+          <Note color={colors.statusWarning}>{note}</Note>
+        </Section>
+      ) : null}
       <ProgressSummary colors={colors} layerTitle={layerTitle} />
       {drafts ? <DraftsSection control={drafts} colors={colors} /> : null}
     </>
@@ -47,16 +52,7 @@ export function Header({ header, theme }: { header: ReviewHeader; theme: PluginT
   const small = { fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) };
 
   return (
-    <View
-      style={{
-        gap: spacing[2],
-        padding: spacing[4],
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: colors.border,
-        backgroundColor: colors.surface1,
-      }}
-    >
+    <Section colors={colors} title={header.forge === "gitlab" ? "Merge request" : "Pull request"}>
       <Text style={{ color: colors.foreground, fontSize: fontSize.lg, lineHeight: leading(fontSize.lg), fontWeight: "600" }}>
         {header.title}
       </Text>
@@ -75,7 +71,7 @@ export function Header({ header, theme }: { header: ReviewHeader; theme: PluginT
         <Text style={{ color: colors.statusDanger }}>−{header.deletions}</Text>
       </Text>
       <ExternalLink href={header.url}>Open on {FORGE_LABELS[header.forge]}</ExternalLink>
-    </View>
+    </Section>
   );
 }
 
