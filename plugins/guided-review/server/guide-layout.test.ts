@@ -279,14 +279,14 @@ test("a decision keeps its alternative only when the author's words quoted for i
   );
 });
 
-test("a node keeps only the decisions whose quoted alternative the overview does not already give", async (t) => {
+test("a node keeps only its decisions with a quoted alternative, and the overview drops a decision a node has", async (t) => {
   const { service, agents } = await withHost(t, [file("src/a.ts", "@@ -1,1 +1,1 @@\n-a\n+// Polling, not a webhook: the webhook drops events under load.")]);
   const decision = (choice: string, quote: string) => ({ choice, alternative: { text: "Not that.", quote } });
   const base = guideOf([node("a", ["src/a.ts"])]);
 
   const guide = await generated(service, agents, {
     ...base,
-    overview: { ...base.overview, decisions: [decision("Poll.", "the webhook drops events under load")] },
+    overview: { ...base.overview, decisions: [decision("Poll.", "the webhook drops events under load"), decision("Push nothing.", "Polling, not a webhook")] },
     nodes: [
       {
         ...base.nodes[0]!,
@@ -302,8 +302,11 @@ test("a node keeps only the decisions whose quoted alternative the overview does
 
   assert.equal(guide?.status, "ready");
   if (guide?.status !== "ready") return;
-  assert.deepEqual(guide.guide.nodes[0]!.decisions.map((entry) => entry.choice), ["Jitter."]);
-  assert.notEqual(guide.guide.overview.decisions[0]!.alternative, null);
+  assert.deepEqual(guide.guide.nodes[0]!.decisions.map((entry) => entry.choice), ["Jitter.", "Poll here too."]);
+  assert.deepEqual(
+    guide.guide.overview.decisions.map((entry) => [entry.choice, entry.alternative !== null]),
+    [["Push nothing.", true]],
+  );
 });
 
 test("a lockfile a node covers stays in Supporting, where the paths put it, and leaves the node", async (t) => {

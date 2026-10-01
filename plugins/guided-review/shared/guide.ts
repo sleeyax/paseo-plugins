@@ -43,7 +43,7 @@ export const GuideOverviewSchema = z.object({
   needToKnows: z
     .array(z.string().min(1))
     .describe("The new invariants, contracts and concepts a reviewer must hold in mind while reading, one per entry, each spanning more than one node; a fact about one node goes in that node."),
-  decisions: z.array(DecisionSchema).describe("The decisions the author made across the change, each with the alternative the author rejected where they say so."),
+  decisions: z.array(DecisionSchema).describe("The decisions the author made that span more than one node, each with the alternative the author rejected where they say so; a decision about one node goes on that node."),
   attention: z
     .array(
       z.object({
@@ -86,7 +86,7 @@ export const GuideNodeSchema = z.object({
   behaviour: z
     .array(z.string().min(1))
     .describe(
-      "What the concept does, one observable fact per entry, for a reviewer who never opens its code: when it runs, what it reads and writes, its side effects, every other file in the repository that uses what changed, and the names and limits that matter after merge. Say what happens, never how the lines make it happen; leave out ids, secret names, names nothing refers to and what stays unchanged, and repeat nothing the summary or a need-to-know says.",
+      "What the concept does, one observable fact per entry, for a reviewer who never opens its code: when it runs, what it reads and writes, its side effects, every other file in the repository that uses what changed, and the names and limits that matter after merge. Say what happens, never how the lines make it happen. Keep only what a reviewer would misunderstand or judge differently without: leave out boilerplate that matches the rest of the repository, ids, secret names, names nothing refers to and what stays unchanged, and repeat nothing the summary or a need-to-know says.",
     ),
   covers: z
     .array(CoveredCodeSchema)
@@ -95,7 +95,7 @@ export const GuideNodeSchema = z.object({
   decisions: z
     .array(DecisionSchema)
     .describe(
-      "Decisions local to this concept whose rejected alternative the author names, each with that alternative. A choice with no such alternative belongs in `why` or `behaviour`, if anywhere, and a decision in the overview is not repeated here.",
+      "Decisions about this concept whose rejected alternative the author names, each with that alternative. A choice with no such alternative belongs in `why` or `behaviour`, if anywhere.",
     ),
   dependencies: z
     .array(DependencySchema)
