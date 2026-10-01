@@ -218,14 +218,21 @@ export function NodeCard({
             <UnderstoodToggle subject={{ kind: "node", nodeId: node.id }} colors={colors} />
           </View>
           <Collapsible collapsed={collapsed}>
-            <Body colors={colors} muted item={{ key: "summary", text: node.summary }}>
+            <Label colors={colors}>Summary</Label>
+            <Body colors={colors} item={{ key: "summary", text: node.summary }}>
               <GuideText text={node.summary} colors={colors} />
             </Body>
             {node.dependencies.length > 0 ? <Dependencies dependencies={node.dependencies} titles={titles} colors={colors} /> : null}
+            <Label colors={colors}>Explanation</Label>
             <Body colors={colors} item={{ key: "explanation", text: node.explanation }}>
               <GuideText text={node.explanation} colors={colors} />
             </Body>
-            {node.decisions.length > 0 ? <Decisions decisions={node.decisions} colors={colors} /> : null}
+            {node.decisions.length > 0 ? (
+              <>
+                <Label colors={colors}>Decisions</Label>
+                <Decisions decisions={node.decisions} colors={colors} />
+              </>
+            ) : null}
           </Collapsible>
         </View>
       </CardTextContext.Provider>
@@ -249,32 +256,30 @@ export function NodeCard({
 /** The nodes a node builds on: on one line when none has a reason to give, else a bullet each. */
 function Dependencies({ dependencies, titles, colors }: { dependencies: readonly GuideDependency[]; titles: ReadonlyMap<string, string>; colors: Colors }) {
   const titled = dependencies.map((dependency) => ({ ...dependency, title: titles.get(dependency.nodeId) ?? dependency.nodeId }));
-  if (titled.every((dependency) => dependency.reason === null)) {
-    return (
-      <Body colors={colors} muted item={{ key: "dependencies", text: `Builds on ${titled.map((dependency) => dependency.title).join(", ")}` }}>
-        {"Builds on "}
-        {titled.map((dependency, index) => (
-          <React.Fragment key={dependency.nodeId}>
-            {index > 0 ? ", " : null}
-            <NodeLink nodeId={dependency.nodeId} title={dependency.title} colors={colors} />
-          </React.Fragment>
-        ))}
-      </Body>
-    );
-  }
   return (
     <>
       <Label colors={colors}>Builds on</Label>
-      {titled.map(({ nodeId, title, reason }) => (
-        <Bullet key={nodeId} colors={colors} item={{ key: `dependency:${nodeId}`, text: reason === null ? title : `${title}: ${reason}` }}>
-          <NodeLink nodeId={nodeId} title={title} colors={colors} />
-          {reason === null ? null : (
-            <>
-              : <GuideText text={reason} colors={colors} />
-            </>
-          )}
-        </Bullet>
-      ))}
+      {titled.every((dependency) => dependency.reason === null) ? (
+        <Body colors={colors} item={{ key: "dependencies", text: titled.map((dependency) => dependency.title).join(", ") }}>
+          {titled.map((dependency, index) => (
+            <React.Fragment key={dependency.nodeId}>
+              {index > 0 ? ", " : null}
+              <NodeLink nodeId={dependency.nodeId} title={dependency.title} colors={colors} />
+            </React.Fragment>
+          ))}
+        </Body>
+      ) : (
+        titled.map(({ nodeId, title, reason }) => (
+          <Bullet key={nodeId} colors={colors} item={{ key: `dependency:${nodeId}`, text: reason === null ? title : `${title}: ${reason}` }}>
+            <NodeLink nodeId={nodeId} title={title} colors={colors} />
+            {reason === null ? null : (
+              <>
+                : <GuideText text={reason} colors={colors} />
+              </>
+            )}
+          </Bullet>
+        ))
+      )}
     </>
   );
 }
