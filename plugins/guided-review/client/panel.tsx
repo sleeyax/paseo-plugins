@@ -1,22 +1,21 @@
-import type { PluginTheme } from "@getpaseo/plugin";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
-import { ExternalLink } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import React from "react";
-import { ScrollView, Text, View } from "react-native";
+import React, { useState } from "react";
+import { ScrollView, View, type LayoutChangeEvent } from "react-native";
 import * as contracts from "../shared/contracts.ts";
-import type { ReviewHeader } from "../shared/contracts.ts";
+import type { GuideState } from "../shared/guide.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
-import { numberLabel } from "../shared/reference.ts";
 import { useAskAbout } from "./ask-action.tsx";
 import { BranchStartView, isBranchRunning } from "./branch-start.tsx";
 import { DraftsContext, DraftsSection, useDrafts } from "./drafts.tsx";
 import { GuideView } from "./guide-view.tsx";
 import { FinishReview } from "./finish-review.tsx";
 import { StaleGuideBanner, useRegenerate } from "./head-check.tsx";
-import { useProgress } from "./progress.tsx";
-import { fontSize, leading, MAX_PANEL_WIDTH, radius, spacing } from "./theme.ts";
+import { layoutFor } from "./guide-entries.ts";
+import { ProgressContext, useProgress } from "./progress.tsx";
+import { Header, Note, Sidebar, SIDEBAR_WIDTH } from "./sidebar.tsx";
+import { MAX_PANEL_WIDTH, spacing } from "./theme.ts";
 
 const POLL_MS = 2_000;
 /** An empty panel is asked again now and then, since the Command Center item starts a branch's guide from outside it. */
@@ -62,105 +61,94 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
     onRegenerated: () => void panel.refetch(),
   });
 
-  let body: React.ReactNode;
-  if (panel.isPending) {
-    body = <Note color={colors.foregroundMuted}>Reading the review…</Note>;
-  } else if (panel.isError) {
-    body = <Note color={colors.statusDanger}>{panel.error instanceof Error ? panel.error.message : String(panel.error)}</Note>;
-  } else if (panel.data.status === "none") {
-    body = (
-      <BranchStartView
-        workspaceId={workspaceId}
-        branch={panel.data.branch}
-        theme={theme}
-        {...(navigation ? { openWorkspace: (id: string) => navigation.openWorkspace({ workspaceId: id }) } : {})}
-        onStarted={() => void panel.refetch()}
-      />
-    );
-  } else {
-    const { reviewId } = panel.data;
-    body = (
-      <View style={{ gap: spacing[3] }}>
-        <Header header={panel.data.header} theme={theme} />
-        <StaleGuideBanner reviewId={reviewId} header={panel.data.header} theme={theme} regenerate={regenerate} />
-        {panel.data.note ? <Note color={colors.statusWarning}>{panel.data.note}</Note> : null}
-        {drafts ? <DraftsSection control={drafts} colors={colors} /> : null}
-        {drafts ? <FinishReview reviewId={reviewId} header={panel.data.header} drafts={drafts} colors={colors} regenerate={regenerate} /> : null}
-        <GuideView
-          reviewId={reviewId}
-          state={panel.data.guide}
+  const [width, setWidth] = useState<number | null>(null);
+  // Until the web panel has been measured nothing is drawn, rather than the stack for a frame.
+  const shape = layout.platform !== "web" ? "stack" : width === null ? null : layoutFor(width, layout.platform);
+  const measure = (event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width);
+
+  if (panel.isPending || panel.isError || panel.data.status === "none" || shape === "stack") {
+    let body: React.ReactNode;
+    if (panel.isPending) {
+      body = <Note color={colors.foregroundMuted}>Reading the review…</Note>;
+    } else if (panel.isError) {
+      body = <Note color={colors.statusDanger}>{panel.error instanceof Error ? panel.error.message : String(panel.error)}</Note>;
+    } else if (panel.data.status === "none") {
+      body = (
+        <BranchStartView
+          workspaceId={workspaceId}
+          branch={panel.data.branch}
           theme={theme}
-          {...(openAgent ? { openAgent } : {})}
-          ask={ask}
-          progress={progress}
-          retry={{
-            run: () => retry.mutate(reviewId),
-            pending: retry.isPending,
-            error: retry.error ? (retry.error instanceof Error ? retry.error.message : String(retry.error)) : null,
-          }}
+          {...(navigation ? { openWorkspace: (id: string) => navigation.openWorkspace({ workspaceId: id }) } : {})}
+          onStarted={() => void panel.refetch()}
         />
-      </View>
+      );
+    } else {
+      const { reviewId } = panel.data;
+      body = (
+        <View style={{ gap: spacing[3] }}>
+          <Header header={panel.data.header} theme={theme} />
+          <StaleGuideBanner reviewId={reviewId} header={panel.data.header} theme={theme} regenerate={regenerate} />
+          {panel.data.note ? <Note color={colors.statusWarning}>{panel.data.note}</Note> : null}
+          {drafts ? <DraftsSection control={drafts} colors={colors} /> : null}
+          {drafts ? <FinishReview reviewId={reviewId} header={panel.data.header} drafts={drafts} colors={colors} regenerate={regenerate} /> : null}
+          {guideView(reviewId, panel.data.guide, true)}
+        </View>
+      );
+    }
+    return (
+      <ScrollView
+        onLayout={measure}
+        style={{ flex: 1, backgroundColor: colors.surface0 }}
+        contentContainerStyle={{
+          width: "100%",
+          maxWidth: MAX_PANEL_WIDTH,
+          alignSelf: "center",
+          padding: layout.compact ? spacing[3] : spacing[4],
+        }}
+      >
+        <ProgressContext.Provider value={progress}>
+          <DraftsContext.Provider value={drafts}>{body}</DraftsContext.Provider>
+        </ProgressContext.Provider>
+      </ScrollView>
     );
   }
 
+  if (shape === null) return <View onLayout={measure} style={{ flex: 1, backgroundColor: colors.surface0 }} />;
+
+  const { reviewId } = panel.data;
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.surface0 }}
-      contentContainerStyle={{
-        width: "100%",
-        maxWidth: MAX_PANEL_WIDTH,
-        alignSelf: "center",
-        padding: layout.compact ? spacing[3] : spacing[4],
-      }}
-    >
-      <DraftsContext.Provider value={drafts}>{body}</DraftsContext.Provider>
-    </ScrollView>
-  );
-}
-
-const STATE_LABELS = { open: "Open", closed: "Closed", merged: "Merged" } as const;
-const FORGE_LABELS = { github: "GitHub", gitlab: "GitLab" } as const;
-
-function Header({ header, theme }: { header: ReviewHeader; theme: PluginTheme }) {
-  const colors = theme.colors;
-  const stateColor = header.isDraft
-    ? colors.foregroundMuted
-    : { open: colors.statusSuccess, merged: colors.accent, closed: colors.statusDanger }[header.state];
-  const small = { fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) };
-
-  return (
-    <View
-      style={{
-        gap: spacing[2],
-        padding: spacing[4],
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: colors.border,
-        backgroundColor: colors.surface1,
-      }}
-    >
-      <Text style={{ color: colors.foreground, fontSize: fontSize.lg, lineHeight: leading(fontSize.lg), fontWeight: "600" }}>
-        {header.title}
-      </Text>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing[2] }}>
-        <View style={{ paddingHorizontal: spacing[2], borderRadius: radius.full, borderWidth: 1, borderColor: stateColor }}>
-          <Text style={{ ...small, color: stateColor }}>{header.isDraft ? "Draft" : STATE_LABELS[header.state]}</Text>
-        </View>
-        <Text style={{ ...small, color: colors.foregroundMuted }}>
-          {header.project} {numberLabel(header.forge, header.number)} by {header.author}
-        </Text>
-      </View>
-      <Text style={{ ...small, color: colors.foregroundMuted }}>
-        {header.fileCount === 1 ? "1 file" : `${header.fileCount} files`}
-        {"  "}
-        <Text style={{ color: colors.statusSuccess }}>+{header.additions}</Text>{" "}
-        <Text style={{ color: colors.statusDanger }}>−{header.deletions}</Text>
-      </Text>
-      <ExternalLink href={header.url}>Open on {FORGE_LABELS[header.forge]}</ExternalLink>
+    <View onLayout={measure} style={{ flex: 1, flexDirection: "row", backgroundColor: colors.surface0 }}>
+      <ProgressContext.Provider value={progress}>
+        <DraftsContext.Provider value={drafts}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[4] }}>
+            {guideView(reviewId, panel.data.guide, false)}
+          </ScrollView>
+          <ScrollView
+            style={{ width: SIDEBAR_WIDTH, flexGrow: 0, flexShrink: 0, borderLeftWidth: 1, borderColor: colors.border }}
+            contentContainerStyle={{ gap: spacing[3], padding: spacing[3] }}
+          >
+            <Sidebar reviewId={reviewId} header={panel.data.header} note={panel.data.note} drafts={drafts} regenerate={regenerate} theme={theme} />
+          </ScrollView>
+        </DraftsContext.Provider>
+      </ProgressContext.Provider>
     </View>
   );
-}
 
-function Note({ color, children }: { color: string; children: React.ReactNode }) {
-  return <Text style={{ color, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>{children}</Text>;
+  function guideView(reviewId: string, state: GuideState, withProgress: boolean) {
+    return (
+      <GuideView
+        reviewId={reviewId}
+        state={state}
+        theme={theme}
+        {...(openAgent ? { openAgent } : {})}
+        ask={ask}
+        withProgress={withProgress}
+        retry={{
+          run: () => retry.mutate(reviewId),
+          pending: retry.isPending,
+          error: retry.error ? (retry.error instanceof Error ? retry.error.message : String(retry.error)) : null,
+        }}
+      />
+    );
+  }
 }
