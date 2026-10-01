@@ -42,7 +42,7 @@ export const GuideOverviewSchema = z.object({
     .describe("Two or three sentences on the idea behind the change and why it exists, before any code."),
   needToKnows: z
     .array(z.string().min(1))
-    .describe("The new invariants, contracts and concepts a reviewer must hold in mind while reading, one per entry, never restating a node's summary."),
+    .describe("The new invariants, contracts and concepts a reviewer must hold in mind while reading, one per entry, each spanning more than one node; a fact about one node goes in that node."),
   decisions: z.array(DecisionSchema).describe("The decisions the author made across the change, each with the alternative the author rejected where they say so."),
   attention: z
     .array(
@@ -86,7 +86,7 @@ export const GuideNodeSchema = z.object({
   behaviour: z
     .array(z.string().min(1))
     .describe(
-      "What the concept does, one observable fact per entry, for a reviewer who never opens its code: when it runs, what it reads and writes, its side effects, what else in the repository uses what changed, and the names and limits that matter after merge. Say what happens, never how the lines make it happen, and repeat nothing the summary says.",
+      "What the concept does, one observable fact per entry, for a reviewer who never opens its code: when it runs, what it reads and writes, its side effects, every other file in the repository that uses what changed, and the names and limits that matter after merge. Say what happens, never how the lines make it happen; leave out ids, secret names, names nothing refers to and what stays unchanged, and repeat nothing the summary or a need-to-know says.",
     ),
   covers: z
     .array(CoveredCodeSchema)
