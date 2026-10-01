@@ -8,7 +8,7 @@ import { guideGroups, layerTitle, type Entry } from "./guide-entries.ts";
 import { AskAction, type AskControl } from "./ask-action.tsx";
 import { NodeCode } from "./diff-view.tsx";
 import { ItemCommentBox, NodeComments, OverviewComments, useCommentOnHold, useCommentOnRelease, type Selected } from "./drafts.tsx";
-import { GroupUnderstoodToggle, ProgressContext, ProgressSummary, UnderstoodToggle, useCollapsed, type ProgressControl } from "./progress.tsx";
+import { GroupUnderstoodToggle, ProgressSummary, UnderstoodToggle, useCollapsed } from "./progress.tsx";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 import { Button } from "./button.tsx";
 import { GuideText } from "./guide-text.tsx";
@@ -23,12 +23,12 @@ export type GuideViewProps = {
   retry: { run: () => void; pending: boolean; error: string | null };
   /** "Ask about this" on each node, and on each Supporting and Unsorted entry. */
   ask: AskControl;
-  /** The reviewer's progress and the "understood" toggles; the ready guide draws neither without it. */
-  progress?: ProgressControl;
+  /** Draws the progress summary above the groups, where no sidebar shows it. */
+  withProgress: boolean;
 };
 
 /** The guide under the header: its generation while it runs, its failure with a retry, or the guide itself. */
-export function GuideView({ reviewId, state, theme, openAgent, retry, ask, progress }: GuideViewProps) {
+export function GuideView({ reviewId, state, theme, openAgent, retry, ask, withProgress }: GuideViewProps) {
   const colors = theme.colors;
   const agentLink =
     state.agentId !== null && openAgent ? (
@@ -64,11 +64,11 @@ export function GuideView({ reviewId, state, theme, openAgent, retry, ask, progr
       );
     case "ready":
       return (
-        <ProgressContext.Provider value={progress ?? null}>
+        <>
           <Overview guide={state.guide} colors={colors} />
           {agentLink ? <View style={{ alignItems: "flex-start" }}>{agentLink}</View> : null}
-          <Tree reviewId={reviewId} agentId={state.agentId} guide={state.guide} theme={theme} ask={ask} />
-        </ProgressContext.Provider>
+          <Tree reviewId={reviewId} agentId={state.agentId} guide={state.guide} theme={theme} ask={ask} withProgress={withProgress} />
+        </>
       );
   }
 }
@@ -80,19 +80,21 @@ function Tree({
   guide,
   theme,
   ask,
+  withProgress,
 }: {
   reviewId: string;
   agentId: string;
   guide: LayeredGuide;
   theme: PluginTheme;
   ask: AskControl;
+  withProgress: boolean;
 }) {
   const colors = theme.colors;
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
   const code = (entry: Entry) => <NodeCode reviewId={reviewId} agentId={agentId} subject={entry.subject} theme={theme} />;
   return (
     <>
-      <ProgressSummary colors={colors} layerTitle={layerTitle} />
+      {withProgress ? <ProgressSummary colors={colors} layerTitle={layerTitle} /> : null}
       {guideGroups(guide).map((group) => (
         <React.Fragment key={group.id}>
           <Heading colors={colors} subjects={group.entries.map((entry) => entry.subject)}>
