@@ -334,15 +334,17 @@ function Decisions({ decisions, colors }: { decisions: readonly GuideDecision[];
           key={index}
           colors={colors}
           item={{ key: `decision:${index}`, text: alternative ? `${choice} Rather than: ${alternative.text}` : choice }}
+          sub={
+            alternative ? (
+              <>
+                {"Rather than: "}
+                <GuideText text={alternative.text} colors={colors} />
+                <Text style={{ fontStyle: "italic" }}> (“{alternative.quote}”)</Text>
+              </>
+            ) : undefined
+          }
         >
           <GuideText text={choice} colors={colors} />
-          {alternative ? (
-            <Text style={{ color: colors.foregroundMuted }}>
-              {" Rather than: "}
-              <GuideText text={alternative.text} colors={colors} />
-              <Text style={{ fontStyle: "italic" }}> (“{alternative.quote}”)</Text>
-            </Text>
-          ) : null}
         </Bullet>
       ))}
     </>
@@ -500,19 +502,34 @@ function Body({
   );
 }
 
-function Bullet({ colors, item, children }: { colors: Colors; item?: Item; children: React.ReactNode }) {
+/** A `sub` is a muted point nested under the bullet, part of the same item. */
+function Bullet({ colors, item, sub, children }: { colors: Colors; item?: Item; sub?: React.ReactNode; children: React.ReactNode }) {
   const { ref, onLongPress, box } = useItem(item, colors);
   return (
     <>
       <View ref={ref} style={{ flexDirection: "row", gap: spacing[2] }}>
         <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>•</Text>
-        <Text
-          selectable={HIGHLIGHTS_TEXT}
-          onLongPress={onLongPress}
-          style={{ flex: 1, color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}
-        >
-          {children}
-        </Text>
+        <View style={{ flex: 1, gap: spacing[1] }}>
+          <Text
+            selectable={HIGHLIGHTS_TEXT}
+            onLongPress={onLongPress}
+            style={{ color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}
+          >
+            {children}
+          </Text>
+          {sub === undefined ? null : (
+            <View style={{ flexDirection: "row", gap: spacing[2] }}>
+              <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>◦</Text>
+              <Text
+                selectable={HIGHLIGHTS_TEXT}
+                onLongPress={onLongPress}
+                style={{ flex: 1, color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}
+              >
+                {sub}
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
       {box}
     </>
