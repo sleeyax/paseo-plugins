@@ -1,7 +1,7 @@
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { ScrollView, View, type LayoutChangeEvent } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import type { GuideState } from "../shared/guide.ts";
@@ -12,7 +12,9 @@ import { DraftsContext, DraftsSection, useDrafts } from "./drafts.tsx";
 import { GuideView } from "./guide-view.tsx";
 import { FinishReview } from "./finish-review.tsx";
 import { StaleGuideBanner, useRegenerate } from "./head-check.tsx";
-import { layoutFor } from "./guide-entries.ts";
+import { Detail } from "./detail.tsx";
+import { guideGroups, layoutFor } from "./guide-entries.ts";
+import { Navigator, NAVIGATOR_WIDTH, useSelection } from "./navigator.tsx";
 import { ProgressContext, useProgress } from "./progress.tsx";
 import { Header, Note, Sidebar, SIDEBAR_WIDTH } from "./sidebar.tsx";
 import { MAX_PANEL_WIDTH, spacing } from "./theme.ts";
@@ -61,6 +63,9 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
     onRegenerated: () => void panel.refetch(),
   });
 
+  const readyGuide = panel.data?.status === "ready" && panel.data.guide.status === "ready" ? panel.data.guide.guide : null;
+  const groups = useMemo(() => (readyGuide === null ? [] : guideGroups(readyGuide)), [readyGuide]);
+  const [selected, select] = useSelection(groups, progress.progress);
   const [width, setWidth] = useState<number | null>(null);
   // Until the web panel has been measured nothing is drawn, rather than the stack for a frame.
   const shape = layout.platform !== "web" ? "stack" : width === null ? null : layoutFor(width, layout.platform);
@@ -115,20 +120,46 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
 
   if (shape === null) return <View onLayout={measure} style={{ flex: 1, backgroundColor: colors.surface0 }} />;
 
-  const { reviewId } = panel.data;
+  const { reviewId, header, note, guide } = panel.data;
+  const sidebar = <Sidebar reviewId={reviewId} header={header} note={note} drafts={drafts} regenerate={regenerate} theme={theme} />;
+  const navigator =
+    guide.status === "ready" ? <Navigator groups={groups} selected={selected} select={select} drafts={drafts?.drafts ?? []} colors={colors} /> : null;
+  const divider = { borderColor: colors.border, flexGrow: 0, flexShrink: 0 } as const;
   return (
     <View onLayout={measure} style={{ flex: 1, flexDirection: "row", backgroundColor: colors.surface0 }}>
       <ProgressContext.Provider value={progress}>
         <DraftsContext.Provider value={drafts}>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[4] }}>
-            {guideView(reviewId, panel.data.guide, false)}
-          </ScrollView>
-          <ScrollView
-            style={{ width: SIDEBAR_WIDTH, flexGrow: 0, flexShrink: 0, borderLeftWidth: 1, borderColor: colors.border }}
-            contentContainerStyle={{ gap: spacing[3], padding: spacing[3] }}
-          >
-            <Sidebar reviewId={reviewId} header={panel.data.header} note={panel.data.note} drafts={drafts} regenerate={regenerate} theme={theme} />
-          </ScrollView>
+          {shape === "three" ? (
+            <ScrollView style={{ ...divider, width: NAVIGATOR_WIDTH, borderRightWidth: 1 }}>{navigator}</ScrollView>
+          ) : (
+            <ScrollView style={{ ...divider, width: SIDEBAR_WIDTH, borderRightWidth: 1 }}>
+              {navigator}
+              <View style={{ gap: spacing[3], padding: spacing[3] }}>{sidebar}</View>
+            </ScrollView>
+          )}
+          {guide.status === "ready" ? (
+            <Detail
+              key={guide.agentId}
+              reviewId={reviewId}
+              agentId={guide.agentId}
+              guide={guide.guide}
+              groups={groups}
+              selected={selected}
+              select={select}
+              theme={theme}
+              ask={ask}
+              {...(openAgent ? { openAgent } : {})}
+            />
+          ) : (
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[4] }}>
+              {guideView(reviewId, guide, false)}
+            </ScrollView>
+          )}
+          {shape === "three" ? (
+            <ScrollView style={{ ...divider, width: SIDEBAR_WIDTH, borderLeftWidth: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[3] }}>
+              {sidebar}
+            </ScrollView>
+          ) : null}
         </DraftsContext.Provider>
       </ProgressContext.Provider>
     </View>

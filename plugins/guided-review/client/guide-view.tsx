@@ -106,11 +106,7 @@ function Tree({
             )
           ) : (
             <Card colors={colors} light={group.kind !== "unsorted"}>
-              {group.kind === "unsorted" ? (
-                <Body colors={colors} muted>
-                  The guide agent placed these changes nowhere, so no concept explains them. Where a concept covers part of a file, only the rest is here.
-                </Body>
-              ) : null}
+              {group.kind === "unsorted" ? <UnsortedNote colors={colors} /> : null}
               {group.entries.map((entry) => (entry.kind === "file" ? <FileEntry key={entry.key} colors={colors} entry={entry} ask={ask} code={code(entry)} /> : null))}
             </Card>
           )}
@@ -120,8 +116,16 @@ function Tree({
   );
 }
 
+export function UnsortedNote({ colors }: { colors: Colors }) {
+  return (
+    <Body colors={colors} muted>
+      The guide agent placed these changes nowhere, so no concept explains them. Where a concept covers part of a file, only the rest is here.
+    </Body>
+  );
+}
+
 /** The overview, whose text the reviewer can highlight, or hold in the phone app, to comment on. */
-function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
+export function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
   const { overview } = guide;
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
   const { prose, text, selected } = useCardText({ kind: "overview" });
@@ -171,29 +175,33 @@ function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
 /**
  * A node, labelled a leaf when nothing builds on it, whose code (`code`) comes before its comments, which sit at the foot of the card.
  * The reviewer can highlight its text, not its code, or hold it in the phone app, to comment on.
+ * A card that is not `collapsible` stands alone in the detail pane, where folding it would leave nothing to read.
  */
-function NodeCard({
+export function NodeCard({
   node,
   titles,
   colors,
   ask,
   code,
+  collapsible = true,
 }: {
   node: LayeredNode;
   titles: ReadonlyMap<string, string>;
   colors: Colors;
   ask: AskControl;
   code: React.ReactNode;
+  collapsible?: boolean;
 }) {
   const files = coveredPaths(node);
   const { prose, text, selected } = useCardText({ kind: "node", nodeId: node.id });
-  const [collapsed, setCollapsed] = useCollapsed({ kind: "node", nodeId: node.id });
+  const [folded, setCollapsed] = useCollapsed({ kind: "node", nodeId: node.id });
+  const collapsed = collapsible && folded;
   return (
     <Card colors={colors}>
       <CardTextContext.Provider value={text}>
         <View ref={prose} style={{ gap: spacing[2] }}>
           <View style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing[2] }}>
-            <CollapseToggle colors={colors} collapsed={collapsed} onPress={() => setCollapsed(!collapsed)} />
+            {collapsible ? <CollapseToggle colors={colors} collapsed={collapsed} onPress={() => setCollapsed(!collapsed)} /> : null}
             <View style={{ flex: 1 }}>
               <Text
                 selectable={HIGHLIGHTS_TEXT}
@@ -258,16 +266,29 @@ function NodeCard({
  * read the diff of, since tests and wiring get review comments too: the whole of it, or the rest of a
  * file some nodes cover part of. A lockfile or a generated file starts with its diff hidden, as it is long and seldom read.
  */
-function FileEntry({ colors, entry, ask, code }: { colors: Colors; entry: Extract<Entry, { kind: "file" }>; ask: AskControl; code: React.ReactNode }) {
+export function FileEntry({
+  colors,
+  entry,
+  ask,
+  code,
+  collapsible = true,
+}: {
+  colors: Colors;
+  entry: Extract<Entry, { kind: "file" }>;
+  ask: AskControl;
+  code: React.ReactNode;
+  collapsible?: boolean;
+}) {
   const { path, category } = entry;
   // Tests and Documentation are groups of their own, so only the rest of Supporting names its category.
   const note = category === null || category === "test" || category === "docs" ? undefined : category;
   const [open, setOpen] = React.useState(category !== "lockfile" && category !== "generated");
-  const [collapsed, setCollapsed] = useCollapsed({ kind: "file", path });
+  const [folded, setCollapsed] = useCollapsed({ kind: "file", path });
+  const collapsed = collapsible && folded;
   return (
     <View style={{ gap: spacing[1] }}>
       <View style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing[2] }}>
-        <CollapseToggle colors={colors} collapsed={collapsed} onPress={() => setCollapsed(!collapsed)} />
+        {collapsible ? <CollapseToggle colors={colors} collapsed={collapsed} onPress={() => setCollapsed(!collapsed)} /> : null}
         <View style={{ flex: 1 }}>
           <FileLine colors={colors} path={path} note={note} />
         </View>
@@ -317,7 +338,7 @@ function Decisions({ decisions, colors }: { decisions: readonly GuideDecision[];
 }
 
 /** A `light` card sits on the panel's own background rather than raised on a card surface. */
-function Card({ colors, light, children }: { colors: Colors; light?: boolean; children: React.ReactNode }) {
+export function Card({ colors, light, children }: { colors: Colors; light?: boolean; children: React.ReactNode }) {
   return (
     <View
       style={{
@@ -486,7 +507,7 @@ function Bullet({ colors, item, children }: { colors: Colors; item?: Item; child
   );
 }
 
-function Link({ colors, label, onPress }: { colors: Colors; label: string; onPress: () => void }) {
+export function Link({ colors, label, onPress }: { colors: Colors; label: string; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} accessibilityRole="link">
       <Text style={{ color: colors.accent, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>{label}</Text>
