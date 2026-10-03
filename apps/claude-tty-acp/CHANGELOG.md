@@ -5,7 +5,6 @@
 
 ### Features
 
-* **claude-tty:** offer Opus 5.5 and Sonnet 5.5 ([8dc621a](https://github.com/sleeyax/paseo-plugins/commit/8dc621a660745923fef6c746267c2828c2764385))
 * **claude-tty:** offer Opus 5.5 and Sonnet 5.5 ([d669cf1](https://github.com/sleeyax/paseo-plugins/commit/d669cf1c7f5235a4f7054098503661c58ea39d42))
 
 
