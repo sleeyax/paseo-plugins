@@ -1672,6 +1672,47 @@ test("sends the prompt as usual when Claude says nothing else has the keyboard",
   }
 });
 
+test("pastes a known command apart from its attachment, so Claude runs it rather than reading it as pasted text", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-command-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  await mkdir(path.join(configDirectory, "skills", "implement-spec"), { recursive: true });
+  await writeFile(path.join(configDirectory, "skills", "implement-spec", "SKILL.md"), "---\ndescription: Implement a spec\n---\n");
+  let agent!: ClaudeTtyAgent;
+  let pty!: FakePty;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    pty = new FakePty(6700, (text) => {
+      if (text.startsWith("\u001b[200~")) pty.emitData("\u001b[2J\u001b[H\u276f /implement-spec [Pasted text #1 +3 lines]\r\n");
+      if (text === "\r") pty.emitData("\u001b[2J\u001b[H\u276f\r\n");
+    });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), claudeConfigDir: configDirectory, startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+
+  try {
+    const session = await agent.newSession({ cwd: path.join(root, "work"), mcpServers: [] });
+    const turn = agent.prompt({
+      sessionId: session.sessionId,
+      prompt: [
+        { type: "text", text: "/implement-spec https://example.com/issues/88" },
+        { type: "resource", resource: { uri: "paseo://issue/88", mimeType: "text/plain", text: "the issue" } },
+      ],
+    });
+    await waitFor(() => pty !== undefined && pty.writes.length === 2);
+    assert.deepEqual(pty.writes, [
+      '\u001b[200~/implement-spec \u001b[201~\u001b[200~https://example.com/issues/88\n<resource uri="paseo://issue/88">\nthe issue\n</resource> \u001b[201~',
+      "\r",
+    ]);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test("resubmits a prompt Claude leaves sitting in its input box", async () => {
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-test-"));
   const updates: SessionNotification[] = [];
