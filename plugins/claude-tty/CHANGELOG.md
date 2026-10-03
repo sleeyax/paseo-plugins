@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-v0.1.0...claude-tty-v0.2.0) (2026-10-03)
+
+
+### Miscellaneous Chores
+
+* **claude-tty:** Synchronize claude-tty versions
+
 ## [0.1.0](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-v0.0.1...claude-tty-v0.1.0) (2026-09-25)
 
 
