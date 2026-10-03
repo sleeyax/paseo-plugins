@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { cleanupPromptFiles, materializePrompt } from "./prompt-content.ts";
+import { cleanupPromptFiles, materializePrompt, promptPastes } from "./prompt-content.ts";
 
 test("materializes images, local links, and bounded resources", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "prompt-content-test-"));
@@ -41,4 +41,15 @@ test("rejects audio and non-local links", async () => {
   } finally {
     await rm(directory, { force: true, recursive: true });
   }
+});
+
+test("pastes a known command apart from what follows it", () => {
+  const commands = [{ name: "implement-spec", description: "" }, { name: "plugin:review", description: "" }];
+  assert.deepEqual(promptPastes("/implement-spec https://example.com/88\n<resource>card</resource>", commands), ["/implement-spec", "https://example.com/88\n<resource>card</resource>"]);
+  assert.deepEqual(promptPastes("/implement-spec\n@/tmp/image.png", commands), ["/implement-spec", "@/tmp/image.png"]);
+  assert.deepEqual(promptPastes("/plugin:review this", commands), ["/plugin:review", "this"]);
+  assert.deepEqual(promptPastes("/implement-spec", commands), ["/implement-spec"]);
+  assert.deepEqual(promptPastes("/unknown https://example.com\nmore", commands), ["/unknown https://example.com\nmore"]);
+  assert.deepEqual(promptPastes("/etc/hosts is broken\nmore", commands), ["/etc/hosts is broken\nmore"]);
+  assert.deepEqual(promptPastes("run /implement-spec", commands), ["run /implement-spec"]);
 });

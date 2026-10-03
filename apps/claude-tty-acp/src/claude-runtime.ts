@@ -4,13 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import type { AgentSideConnection, ContentBlock, PromptResponse } from "@agentclientprotocol/sdk";
 import * as nodePty from "node-pty";
+import { discoverCommands } from "./commands.ts";
 import { type ContextWindow, contextWindow, formatTokens } from "./context-window.ts";
 import { createDeferred, type Deferred } from "./deferred.ts";
 import { DialogWatcher } from "./dialog-cards.ts";
 import { type HookPayload, type HookRegistration, type HookResponse, HookServer } from "./hook-server.ts";
 import { InteractionBridge } from "./interactions.ts";
 import { writeLog } from "./log.ts";
-import { cleanupPromptFiles, materializePrompt } from "./prompt-content.ts";
+import { cleanupPromptFiles, materializePrompt, promptPastes } from "./prompt-content.ts";
 import { markRuntimeDirectory, runtimePrefix } from "./runtime-directories.ts";
 import { INHERIT_EFFORT_ID, INHERIT_MODEL_ID } from "./session-options.ts";
 import { claudeIsWaitingFor } from "./session-status.ts";
@@ -368,6 +369,7 @@ export class ClaudeRuntime {
     await this.ensureStarted();
     if (!this.runtimeDirectory) throw new Error(`Session ${this.sessionId} has no runtime directory`);
     const prompt = await materializePrompt(content, this.runtimeDirectory, this.cwd);
+    const commands = prompt.text.startsWith("/") ? await discoverCommands(this.cwd, this.claudeConfigDir) : [];
     const turn = createDeferred<TurnResult>();
     this.turn = turn;
     this.cancelRequested = false;
@@ -380,7 +382,7 @@ export class ClaudeRuntime {
     this.assistantBaseline = this.translator.assistantChunks;
     this.translator.trackBackgroundWork();
     try {
-      await this.submit(prompt.text);
+      await this.submit(promptPastes(prompt.text, commands));
       const result = await turn.promise;
       if (result.assistantMessage) {
         this.translator.suppressNextAssistantText(result.assistantMessage);
@@ -1054,12 +1056,13 @@ export class ClaudeRuntime {
    * a line anywhere. That is worth an error rather than a silence, so this only returns on evidence that
    * the prompt went in — the input box letting go of it, or the turn moving on by itself.
    */
-  private async submit(text: string): Promise<void> {
+  private async submit(pastes: string[]): Promise<void> {
     const activityBefore = this.activityAt;
-    const echo = promptEcho(text);
+    const echo = promptEcho(pastes[0]!);
     const paste = async (): Promise<void> => {
       await this.clearInputBox();
-      this.pty?.write(`${BRACKETED_PASTE_START}${text}${COMPLETION_DISMISS}${BRACKETED_PASTE_END}`);
+      // Claude keeps bracketed pastes apart even when they arrive in one write.
+      this.pty?.write(pastes.map((text) => `${BRACKETED_PASTE_START}${text}${COMPLETION_DISMISS}${BRACKETED_PASTE_END}`).join(""));
     };
     if ((await this.takeTheKeyboardBack(activityBefore)) === "delivered") return;
     await paste();
