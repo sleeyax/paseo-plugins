@@ -1,7 +1,7 @@
 import { chmod, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import type { ContentBlock } from "@agentclientprotocol/sdk";
+import type { AvailableCommand, ContentBlock } from "@agentclientprotocol/sdk";
 
 const INLINE_RESOURCE_BYTES = 32 * 1024;
 
@@ -55,6 +55,19 @@ export async function materializePrompt(content: ContentBlock[], directory: stri
     await cleanupPromptFiles(files);
     throw error;
   }
+}
+
+/**
+ * The bracketed pastes a prompt is put into Claude's input box as, in order.
+ * Claude collapses a long paste into a `[Pasted text]` placeholder, and a box that starts with one is not a command.
+ * So a prompt that starts with a known command has that command pasted on its own and the rest after it, which Claude expands into the command's arguments.
+ * Only a known one, because Claude drops a prompt that starts with an unknown command instead of sending it.
+ */
+export function promptPastes(text: string, commands: readonly AvailableCommand[]): string[] {
+  const match = /^\/(\S+)\s*/.exec(text);
+  if (!match || !commands.some((command) => command.name === match[1])) return [text];
+  const rest = text.slice(match[0].length);
+  return rest ? [`/${match[1]}`, rest] : [text];
 }
 
 export async function cleanupPromptFiles(files: string[]): Promise<void> {
