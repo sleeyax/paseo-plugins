@@ -13,7 +13,7 @@ import { Button } from "./button.tsx";
 import { age, visibleItems } from "./inbox-filter.ts";
 import { useInboxPreferences } from "./inbox-preferences.ts";
 import type { ReviewStart } from "./start-review.ts";
-import { fontSize, leading, MAX_CONTENT_WIDTH, radius, spacing, type Colors } from "./theme.ts";
+import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 
 const FORGE_NAMES = { github: "GitHub", gitlab: "GitLab" } as const;
 
@@ -27,7 +27,7 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
   const [choosing, setChoosing] = useState(false);
 
   const items = inbox.data ? visibleItems(inbox.data.items, preferences, query) : [];
-  const table = !compact && width >= MAX_CONTENT_WIDTH;
+  const table = !compact && width >= tableWidth(preferences.columns);
 
   return (
     <View onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width)}>
@@ -249,16 +249,23 @@ function ciOf(item: InboxItem): Tinted | null {
   }
 }
 
-function sizeOf(item: InboxItem): string {
-  return `+${item.additions} −${item.deletions} · ${item.fileCount} file${item.fileCount === 1 ? "" : "s"}`;
+function linesOf(item: InboxItem): string {
+  return `+${item.additions} −${item.deletions}`;
 }
 
-type ColumnSpec = { label: string; flex: number; sort?: InboxSortKey; cell: (item: InboxItem, colors: Colors, now: Date) => React.ReactNode };
+function filesOf(item: InboxItem): string {
+  return `${item.fileCount} file${item.fileCount === 1 ? "" : "s"}`;
+}
+
+/** A column's width: fixed for a value whose length is known, else a share of what is left, never under `min`. */
+type ColumnWidth = { width: number } | { flex: number; min: number };
+
+type ColumnSpec = { label: string; size: ColumnWidth; sort?: InboxSortKey; cell: (item: InboxItem, colors: Colors, now: Date) => React.ReactNode };
 
 const COLUMNS: Record<InboxColumn, ColumnSpec> = {
   project: {
     label: "Project",
-    flex: 1.4,
+    size: { flex: 1.2, min: 96 },
     cell: (item, colors) => (
       <View>
         <Cell colors={colors} text={`${numberLabel(item.forge, item.number)} · ${FORGE_NAMES[item.forge]}`} />
@@ -266,26 +273,53 @@ const COLUMNS: Record<InboxColumn, ColumnSpec> = {
       </View>
     ),
   },
-  title: { label: "Title", flex: 3, cell: (item, colors) => <Title colors={colors} item={item} /> },
-  author: { label: "Author", flex: 1, cell: (item, colors) => <Cell colors={colors} text={item.author} color="foregroundMuted" /> },
-  updated: { label: "Updated", flex: 0.8, sort: "updated", cell: (item, colors, now) => <Cell colors={colors} text={age(item.updatedAt, now)} color="foregroundMuted" /> },
-  created: { label: "Created", flex: 0.8, sort: "created", cell: (item, colors, now) => <Cell colors={colors} text={age(item.createdAt, now)} color="foregroundMuted" /> },
-  size: { label: "Size", flex: 1.3, sort: "size", cell: (item, colors) => <Cell colors={colors} text={sizeOf(item)} color="foregroundMuted" /> },
-  ci: { label: "CI", flex: 0.7, cell: (item, colors) => <TintedCell colors={colors} value={ciOf(item)} /> },
-  state: { label: "My review", flex: 1.6, cell: (item, colors) => <TintedCell colors={colors} value={stateOf(item)} /> },
-  local: { label: "Here", flex: 1.4, cell: (item, colors) => <TintedCell colors={colors} value={localOf(item)} /> },
+  title: { label: "Title", size: { flex: 3, min: 160 }, cell: (item, colors) => <Title colors={colors} item={item} /> },
+  author: { label: "Author", size: { flex: 1, min: 64 }, cell: (item, colors) => <Cell colors={colors} text={item.author} color="foregroundMuted" /> },
+  updated: { label: "Updated", size: { width: 72 }, sort: "updated", cell: (item, colors, now) => <Cell colors={colors} text={age(item.updatedAt, now)} color="foregroundMuted" /> },
+  created: { label: "Created", size: { width: 72 }, sort: "created", cell: (item, colors, now) => <Cell colors={colors} text={age(item.createdAt, now)} color="foregroundMuted" /> },
+  size: {
+    label: "Size",
+    size: { width: 80 },
+    sort: "size",
+    cell: (item, colors) => (
+      <View>
+        <Cell colors={colors} text={linesOf(item)} color="foregroundMuted" />
+        <Cell colors={colors} text={filesOf(item)} color="foregroundMuted" />
+      </View>
+    ),
+  },
+  ci: { label: "CI", size: { width: 64 }, cell: (item, colors) => <TintedCell colors={colors} value={ciOf(item)} /> },
+  state: { label: "My review", size: { flex: 1.4, min: 96 }, cell: (item, colors) => <TintedCell colors={colors} value={stateOf(item)} /> },
+  local: { label: "Here", size: { flex: 1.4, min: 96 }, cell: (item, colors) => <TintedCell colors={colors} value={localOf(item)} /> },
 };
 
-function Cell({ colors, text, color }: { colors: Colors; text: string; color?: keyof Colors }) {
+const ACTIONS_WIDTH = 96;
+const CELL_GAP = spacing[3];
+
+function columnStyle(size: ColumnWidth) {
+  return "width" in size ? { width: size.width } : { flex: size.flex, minWidth: size.min };
+}
+
+/** The narrowest the table can be with these columns before its cells crowd; anything narrower gets cards. */
+function tableWidth(columns: readonly InboxColumn[]): number {
+  const cells = columns.reduce((total, column) => {
+    const { size } = COLUMNS[column];
+    return total + ("width" in size ? size.width : size.min);
+  }, 0);
+  return cells + ACTIONS_WIDTH + CELL_GAP * columns.length + spacing[3] * 2 + 2;
+}
+
+function Cell({ colors, text, color, lines = 1 }: { colors: Colors; text: string; color?: keyof Colors; lines?: number }) {
   return (
-    <Text numberOfLines={1} style={{ color: colors[color ?? "foreground"], fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>
+    <Text numberOfLines={lines} style={{ color: colors[color ?? "foreground"], fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>
       {text}
     </Text>
   );
 }
 
+/** Two lines, since a state or what is kept here can run to a few words. */
 function TintedCell({ colors, value }: { colors: Colors; value: Tinted | null }) {
-  return value === null ? <Cell colors={colors} text="—" color="foregroundMuted" /> : <Cell colors={colors} text={value.text} color={value.color} />;
+  return value === null ? <Cell colors={colors} text="—" color="foregroundMuted" /> : <Cell colors={colors} text={value.text} color={value.color} lines={2} />;
 }
 
 function Title({ colors, item }: { colors: Colors; item: InboxItem }) {
@@ -307,11 +341,11 @@ function Badge({ colors, text }: { colors: Colors; text: string }) {
   );
 }
 
-/** The row's own way into the review, and to the change request on its forge. */
-function Actions({ colors, item, starter }: { colors: Colors; item: InboxItem; starter: ReviewStart }) {
+/** The row's own way into the review, and to the change request on its forge: stacked in a table's last column, side by side on a card. */
+function Actions({ colors, item, starter, stacked }: { colors: Colors; item: InboxItem; starter: ReviewStart; stacked?: boolean }) {
   const starting = starter.busy && starter.from === item.url;
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[2] }}>
+    <View style={stacked ? { alignItems: "flex-end", gap: spacing[1] } : { flexDirection: "row", alignItems: "center", gap: spacing[2] }}>
       <Button
         colors={colors}
         small
@@ -335,8 +369,6 @@ function RowStatus({ colors, item, starter }: { colors: Colors; item: InboxItem;
   return <Note colors={colors} tone={starter.status.tone === "danger" ? "danger" : undefined} text={starter.status.text} />;
 }
 
-const ACTIONS_WIDTH = 140;
-
 function Table({
   colors,
   items,
@@ -357,17 +389,20 @@ function Table({
 
   return (
     <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, overflow: "hidden" }}>
-      <View style={{ flexDirection: "row", gap: spacing[3], paddingVertical: spacing[2], paddingHorizontal: spacing[3], backgroundColor: colors.surface1 }}>
+      <View style={{ flexDirection: "row", gap: CELL_GAP, paddingVertical: spacing[2], paddingHorizontal: spacing[3], backgroundColor: colors.surface1 }}>
         {columns.map((column) => {
           const sorted = column.sort !== undefined && preferences.sort.key === column.sort;
           const label = sorted ? `${column.label} ${preferences.sort.descending ? "↓" : "↑"}` : column.label;
           const text = (
-            <Text style={{ color: sorted ? colors.foreground : colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm), fontWeight: "600" }}>
+            <Text
+              numberOfLines={1}
+              style={{ color: sorted ? colors.foreground : colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm), fontWeight: "600" }}
+            >
               {label}
             </Text>
           );
           return (
-            <View key={column.id} style={{ flex: column.flex }}>
+            <View key={column.id} style={columnStyle(column.size)}>
               {column.sort === undefined ? (
                 text
               ) : (
@@ -394,14 +429,14 @@ function Table({
             gap: spacing[1],
           })}
         >
-          <View style={{ flexDirection: "row", gap: spacing[3], alignItems: "center" }}>
+          <View style={{ flexDirection: "row", gap: CELL_GAP, alignItems: "center" }}>
             {columns.map((column) => (
-              <View key={column.id} style={{ flex: column.flex }}>
+              <View key={column.id} style={columnStyle(column.size)}>
                 {column.cell(item, colors, now)}
               </View>
             ))}
             <View style={{ width: ACTIONS_WIDTH, alignItems: "flex-end" }}>
-              <Actions colors={colors} item={item} starter={starter} />
+              <Actions colors={colors} item={item} starter={starter} stacked />
             </View>
           </View>
           <RowStatus colors={colors} item={item} starter={starter} />
@@ -421,7 +456,7 @@ function Card({ colors, item, columns, starter }: { colors: Colors; item: InboxI
     ...(shown("author") ? [item.author] : []),
     ...(shown("updated") ? [`updated ${age(item.updatedAt, now)} ago`] : []),
     ...(shown("created") ? [`opened ${age(item.createdAt, now)} ago`] : []),
-    ...(shown("size") ? [sizeOf(item)] : []),
+    ...(shown("size") ? [`${linesOf(item)} in ${filesOf(item)}`] : []),
   ];
   const tinted = [shown("state") ? stateOf(item) : null, shown("local") ? localOf(item) : null, shown("ci") ? ciOf(item) : null].filter(
     (value) => value !== null,
