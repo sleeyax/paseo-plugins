@@ -31,6 +31,11 @@ export type Cli = {
   ndjson<Schema extends z.ZodType>(schema: Schema, args: readonly string[], options?: CallOptions): Promise<z.output<Schema>[]>;
   /** Whether the call exits cleanly, for a probe whose failure is an answer rather than an error. */
   succeeds(args: readonly string[], options?: CallOptions): Promise<boolean>;
+  /**
+   * Everything the call printed, stdout then stderr, whatever it exited with: what a command reports
+   * when it reports on several things at once, some of which may have failed.
+   */
+  report(args: readonly string[], options?: CallOptions): Promise<string>;
 };
 
 export function createCli(options: CliOptions): Cli {
@@ -92,6 +97,10 @@ export function createCli(options: CliOptions): Cli {
     },
     async succeeds(args, call) {
       return (await run(args, call)).exitCode === 0;
+    },
+    async report(args, call) {
+      const result = await run(args, call);
+      return `${result.stdout}${result.stderr}`;
     },
   };
 }

@@ -5,7 +5,7 @@ import test from "node:test";
 import type { LineRef } from "../../shared/drafts.ts";
 import { anchorAt } from "../anchors.ts";
 import { fakeCommandRunner, type ScriptedResult } from "../fake-command-runner.ts";
-import { createGitLabForge, parseMergeRequestUrl, REQUEST_CHANGES_MUTATION } from "./gitlab.ts";
+import { createGitLabForge, parseAuthStatus, parseMergeRequestUrl, REQUEST_CHANGES_MUTATION, REVIEW_LIST_QUERY } from "./gitlab.ts";
 import { ForgeError, type AnchorLine, type ChangeRequestRef, type DraftAnchor, type DraftTarget } from "./port.ts";
 
 /**
@@ -1067,4 +1067,129 @@ test("discarding with nothing drafted deletes nothing, and a delete that fails i
       "One of your draft notes could not be deleted: 102 (glab failed: 404 Not found (HTTP 404)). Delete what is left on the merge request's page.",
   });
   assert.equal(run.calls.length, 6, "the third was deleted too");
+});
+
+/**
+ * `auth-status-all*.stderr` are glab 1.120's own reports, the second for a host with a made-up token
+ * that does not resolve. `review-list.json` is built by hand in the shape gitlab.com 19.5 answers,
+ * since the MRs a real account reviews are not public.
+ */
+const AUTH_STATUS_ALL: ScriptedResult = { stderr: fixture("auth-status-all.stderr") };
+const LIST_REVIEWS: readonly ScriptedResult[] = [AUTH_STATUS_ALL, version("19.5.0-pre"), { stdout: fixture("review-list.json") }];
+
+test("reads every host glab reports, logged in or not, and why glab cannot use one", () => {
+  assert.deepEqual(parseAuthStatus(fixture("auth-status-all.stderr") + fixture("auth-status-all-unreachable.stderr")), [
+    { host: "gitlab.com", loggedIn: true, problem: null },
+    {
+      host: "gitlab.example.invalid",
+      loggedIn: false,
+      problem: 'API call failed: Get "https://gitlab.example.invalid/api/v4/user": dial tcp: lookup gitlab.example.invalid: no such host',
+    },
+  ]);
+  assert.deepEqual(parseAuthStatus(""), []);
+});
+
+test("lists the open MRs the viewer reviews on each host glab is logged in to, after checking its version", async () => {
+  const { forge, run } = forgeReplaying(LIST_REVIEWS);
+
+  const hosts = await forge.listReviewRequests();
+
+  assert.deepEqual(
+    run.calls.map((call) => call.args),
+    [
+      ["auth", "status", "--all"],
+      ["api", "--hostname", "gitlab.com", "version"],
+      ["api", "graphql", "--hostname", "gitlab.com", "-f", `query=${REVIEW_LIST_QUERY}`],
+    ],
+  );
+  assert.equal(hosts.length, 1);
+  const [host] = hosts;
+  assert.equal(host?.error, null);
+  assert.equal(host?.truncated, false);
+  assert.deepEqual(host?.requests[0], {
+    forge: "gitlab",
+    host: "gitlab.com",
+    project: "example-group/service",
+    number: 12,
+    url: "https://gitlab.com/example-group/service/-/merge_requests/12",
+    title: "Add rate limiting to the upload endpoint",
+    author: "author",
+    isDraft: false,
+    createdAt: "2026-09-28T09:00:00Z",
+    updatedAt: "2026-10-04T16:20:00Z",
+    headSha: "1".repeat(40),
+    additions: 120,
+    deletions: 30,
+    fileCount: 5,
+    ci: "failure",
+    state: "requested",
+    viaTeam: null,
+    changedSinceReview: null,
+    pendingDrafts: null,
+  });
+});
+
+test("an MR reads by the viewer's own reviewer record, changed when the head commit is newer than it", async () => {
+  const { forge } = forgeReplaying(LIST_REVIEWS);
+
+  const [host] = await forge.listReviewRequests();
+  const summary = host?.requests.map(({ number, state, changedSinceReview, ci, author, isDraft }) => ({ number, state, changedSinceReview, ci, author, isDraft }));
+
+  assert.deepEqual(summary, [
+    { number: 12, state: "requested", changedSinceReview: null, ci: "failure", author: "author", isDraft: false },
+    { number: 40, state: "approved", changedSinceReview: false, ci: "success", author: "author", isDraft: false },
+    { number: 41, state: "unapproved", changedSinceReview: true, ci: "pending", author: "author", isDraft: false },
+    { number: 7, state: "changes-requested", changedSinceReview: true, ci: null, author: "ghost", isDraft: true },
+    { number: 8, state: "commented", changedSinceReview: null, ci: null, author: "author", isDraft: false },
+  ]);
+});
+
+test("a host glab is not logged in to, or one older than 19.2, comes back with its error and the others listed", async () => {
+  const report = { exitCode: 1, stderr: fixture("auth-status-all-unreachable.stderr") + fixture("auth-status-all.stderr") };
+  const { forge } = forgeReplaying([report, version("19.5.0-pre"), { stdout: fixture("review-list.json") }]);
+
+  const hosts = await forge.listReviewRequests();
+
+  assert.deepEqual(
+    hosts.map(({ host, error, requests }) => ({ host, error, count: requests.length })),
+    [
+      {
+        host: "gitlab.example.invalid",
+        error:
+          'glab is not logged in to gitlab.example.invalid (API call failed: Get "https://gitlab.example.invalid/api/v4/user": dial tcp: lookup gitlab.example.invalid: no such host). Run `glab auth login --hostname gitlab.example.invalid` on the daemon\'s host.',
+        count: 0,
+      },
+      { host: "gitlab.com", error: null, count: 5 },
+    ],
+  );
+
+  const { forge: old } = forgeReplaying([AUTH_STATUS_ALL, version("18.11.2-ee")]);
+  assert.deepEqual(await old.listReviewRequests(), [
+    { forge: "gitlab", host: "gitlab.com", requests: [], truncated: false, error: "gitlab.com runs GitLab 18.11.2-ee; listing your reviews needs 19.2 or newer." },
+  ]);
+});
+
+test("a GraphQL answer with errors and no user is the host's error, and more MRs than a page mark it truncated", async () => {
+  const failed = JSON.stringify({ data: { currentUser: null }, errors: [{ message: "Query has complexity of 301, which exceeds max complexity of 250" }] });
+  const { forge } = forgeReplaying([AUTH_STATUS_ALL, version("19.5.0-pre"), { stdout: failed }]);
+  assert.equal(
+    (await forge.listReviewRequests())[0]?.error,
+    "GitLab on gitlab.com did not list your reviews: Query has complexity of 301, which exceeds max complexity of 250.",
+  );
+
+  const more = JSON.parse(fixture("review-list.json"));
+  more.data.currentUser.reviewRequestedMergeRequests.pageInfo.hasNextPage = true;
+  const { forge: paged } = forgeReplaying([AUTH_STATUS_ALL, version("19.5.0-pre"), { stdout: JSON.stringify(more) }]);
+  assert.equal((await paged.listReviewRequests())[0]?.truncated, true);
+});
+
+test("a host listed as logged in is not checked again before reading an MR on it", async () => {
+  const head = { stdout: JSON.stringify({ state: "opened", sha: "a".repeat(40), diff_refs: { head_sha: "a".repeat(40) } }) };
+  const { forge, run } = forgeReplaying([...LIST_REVIEWS, { stdout: fixture("project.json") }, head]);
+
+  await forge.listReviewRequests();
+  run.calls.length = 0;
+
+  assert.deepEqual(await forge.fetchHead(MR_3931), { headSha: "a".repeat(40), state: "open" });
+  assert.ok(!run.calls.some((call) => call.args[0] === "auth"), "no auth status check");
 });

@@ -1,0 +1,14 @@
+gitlab.example.invalid
+  x gitlab.example.invalid: API call failed: Get "https://gitlab.example.invalid/api/v4/user": dial tcp: lookup gitlab.example.invalid: no such host
+  ✓ Git operations for gitlab.example.invalid configured to use ssh protocol.
+  ✓ API calls for gitlab.example.invalid are made over https protocol.
+  ✓ REST API Endpoint: https://gitlab.example.invalid/api/v4/
+  ✓ GraphQL Endpoint: https://gitlab.example.invalid/api/graphql/
+  ✓ Token found in configuration file (plaintext): **************************
+  ! To store this token more securely, run glab auth login --hostname gitlab.example.invalid to move it into the operating system keyring.
+          
+   ERROR  
+          
+                                                                                                                      
+  X could not authenticate to one or more of the configured GitLab instances.                                         
+
