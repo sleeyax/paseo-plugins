@@ -56,3 +56,25 @@ export const ReviewRequestHostSchema = z.object({
 });
 
 export type ReviewRequestHost = z.output<typeof ReviewRequestHostSchema>;
+
+/**
+ * What this plugin has of a change request's review, if the reviewer started one here: where its
+ * guide stands at the head it was read at, and whether the forge's head has moved past that.
+ */
+export const LocalReviewSchema = z.object({
+  reviewId: z.string(),
+  guide: z.enum(["none", "generating", "ready", "failed"]),
+  headMoved: z.boolean(),
+});
+
+export const InboxItemSchema = ReviewRequestSchema.extend({ local: LocalReviewSchema.nullable() });
+
+/** Every host's review requests, each joined with the review started here, if any. */
+export const InboxSchema = z.object({
+  hosts: z.array(ReviewRequestHostSchema.omit({ requests: true })),
+  items: z.array(InboxItemSchema),
+});
+
+export type LocalReview = z.output<typeof LocalReviewSchema>;
+export type InboxItem = z.output<typeof InboxItemSchema>;
+export type Inbox = z.output<typeof InboxSchema>;

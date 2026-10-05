@@ -3,6 +3,7 @@ import { z } from "zod";
 import { FileDiffSchema } from "./diff.ts";
 import { CommentOriginSchema, DraftListSchema, DraftLocationSchema, LinkedDraftSchema, QuoteSchema } from "./drafts.ts";
 import { GuideStateSchema } from "./guide.ts";
+import { InboxSchema } from "./inbox.ts";
 import { GuideProgressSchema } from "./progress.ts";
 import { SubmitResultSchema, VerdictOptionSchema, VerdictSchema } from "./submit.ts";
 
@@ -85,6 +86,13 @@ export const startReview = defineRpc({
   name: "guided-review.review.start",
   input: z.object({ url: z.string() }),
   output: StartResultSchema,
+});
+
+/** The open change requests the reviewer reviews on every host, for picking one to start from. */
+export const getInbox = defineRpc({
+  name: "guided-review.inbox.list",
+  input: z.object({}),
+  output: InboxSchema,
 });
 
 export const getStartProgress = defineRpc({

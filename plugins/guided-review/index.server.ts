@@ -56,6 +56,7 @@ export default function contribute(server: PluginServerContext) {
   serve(contracts.startReview, (input) => service.start(input));
   serve(contracts.startBranchReview, (input) => service.startBranch(input));
   serve(contracts.getStartProgress, (input) => service.startProgress(input));
+  serve(contracts.getInbox, () => service.inbox());
   serve(contracts.getPanel, (input) => service.panel(input));
   serve(contracts.generateGuide, (input) => service.generateGuide(input));
   serve(contracts.checkHead, (input) => service.checkHead(input));

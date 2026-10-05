@@ -23,6 +23,8 @@ export type ReviewRecord = {
    * carry over to the guide at this head once it is written. Absent until the head first moves.
    */
   previousHeadSha?: string;
+  /** The head the reviewer's last review from here was published at; absent until one is. */
+  submittedHeadSha?: string;
 };
 
 /**

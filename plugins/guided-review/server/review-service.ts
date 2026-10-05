@@ -15,6 +15,7 @@ import type {
   SyntaxColors,
 } from "../shared/contracts.ts";
 import type { FileDiff } from "../shared/diff.ts";
+import type { Inbox } from "../shared/inbox.ts";
 import type { CommentOrigin, DraftList, DraftLocation, LinkedDraft } from "../shared/drafts.ts";
 import { coveredPaths, type CoveredCode, type GuideState, type LayeredGuide } from "../shared/guide.ts";
 import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
@@ -30,6 +31,7 @@ import { runStructured } from "./guide-agent/structured.ts";
 import { GuideGenerations, isReady, marksOf } from "./guide-generation.ts";
 import { oneAtATimePer } from "./one-at-a-time.ts";
 import { regeneratedAway, ReviewDrafts } from "./review-drafts.ts";
+import { ReviewInbox } from "./review-inbox.ts";
 import { isFinished, ReviewPreparation, startProgressAt } from "./review-preparation.ts";
 import { questionPrompt } from "./question-prompt.ts";
 import { ReviewStore, type ProgressRecord, type ReviewRecord } from "./review-store.ts";
@@ -64,8 +66,8 @@ type SuggestionJob = { agentId: string; state: Suggestion; done: Promise<void> }
  * The plugin's top level: every RPC the panel and the start surface call is a method here, and it
  * reaches the outside world only through the ports it is given, which is what the tests replace.
  * The work behind the larger ones lives in the modules it composes: `ReviewPreparation` reads a change
- * request and gives it a workspace, `GuideGenerations` has its guide written, and `ReviewDrafts`
- * keeps the drafts and the review body.
+ * request and gives it a workspace, `GuideGenerations` has its guide written, `ReviewDrafts`
+ * keeps the drafts and the review body, and `ReviewInbox` lists what the reviewer reviews.
  *
  * Anything that can outlast Paseo's 30-second RPC limit — reading a large PR, cloning, creating a
  * worktree — runs as a background job the caller follows by ID.
@@ -80,6 +82,7 @@ export class ReviewService {
   readonly #guides: GuideGenerations;
   readonly #preparation: ReviewPreparation;
   readonly #drafts: ReviewDrafts;
+  readonly #inbox: ReviewInbox;
   /** The latest branch guiding asked for in each workspace, by workspace ID. */
   readonly #branchStarts = new Map<string, BranchJob>();
   /** Writes of each guide's marks, by review and head SHA, one at a time. */
@@ -104,6 +107,12 @@ export class ReviewService {
       clones: path.join(options.dataDirectory, "clones"),
     });
     this.#drafts = new ReviewDrafts({ store: this.#store, guides: this.#guides });
+    this.#inbox = new ReviewInbox({ forges: this.#forges, store: this.#store, log: this.#log });
+  }
+
+  /** The open change requests the reviewer reviews on every forge and host, with the reviews started here. */
+  async inbox(): Promise<Inbox> {
+    return this.#inbox.list();
   }
 
   /**
@@ -583,6 +592,10 @@ export class ReviewService {
     if (!option?.allowed) return { status: "refused", message: option?.reason ?? "That verdict is not on offer.", verdicts };
 
     const outcome = await this.#drafts.submit(record, forge, verdict, text);
+    if (outcome.published) {
+      const latest = (await this.#store.get(reviewId)) ?? record;
+      await this.#store.update({ ...latest, submittedHeadSha: record.header.headSha });
+    }
     for (const step of outcome.steps) {
       if (step.status === "failed") this.#log(`Submitting ${record.ref.url}: "${step.label}" failed: ${step.message}`);
     }
