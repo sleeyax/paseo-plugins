@@ -1,5 +1,8 @@
 {
   "data": {
+    "viewer": {
+      "login": "sleeyax"
+    },
     "search": {
       "issueCount": 7,
       "nodes": [
@@ -29,6 +32,16 @@
           "viewerLatestReviewRequest": null,
           "reviews": {
             "nodes": []
+          },
+          "timelineItems": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "__typename": "User",
+                  "login": "sleeyax"
+                }
+              }
+            ]
           }
         },
         {
@@ -55,6 +68,16 @@
           "viewerLatestReviewRequest": null,
           "reviews": {
             "nodes": []
+          },
+          "timelineItems": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "__typename": "User",
+                  "login": "someone-else"
+                }
+              }
+            ]
           }
         },
         {
@@ -81,6 +104,15 @@
           "viewerLatestReviewRequest": null,
           "reviews": {
             "nodes": []
+          },
+          "timelineItems": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "__typename": "Team"
+                }
+              }
+            ]
           }
         },
         {
@@ -107,6 +139,21 @@
           "viewerLatestReviewRequest": null,
           "reviews": {
             "nodes": []
+          },
+          "timelineItems": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "__typename": "Bot"
+                }
+              },
+              {
+                "requestedReviewer": {
+                  "__typename": "User",
+                  "login": "sleeyax"
+                }
+              }
+            ]
           }
         },
         {
@@ -133,6 +180,16 @@
           "viewerLatestReviewRequest": null,
           "reviews": {
             "nodes": []
+          },
+          "timelineItems": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "__typename": "User",
+                  "login": "sleeyax"
+                }
+              }
+            ]
           }
         },
         {
@@ -159,6 +216,16 @@
           "viewerLatestReviewRequest": null,
           "reviews": {
             "nodes": []
+          },
+          "timelineItems": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "__typename": "User",
+                  "login": "sleeyax"
+                }
+              }
+            ]
           }
         },
         {
@@ -184,6 +251,9 @@
           },
           "viewerLatestReviewRequest": null,
           "reviews": {
+            "nodes": []
+          },
+          "timelineItems": {
             "nodes": []
           }
         }

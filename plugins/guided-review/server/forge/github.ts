@@ -272,18 +272,21 @@ const SUBMIT_LABELS: Record<Verdict, string> = {
  * GitHub drops a review request once the reviewer reviews, so what they are a reviewer of is two
  * searches: the requests outstanding, team requests included, and the ones they answered. Pages are
  * kept at half a GraphQL page, because a full one of these timed out as a 502.
+ * `reviewed-by` also finds reviews nobody asked for, so `wasAskedToReview` keeps only those asked of the viewer.
  */
 export const REVIEW_SEARCHES = {
   requested: "is:pr is:open review-requested:@me archived:false",
   reviewed: "is:pr is:open reviewed-by:@me -author:@me -review-requested:@me archived:false",
 } as const;
 const REVIEW_SEARCH_SIZE = 50;
+const REVIEW_REQUEST_EVENTS = 20;
 
 /**
  * A pending review is visible only to its author, so the first one is the viewer's, and its comments
  * are their drafts. A PR author can be a deleted account, which GitHub gives as null.
  */
 export const REVIEW_SEARCH_QUERY = `query GuidedReviewInbox($query: String!) {
+  viewer { login }
   search(type: ISSUE, query: $query, first: ${REVIEW_SEARCH_SIZE}) {
     issueCount
     nodes {
@@ -294,6 +297,9 @@ export const REVIEW_SEARCH_QUERY = `query GuidedReviewInbox($query: String!) {
         viewerLatestReview { state commit { oid } }
         viewerLatestReviewRequest { requestedReviewer { __typename ... on Team { combinedSlug } } }
         reviews(states: PENDING, first: 1) { nodes { viewerDidAuthor comments { totalCount } } }
+        timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], first: ${REVIEW_REQUEST_EVENTS}) {
+          nodes { ... on ReviewRequestedEvent { requestedReviewer { __typename ... on User { login } } } }
+        }
       }
     }
   }
@@ -301,6 +307,7 @@ export const REVIEW_SEARCH_QUERY = `query GuidedReviewInbox($query: String!) {
 
 const ReviewSearchResponse = z.object({
   data: z.object({
+    viewer: z.object({ login: z.string() }),
     search: z.object({
       issueCount: z.number(),
       nodes: z.array(
@@ -327,6 +334,9 @@ const ReviewSearchResponse = z.object({
             .object({ requestedReviewer: z.object({ __typename: z.string(), combinedSlug: z.string().optional() }).nullable() })
             .nullable(),
           reviews: z.object({ nodes: z.array(z.object({ viewerDidAuthor: z.boolean(), comments: z.object({ totalCount: z.number() }) })) }),
+          timelineItems: z.object({
+            nodes: z.array(z.object({ requestedReviewer: z.object({ __typename: z.string(), login: z.string().optional() }).nullable() })),
+          }),
         }),
       ),
     }),
@@ -350,6 +360,14 @@ const REVIEWER_STATES: Record<NonNullable<SearchedPullRequest["viewerLatestRevie
   CHANGES_REQUESTED: "changes-requested",
   DISMISSED: "commented",
 };
+
+/**
+ * Whether the PR ever asked `login` for a review, by name or through a team.
+ * A team request counts whichever team it was, as telling whether the viewer is in it takes the `read:org` scope.
+ */
+function wasAskedToReview(pr: SearchedPullRequest, login: string): boolean {
+  return pr.timelineItems.nodes.some(({ requestedReviewer }) => requestedReviewer?.__typename === "Team" || requestedReviewer?.login === login);
+}
 
 /**
  * Where the viewer stands on a PR one of `REVIEW_SEARCHES` found. A PR they are asked to review is
@@ -615,7 +633,7 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
         const [requested, reviewed] = await Promise.all([search(REVIEW_SEARCHES.requested), search(REVIEW_SEARCHES.reviewed)]);
         const requests = [
           ...requested.data.search.nodes.map((pr) => reviewRequestOf(pr, true)),
-          ...reviewed.data.search.nodes.map((pr) => reviewRequestOf(pr, false)),
+          ...reviewed.data.search.nodes.filter((pr) => wasAskedToReview(pr, reviewed.data.viewer.login)).map((pr) => reviewRequestOf(pr, false)),
         ].filter((request) => request !== null);
         const truncated = [requested, reviewed].some(({ data }) => data.search.issueCount > data.search.nodes.length);
         return [{ forge: "github", host: GITHUB_HOST, requests, truncated, error: null }];

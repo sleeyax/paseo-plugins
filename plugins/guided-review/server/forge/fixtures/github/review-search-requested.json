@@ -1,5 +1,6 @@
 {
   "data": {
+    "viewer": { "login": "sleeyax" },
     "search": {
       "issueCount": 2,
       "nodes": [
@@ -18,7 +19,8 @@
           "statusCheckRollup": { "state": "FAILURE" },
           "viewerLatestReview": null,
           "viewerLatestReviewRequest": { "requestedReviewer": { "__typename": "User" } },
-          "reviews": { "nodes": [{ "viewerDidAuthor": true, "comments": { "totalCount": 2 } }] }
+          "reviews": { "nodes": [{ "viewerDidAuthor": true, "comments": { "totalCount": 2 } }] },
+          "timelineItems": { "nodes": [] }
         },
         {
           "number": 7,
@@ -35,7 +37,8 @@
           "statusCheckRollup": null,
           "viewerLatestReview": { "state": "CHANGES_REQUESTED", "commit": { "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
           "viewerLatestReviewRequest": { "requestedReviewer": { "__typename": "Team", "combinedSlug": "example-org/backend" } },
-          "reviews": { "nodes": [] }
+          "reviews": { "nodes": [] },
+          "timelineItems": { "nodes": [] }
         }
       ]
     }

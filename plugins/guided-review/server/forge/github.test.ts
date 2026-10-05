@@ -673,7 +673,7 @@ test("lists what the viewer is asked to review and what they reviewed, as two se
   assert.equal(host?.host, "github.com");
   assert.equal(host?.error, null);
   assert.equal(host?.truncated, false);
-  assert.equal(host?.requests.length, 9);
+  assert.equal(host?.requests.length, 7);
 
   assert.deepEqual(host?.requests[0], {
     forge: "github",
@@ -725,7 +725,18 @@ test("a PR the viewer reviewed and is not asked again reads by their review, cha
   assert.equal(commented?.viaTeam, null);
   assert.equal(commented?.changedSinceReview, false);
   assert.equal(byUrl("https://github.com/stretchr/testify/pull/1546")?.state, "approved");
-  assert.equal(byUrl("https://github.com/magisterquis/connectproxy/pull/2")?.state, "changes-requested");
+});
+
+test("a PR the viewer reviewed without being asked, by name or through a team, is left out", async () => {
+  const { forge } = forgeReplaying([{ stdout: fixture("review-search-requested.json") }, { stdout: fixture("review-search-reviewed.json") }]);
+
+  const [host] = await forge.listReviewRequests();
+  const urls = host?.requests.map((request) => request.url);
+
+  assert.ok(!urls?.includes("https://github.com/magisterquis/connectproxy/pull/2"));
+  assert.ok(!urls?.includes("https://github.com/sickcodes/Docker-OSX/pull/819"));
+  assert.ok(urls?.includes("https://github.com/stretchr/testify/pull/1546"));
+  assert.ok(urls?.includes("https://github.com/stretchr/testify/pull/1467"));
 });
 
 test("a search with more results than it returned marks the host as truncated", async () => {
