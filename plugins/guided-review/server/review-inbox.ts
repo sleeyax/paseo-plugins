@@ -1,11 +1,17 @@
 import type { Inbox, InboxItem, LocalReview, ReviewRequest } from "../shared/inbox.ts";
 import type { ChangeRequestRef, Forge } from "./forge/port.ts";
+import type { GuideGenerations } from "./guide-generation.ts";
 import type { InboxCheckOffsFile } from "./inbox-check-offs.ts";
+import type { ReviewPreparation } from "./review-preparation.ts";
 import { reviewIdOf, type ReviewRecord, type ReviewStore } from "./review-store.ts";
+import type { WorkspacePort } from "./workspaces/port.ts";
 
 export type ReviewInboxOptions = {
   forges: readonly Forge[];
   store: ReviewStore;
+  preparation: ReviewPreparation;
+  guides: GuideGenerations;
+  workspaces: WorkspacePort;
   checkOffs: InboxCheckOffsFile;
   log: (message: string) => void;
 };
@@ -21,12 +27,18 @@ export type ReviewInboxOptions = {
 export class ReviewInbox {
   readonly #forges: readonly Forge[];
   readonly #store: ReviewStore;
+  readonly #preparation: ReviewPreparation;
+  readonly #guides: GuideGenerations;
+  readonly #workspaces: WorkspacePort;
   readonly #checkOffs: InboxCheckOffsFile;
   readonly #log: (message: string) => void;
 
   constructor(options: ReviewInboxOptions) {
     this.#forges = options.forges;
     this.#store = options.store;
+    this.#preparation = options.preparation;
+    this.#guides = options.guides;
+    this.#workspaces = options.workspaces;
     this.#checkOffs = options.checkOffs;
     this.#log = options.log;
   }
@@ -39,15 +51,27 @@ export class ReviewInbox {
     return { hosts: listed.map(({ requests: _, ...host }) => host), items };
   }
 
-  async #item(request: ReviewRequest): Promise<Omit<InboxItem, "checkedOff">> {
-    const record = await this.#recordOf(request);
-    if (record === null) return { ...request, local: null };
-    const local: LocalReview = {
-      reviewId: record.id,
-      guide: (await this.#store.getGuide(record.id, record.header.headSha))?.status ?? "none",
-      headMoved: request.headSha !== "" && request.headSha !== record.header.headSha,
+  /** What this plugin has of the review `reviewId` names: null when it was never started here. */
+  async local(reviewId: string): Promise<LocalReview | null> {
+    const record = await this.#store.get(reviewId);
+    const progress = this.#preparation.progressOf(reviewId);
+    const preparing = progress === undefined || progress.phase === "ready" ? null : { phase: progress.phase, message: progress.message };
+    if (record === null) return preparing === null ? null : { header: progress?.header ?? null, preparing, guide: "none", workspaceId: null };
+    const stored = await this.#store.getGuide(record.id, record.header.headSha);
+    return {
+      header: record.header,
+      preparing,
+      guide: this.#guides.running(record) ? "generating" : (stored?.status ?? "none"),
+      workspaceId: (await this.#workspaces.isActive(record.workspace.id)) ? record.workspace.id : null,
     };
-    return { ...request, ...(await this.#fromReview(request, record)), local };
+  }
+
+  async #item(request: ReviewRequest): Promise<Omit<InboxItem, "checkedOff">> {
+    const reviewId = idOf(request);
+    const local = reviewId === null ? null : await this.local(reviewId);
+    const record = reviewId === null ? null : await this.#store.get(reviewId);
+    if (record === null) return { ...request, reviewId, local };
+    return { ...request, ...(await this.#fromReview(request, record)), reviewId, local };
   }
 
   /** What the review started here knows better than the forge's listing. */
@@ -73,13 +97,12 @@ export class ReviewInbox {
     }
   }
 
-  async #recordOf({ forge, host, project, number, url }: ReviewRequest): Promise<ReviewRecord | null> {
-    let id: string;
-    try {
-      id = reviewIdOf({ forge, host, project, number, url });
-    } catch {
-      return null;
-    }
-    return this.#store.get(id);
+}
+
+function idOf({ forge, host, project, number, url }: ReviewRequest): string | null {
+  try {
+    return reviewIdOf({ forge, host, project, number, url });
+  } catch {
+    return null;
   }
 }

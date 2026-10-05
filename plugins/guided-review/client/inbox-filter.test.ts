@@ -25,6 +25,7 @@ function item(number: number, overrides: Partial<InboxItem> = {}): InboxItem {
     viaTeam: null,
     changedSinceReview: null,
     pendingDrafts: 0,
+    reviewId: null,
     local: null,
     checkedOff: false,
     ...overrides,

@@ -4,26 +4,12 @@ import { FileDiffSchema } from "./diff.ts";
 import { CommentOriginSchema, DraftListSchema, DraftLocationSchema, LinkedDraftSchema, QuoteSchema } from "./drafts.ts";
 import { GuideStateSchema } from "./guide.ts";
 import { InboxPreferencesSchema } from "./inbox-preferences.ts";
-import { CheckOffSchema, InboxSchema } from "./inbox.ts";
+import { CheckOffSchema, InboxSchema, LocalReviewSchema } from "./inbox.ts";
 import { GuideProgressSchema } from "./progress.ts";
+import { ReviewHeaderSchema, START_PHASES } from "./review-header.ts";
 import { SubmitResultSchema, VerdictOptionSchema, VerdictSchema } from "./submit.ts";
 
-/** What the panel shows about a change request before any guide exists. */
-export const ReviewHeaderSchema = z.object({
-  forge: z.enum(["github", "gitlab"]),
-  url: z.string(),
-  /** `owner/repo`, or a GitLab project path. */
-  project: z.string(),
-  number: z.number().int(),
-  title: z.string(),
-  author: z.string(),
-  state: z.enum(["open", "closed", "merged"]),
-  isDraft: z.boolean(),
-  fileCount: z.number().int(),
-  additions: z.number().int(),
-  deletions: z.number().int(),
-  headSha: z.string(),
-});
+export const LocalReviewsSchema = z.object({ reviews: z.array(z.object({ reviewId: z.string(), local: LocalReviewSchema.nullable() })) });
 
 export const StartResultSchema = z.discriminatedUnion("status", [
   /** The URL is not one any forge takes; nothing was started. */
@@ -31,8 +17,6 @@ export const StartResultSchema = z.discriminatedUnion("status", [
   /** A background job is reading the change request and preparing its workspace; follow it by ID. */
   z.object({ status: z.literal("started"), reviewId: z.string() }),
 ]);
-
-export const START_PHASES = ["reading", "updating-branch", "cloning", "creating-workspace", "ready", "failed", "unknown"] as const;
 
 /**
  * Where starting a review has got to. `unknown` is a review this daemon has no record of, which is
@@ -94,6 +78,13 @@ export const getInbox = defineRpc({
   name: "guided-review.inbox.list",
   input: z.object({}),
   output: InboxSchema,
+});
+
+/** What this plugin has of each review, for the review list to follow the ones being prepared or generated without listing again. */
+export const getLocalReviews = defineRpc({
+  name: "guided-review.inbox.local",
+  input: z.object({ reviewIds: z.array(z.string()) }),
+  output: LocalReviewsSchema,
 });
 
 export const getInboxPreferences = defineRpc({
@@ -423,6 +414,7 @@ export type SyntaxPalette = z.output<typeof SyntaxPaletteSchema>;
 export type SyntaxColors = z.output<typeof SyntaxColorsSchema>;
 export type StartResult = z.output<typeof StartResultSchema>;
 export type StartPhase = (typeof START_PHASES)[number];
+export type LocalReviews = z.output<typeof LocalReviewsSchema>;
 export type StartProgress = z.output<typeof StartProgressSchema>;
 export type PanelView = z.output<typeof PanelViewSchema>;
 export type GuideSubject = z.output<typeof GuideSubjectSchema>;

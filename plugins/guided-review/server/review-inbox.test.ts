@@ -3,19 +3,21 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import type { ReviewRequest, ReviewRequestHost } from "../shared/inbox.ts";
+import { headMoved, type ReviewRequest, type ReviewRequestHost } from "../shared/inbox.ts";
 import { fakeForge, sampleChangeRequest, type FakeForge } from "./fake-forge.ts";
-import { fakeGuideAgents, sampleGuideReply } from "./fake-guide-agents.ts";
-import { fakeWorkspaces } from "./fake-workspaces.ts";
+import { fakeGuideAgents, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
+import { fakeWorkspaces, type FakeWorkspaces } from "./fake-workspaces.ts";
 import { ForgeError } from "./forge/port.ts";
 import { ReviewService } from "./review-service.ts";
 
 const GITHUB_URL = "https://github.com/acme/uploader/pull/7";
 const GITLAB_URL = "https://gitlab.com/acme/uploader/-/merge_requests/7";
+const GITHUB_ID = "github/github.com/acme/uploader/7";
+const GITLAB_ID = "gitlab/gitlab.com/acme/uploader/7";
 const HEAD = "b".repeat(40);
 const PUSHED = "d".repeat(40);
 
-type Host = { github: FakeForge; gitlab: FakeForge; service: ReviewService; restart: () => ReviewService };
+type Host = { github: FakeForge; gitlab: FakeForge; workspaces: FakeWorkspaces; guideAgents: FakeGuideAgents; service: ReviewService; restart: () => ReviewService };
 
 async function withForges(t: TestContext): Promise<Host> {
   const data = await mkdtemp(path.join(os.tmpdir(), "guided-review-inbox-"));
@@ -30,7 +32,7 @@ async function withForges(t: TestContext): Promise<Host> {
   const guideAgents = fakeGuideAgents();
   guideAgents.answer = () => sampleGuideReply();
   const restart = () => new ReviewService({ forges: [github, gitlab], workspaces, guideAgents, dataDirectory: data });
-  return { github, gitlab, service: restart(), restart };
+  return { github, gitlab, workspaces, guideAgents, service: restart(), restart };
 }
 
 async function startReview(service: ReviewService, url: string) {
@@ -84,8 +86,8 @@ test("lists every forge's review requests with their hosts, and none started her
     { forge: "gitlab", host: "gitlab.example.com", truncated: false, error: "glab is not logged in to gitlab.example.com." },
   ]);
   assert.deepEqual(inbox.items, [
-    { ...request(GITHUB_URL), local: null, checkedOff: false },
-    { ...request(GITLAB_URL), local: null, checkedOff: false },
+    { ...request(GITHUB_URL), reviewId: GITHUB_ID, local: null, checkedOff: false },
+    { ...request(GITLAB_URL), reviewId: GITLAB_ID, local: null, checkedOff: false },
   ]);
 });
 
@@ -94,10 +96,59 @@ test("a change request reviewed here carries its review, its guide's state and w
   await startReview(service, GITHUB_URL);
 
   github.reviewRequests = [listed("github", [request(GITHUB_URL)])];
-  assert.deepEqual((await service.inbox()).items[0]?.local, { reviewId: "github/github.com/acme/uploader/7", guide: "ready", headMoved: false });
+  const [item] = (await service.inbox()).items;
+  assert.equal(item?.local?.header?.headSha, HEAD);
+  assert.deepEqual({ ...item?.local, header: null }, { header: null, preparing: null, guide: "ready", workspaceId: "wks_0000000000000001" });
+  assert.equal(headMoved(item!, item!.local!), false);
 
   github.reviewRequests = [listed("github", [request(GITHUB_URL, { headSha: PUSHED })])];
-  assert.equal((await service.inbox()).items[0]?.local?.headMoved, true);
+  const [pushed] = (await service.inbox()).items;
+  assert.equal(headMoved(pushed!, pushed!.local!), true);
+});
+
+test("a start that failed before the change request was read lists as failed, with no review behind it", async (t) => {
+  const { github, service } = await withForges(t);
+  github.changeRequests.delete(GITHUB_URL);
+  await startReview(service, GITHUB_URL);
+
+  github.reviewRequests = [listed("github", [request(GITHUB_URL)])];
+  const local = (await service.inbox()).items[0]?.local;
+  assert.equal(local?.preparing?.phase, "failed");
+  assert.match(local?.preparing?.message ?? "", /^Could not read /);
+  assert.deepEqual({ ...local, preparing: null }, { header: null, preparing: null, guide: "none", workspaceId: null });
+});
+
+test("a review whose workspace was archived has no workspace to open, and the list follows a review by ID as it lists it", async (t) => {
+  const { github, workspaces, service } = await withForges(t);
+  await startReview(service, GITHUB_URL);
+  workspaces.archive("wks_0000000000000001");
+
+  github.reviewRequests = [listed("github", [request(GITHUB_URL)])];
+  const listedLocal = (await service.inbox()).items[0]?.local;
+  assert.equal(listedLocal?.workspaceId, null);
+  assert.deepEqual(await service.localReviews({ reviewIds: [GITHUB_ID, GITLAB_ID] }), {
+    reviews: [
+      { reviewId: GITHUB_ID, local: listedLocal },
+      { reviewId: GITLAB_ID, local: null },
+    ],
+  });
+});
+
+test("a start reads as ready only once its guide is being generated", async (t) => {
+  const { guideAgents, service } = await withForges(t);
+  let release: ((reply: string) => void) | undefined;
+  guideAgents.answer = () => new Promise<string>((resolve) => (release = resolve));
+
+  await service.start({ url: GITHUB_URL });
+  while ((await service.startProgress({ reviewId: GITHUB_ID })).phase !== "ready") await new Promise((resolve) => setImmediate(resolve));
+  const [review] = (await service.localReviews({ reviewIds: [GITHUB_ID] })).reviews;
+  assert.equal(review?.local?.guide, "generating");
+  assert.equal(review?.local?.preparing, null);
+
+  while (release === undefined) await new Promise((resolve) => setImmediate(resolve));
+  release(sampleGuideReply());
+  await service.settled();
+  assert.equal((await service.localReviews({ reviewIds: [GITHUB_ID] })).reviews[0]?.local?.guide, "ready");
 });
 
 test("on GitLab the drafts are counted for an MR reviewed here only, and a failed count reads as unknown", async (t) => {

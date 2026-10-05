@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ReviewHeaderSchema, START_PHASES } from "./review-header.ts";
 
 /**
  * Where the reviewer stands on a change request they review, in the same words on both forges.
@@ -58,16 +59,22 @@ export const ReviewRequestHostSchema = z.object({
 export type ReviewRequestHost = z.output<typeof ReviewRequestHostSchema>;
 
 /**
- * What this plugin has of a change request's review, if the reviewer started one here: where its
- * guide stands at the head it was read at, and whether the forge's head has moved past that.
+ * What this plugin has of a change request's review, if the reviewer started one here: the start
+ * or Regenerate still running, or how it failed, where its guide stands at the head it was read at,
+ * and its workspace while that is open.
  */
 export const LocalReviewSchema = z.object({
-  reviewId: z.string(),
+  /** The change request as the review has it; null until a first start has read it. */
+  header: ReviewHeaderSchema.nullable(),
+  /** The review's start or Regenerate while it runs, and once it failed. */
+  preparing: z.object({ phase: z.enum(START_PHASES), message: z.string().nullable() }).nullable(),
   guide: z.enum(["none", "generating", "ready", "failed"]),
-  headMoved: z.boolean(),
+  workspaceId: z.string().nullable(),
 });
 
 export const InboxItemSchema = ReviewRequestSchema.extend({
+  /** The ID a review of it is kept under; null when it cannot be kept. */
+  reviewId: z.string().nullable(),
   local: LocalReviewSchema.nullable(),
   /** The reviewer set it aside on this list, the forge none the wiser, until it moves on (`server/inbox-check-offs.ts`). */
   checkedOff: z.boolean(),
@@ -86,3 +93,8 @@ export type LocalReview = z.output<typeof LocalReviewSchema>;
 export type CheckOff = z.output<typeof CheckOffSchema>;
 export type InboxItem = z.output<typeof InboxItemSchema>;
 export type Inbox = z.output<typeof InboxSchema>;
+
+/** Whether the forge's head moved past the one the review here was read at. */
+export function headMoved(item: ReviewRequest, local: LocalReview): boolean {
+  return local.header !== null && item.headSha !== "" && item.headSha !== local.header.headSha;
+}

@@ -7,6 +7,7 @@ import type {
   FinishView,
   GuideSubject,
   HeadCheck,
+  LocalReviews,
   NodeDiff,
   PanelView,
   StartProgress,
@@ -113,13 +114,25 @@ export class ReviewService {
     });
     this.#drafts = new ReviewDrafts({ store: this.#store, guides: this.#guides });
     this.#checkOffs = new InboxCheckOffsFile(options.dataDirectory);
-    this.#inbox = new ReviewInbox({ forges: this.#forges, store: this.#store, checkOffs: this.#checkOffs, log: this.#log });
+    this.#inbox = new ReviewInbox({
+      forges: this.#forges,
+      store: this.#store,
+      preparation: this.#preparation,
+      guides: this.#guides,
+      workspaces: this.#workspaces,
+      checkOffs: this.#checkOffs,
+      log: this.#log,
+    });
     this.#inboxPreferences = new InboxPreferencesFile(options.dataDirectory);
   }
 
   /** The open change requests the reviewer reviews on every forge and host, with the reviews started here. */
   async inbox(): Promise<Inbox> {
     return this.#inbox.list();
+  }
+
+  async localReviews({ reviewIds }: { reviewIds: string[] }): Promise<LocalReviews> {
+    return { reviews: await Promise.all(reviewIds.map(async (reviewId) => ({ reviewId, local: await this.#inbox.local(reviewId) }))) };
   }
 
   async inboxPreferences(): Promise<InboxPreferences> {

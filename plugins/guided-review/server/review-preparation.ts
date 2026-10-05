@@ -113,8 +113,7 @@ export class ReviewPreparation {
         updatedAt: this.#now().toISOString(),
       };
       await this.#store.update(record);
-      job.progress = { ...job.progress, header: record.header, phase: "ready", workspaceId: record.workspace.id };
-      await this.#guides.state(record);
+      await this.#ready(job, record);
       return;
     }
 
@@ -139,8 +138,13 @@ export class ReviewPreparation {
       ...(previousHeadSha === undefined ? {} : { previousHeadSha }),
     };
     await this.#store.save(record, changeRequest);
-    job.progress = { ...job.progress, phase: "ready", workspaceId: workspace.id };
+    await this.#ready(job, record);
+  }
+
+  /** Ready only once the guide is asked for, so nothing following the job reads a ready review as having none. */
+  async #ready(job: Job, record: ReviewRecord): Promise<void> {
     await this.#guides.state(record);
+    job.progress = { ...job.progress, header: record.header, phase: "ready", workspaceId: record.workspace.id };
   }
 
   /**

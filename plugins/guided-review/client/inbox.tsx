@@ -6,7 +6,7 @@ import React, { useContext, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import { CHECK_OFF_FILTERS, INBOX_COLUMNS, type CheckOffFilter, type InboxColumn, type InboxPreferences, type InboxSortKey } from "../shared/inbox-preferences.ts";
-import { ReviewerStateSchema, type Inbox, type InboxItem, type ReviewerState } from "../shared/inbox.ts";
+import { headMoved, ReviewerStateSchema, type Inbox, type InboxItem, type ReviewerState } from "../shared/inbox.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { Button } from "./button.tsx";
 import { CheckOffContext, INBOX_QUERY_KEY, useCheckOff } from "./check-off.ts";
@@ -306,10 +306,14 @@ function stateOf(item: InboxItem): Tinted {
 /** What this plugin has of the review, and the reviewer's pending drafts wherever they were written. */
 function localOf(item: InboxItem): Tinted | null {
   const drafts = item.pendingDrafts ? [`${item.pendingDrafts} draft${item.pendingDrafts === 1 ? "" : "s"}`] : [];
-  if (item.local === null) return drafts.length > 0 ? { text: drafts.join(" · "), color: "foregroundMuted" } : null;
-  const guide = { none: "Started", generating: "Guide generating", ready: "Guide ready", failed: "Guide failed" }[item.local.guide];
-  const parts = [guide, ...(item.local.headMoved ? ["head moved"] : []), ...drafts];
-  const color = item.local.guide === "failed" ? "statusDanger" : item.local.headMoved ? "statusWarning" : "foregroundMuted";
+  const { local } = item;
+  if (local === null) return drafts.length > 0 ? { text: drafts.join(" · "), color: "foregroundMuted" } : null;
+  const failed = local.preparing?.phase === "failed";
+  const state =
+    local.preparing === null ? { none: "Started", generating: "Guide generating", ready: "Guide ready", failed: "Guide failed" }[local.guide] : failed ? "Start failed" : "Preparing";
+  const moved = headMoved(item, local);
+  const parts = [state, ...(moved ? ["head moved"] : []), ...drafts];
+  const color = failed || (local.preparing === null && local.guide === "failed") ? "statusDanger" : moved ? "statusWarning" : "foregroundMuted";
   return { text: parts.join(" · "), color };
 }
 
