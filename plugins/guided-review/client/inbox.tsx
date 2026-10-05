@@ -1,5 +1,5 @@
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, Modal, TextInput } from "@getpaseo/plugin/client/react-native";
+import { Modal, TextInput } from "@getpaseo/plugin/client/react-native";
 import { ExternalLink, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
 import React, { useState } from "react";
@@ -16,8 +16,6 @@ import type { ReviewStart } from "./start-review.ts";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 
 const FORGE_NAMES = { github: "GitHub", gitlab: "GitLab" } as const;
-const FORGE_ICONS = { github: "Github", gitlab: "Gitlab" } as const;
-const ICON_SIZE = 16;
 
 /** The open change requests the reviewer reviews, to pick one and start or continue its review. */
 export function ReviewInbox({ colors, compact, starter }: { colors: Colors; compact: boolean; starter: ReviewStart }) {
@@ -265,7 +263,6 @@ type ColumnWidth = { width: number } | { flex: number; min: number };
 type ColumnSpec = { label: string; size: ColumnWidth; sort?: InboxSortKey; cell: (item: InboxItem, colors: Colors, now: Date) => React.ReactNode };
 
 const COLUMNS: Record<InboxColumn, ColumnSpec> = {
-  platform: { label: "Platform", size: { width: 64 }, cell: (item, colors) => <ForgeIcon colors={colors} item={item} /> },
   change: {
     label: "PR/MR",
     size: { flex: 1.2, min: 96 },
@@ -323,14 +320,6 @@ function Cell({ colors, text, color, lines = 1 }: { colors: Colors; text: string
 /** Two lines, since a state or what is kept here can run to a few words. */
 function TintedCell({ colors, value }: { colors: Colors; value: Tinted | null }) {
   return value === null ? <Cell colors={colors} text="—" color="foregroundMuted" /> : <Cell colors={colors} text={value.text} color={value.color} lines={2} />;
-}
-
-function ForgeIcon({ colors, item }: { colors: Colors; item: InboxItem }) {
-  return (
-    <View accessibilityLabel={FORGE_NAMES[item.forge]}>
-      <Icon name={FORGE_ICONS[item.forge]} size={ICON_SIZE} color={colors.foregroundMuted} />
-    </View>
-  );
 }
 
 /** The change request's number as its forge writes it, linking to it there. */
@@ -471,7 +460,6 @@ function Card({ colors, item, columns, starter }: { colors: Colors; item: InboxI
     <View style={{ padding: spacing[3], gap: spacing[1], borderWidth: 1, borderColor: colors.border, borderRadius: radius.md }}>
       <Title colors={colors} item={item} />
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: spacing[1] }}>
-        {shown("platform") ? <ForgeIcon colors={colors} item={item} /> : null}
         <NumberLink colors={colors} item={item} />
         {meta.length > 0 ? (
           <Text style={{ flexShrink: 1, color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>· {meta.join(" · ")}</Text>
