@@ -1,16 +1,16 @@
 import { useRpc } from "@getpaseo/plugin/client";
 import { Modal, TextInput } from "@getpaseo/plugin/client/react-native";
-import { ExternalLink, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
+import { ExternalLink, SettingsAction, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
 import React, { useState } from "react";
 import { Pressable, Text, View, type LayoutChangeEvent } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { INBOX_COLUMNS, type InboxColumn, type InboxPreferences, type InboxSortKey } from "../shared/inbox-preferences.ts";
-import type { Inbox, InboxItem } from "../shared/inbox.ts";
+import { ReviewerStateSchema, type Inbox, type InboxItem, type ReviewerState } from "../shared/inbox.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { Button } from "./button.tsx";
-import { age, countLabel, visibleItems } from "./inbox-filter.ts";
+import { age, countLabel, STATE_NAMES, statesLabel, visibleItems } from "./inbox-filter.ts";
 import { useInboxPreferences } from "./inbox-preferences.ts";
 import { FROM_NEW_REVIEW, NewReview } from "./new-review.tsx";
 import type { ReviewStart } from "./start-review.ts";
@@ -25,7 +25,7 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
   const { preferences, change, error } = useInboxPreferences();
   const [query, setQuery] = useState("");
   const [width, setWidth] = useState(0);
-  const [choosing, setChoosing] = useState(false);
+  const [choosing, setChoosing] = useState<"columns" | "states" | null>(null);
 
   const items = inbox.data ? visibleItems(inbox.data.items, preferences, query) : [];
   const table = !compact && width >= tableWidth(preferences.columns);
@@ -37,7 +37,8 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
         trailing={
           <View style={{ flexDirection: "row", gap: spacing[2] }}>
             <NewReview colors={colors} starter={starter} />
-            <Button colors={colors} small label="Columns" onPress={() => setChoosing(true)} />
+            <Button colors={colors} small label="Columns" onPress={() => setChoosing("columns")} />
+            <Button colors={colors} small label={statesLabel(preferences.states)} onPress={() => setChoosing("states")} />
             <Button colors={colors} small label={inbox.isFetching ? "Refreshing…" : "Refresh"} disabled={inbox.isFetching} onPress={() => void inbox.refetch()} />
           </View>
         }
@@ -69,7 +70,8 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
           )}
         </View>
       </SettingsSection>
-      <ColumnChooser open={choosing} onOpenChange={setChoosing} columns={preferences.columns} change={change} />
+      <ColumnChooser open={choosing === "columns"} onOpenChange={(open) => setChoosing(open ? "columns" : null)} columns={preferences.columns} change={change} />
+      <StateChooser open={choosing === "states"} onOpenChange={(open) => setChoosing(open ? "states" : null)} states={preferences.states} change={change} />
     </View>
   );
 }
@@ -107,6 +109,42 @@ function ColumnChooser({
               value={column === "title" || columns.includes(column)}
               disabled={column === "title"}
               onValueChange={(shown) => toggle(column, shown)}
+            />
+          ))}
+        </SettingsCard>
+      </Modal.Content>
+    </Modal>
+  );
+}
+
+/** Which reviewer states the list shows; the last one shown stays on, as a list showing none is no use. */
+function StateChooser({
+  open,
+  onOpenChange,
+  states,
+  change,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  states: readonly ReviewerState[];
+  change: (update: Partial<InboxPreferences>) => void;
+}) {
+  const all = ReviewerStateSchema.options;
+  const toggle = (state: ReviewerState, shown: boolean) =>
+    change({ states: all.filter((candidate) => (candidate === state ? shown : states.includes(candidate))) });
+  return (
+    <Modal title="States" open={open} onOpenChange={onOpenChange}>
+      <Modal.Content>
+        <SettingsCard>
+          <SettingsAction label="All" actionLabel="Show all" disabled={states.length === all.length} onPress={() => change({ states: [...all] })} />
+          {all.map((state) => (
+            <SettingsSwitch
+              key={state}
+              label={STATE_NAMES[state].charAt(0).toUpperCase() + STATE_NAMES[state].slice(1)}
+              {...(state === "unapproved" ? { hint: "GitLab only" } : {})}
+              value={states.includes(state)}
+              disabled={states.length === 1 && states.includes(state)}
+              onValueChange={(shown) => toggle(state, shown)}
             />
           ))}
         </SettingsCard>
@@ -161,7 +199,6 @@ function Toolbar({
         ))}
         <View style={{ width: 1, alignSelf: "stretch", backgroundColor: colors.border, marginHorizontal: spacing[1] }} />
         <Chip colors={colors} label="Needs my attention" selected={preferences.needsAttention} onPress={() => change({ needsAttention: !preferences.needsAttention })} />
-        <Chip colors={colors} label="Hide approved" selected={preferences.hideApproved} onPress={() => change({ hideApproved: !preferences.hideApproved })} />
         <Chip colors={colors} label="Hide drafts" selected={preferences.hideDrafts} onPress={() => change({ hideDrafts: !preferences.hideDrafts })} />
       </View>
     </View>

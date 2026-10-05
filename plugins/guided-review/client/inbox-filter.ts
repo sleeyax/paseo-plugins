@@ -1,5 +1,5 @@
 import type { InboxPreferences, InboxSortKey } from "../shared/inbox-preferences.ts";
-import type { InboxItem } from "../shared/inbox.ts";
+import { ReviewerStateSchema, type InboxItem, type ReviewerState } from "../shared/inbox.ts";
 import { numberLabel } from "../shared/reference.ts";
 
 /**
@@ -29,11 +29,36 @@ export function visibleItems(items: readonly InboxItem[], preferences: InboxPref
   const direction = preferences.sort.descending ? -1 : 1;
   return items
     .filter((item) => preferences.provider === "all" || item.forge === preferences.provider)
-    .filter((item) => !preferences.hideApproved || item.state !== "approved")
+    .filter((item) => preferences.states.includes(item.state))
     .filter((item) => !preferences.hideDrafts || !item.isDraft)
     .filter((item) => !preferences.needsAttention || needsAttention(item))
     .filter((item) => matchesSearch(item, query))
     .sort((a, b) => direction * (value(a) - value(b)) || SORT_VALUES.updated(b) - SORT_VALUES.updated(a));
+}
+
+/** Each reviewer state as a sentence names it mid-way. */
+export const STATE_NAMES: Record<ReviewerState, string> = {
+  requested: "requested",
+  commented: "commented",
+  "changes-requested": "changes requested",
+  approved: "approved",
+  unapproved: "approval reset",
+};
+
+/**
+ * Which states the list shows, naming whichever side is shorter: `States: requested and commented`,
+ * or `States: all but approved`.
+ */
+export function statesLabel(states: readonly ReviewerState[]): string {
+  const hidden = ReviewerStateSchema.options.filter((state) => !states.includes(state));
+  if (hidden.length === 0) return "States: all";
+  if (states.length <= hidden.length) return `States: ${namesOf(states)}`;
+  return `States: all but ${namesOf(hidden)}`;
+}
+
+function namesOf(states: readonly ReviewerState[]): string {
+  const names = states.map((state) => STATE_NAMES[state]);
+  return names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
 /** How many reviews the list shows, and of how many when the filters or the search hide some. */

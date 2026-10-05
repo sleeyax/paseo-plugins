@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_INBOX_PREFERENCES, type InboxPreferences } from "../shared/inbox-preferences.ts";
 import type { InboxItem } from "../shared/inbox.ts";
-import { age, countLabel, matchesSearch, needsAttention, visibleItems } from "./inbox-filter.ts";
+import { age, countLabel, matchesSearch, needsAttention, statesLabel, visibleItems } from "./inbox-filter.ts";
 
 function item(number: number, overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -30,7 +30,7 @@ function item(number: number, overrides: Partial<InboxItem> = {}): InboxItem {
   };
 }
 
-const ALL: InboxPreferences = { ...DEFAULT_INBOX_PREFERENCES, hideApproved: false };
+const ALL: InboxPreferences = { ...DEFAULT_INBOX_PREFERENCES, states: ["requested", "commented", "changes-requested", "approved", "unapproved"] };
 
 function numbers(items: InboxItem[]): number[] {
   return items.map((entry) => entry.number);
@@ -57,6 +57,26 @@ test("filters by forge and drafts, and sorts by creation or size either way", ()
   assert.deepEqual(numbers(visibleItems(items, { ...ALL, provider: "gitlab" }, "")), [1]);
   assert.deepEqual(numbers(visibleItems(items, { ...ALL, hideDrafts: true, sort: { key: "created", descending: true } }, "")), [3, 1]);
   assert.deepEqual(numbers(visibleItems(items, { ...ALL, sort: { key: "size", descending: false } }, "")), [3, 1, 2]);
+});
+
+test("shows only the reviewer states chosen, updated since or not", () => {
+  const items = [
+    item(1),
+    item(2, { state: "changes-requested", changedSinceReview: true }),
+    item(3, { state: "commented", changedSinceReview: false }),
+    item(4, { state: "requested", changedSinceReview: true }),
+  ];
+
+  assert.deepEqual(numbers(visibleItems(items, { ...ALL, states: ["requested"] }, "")), [1, 4]);
+  assert.deepEqual(numbers(visibleItems(items, { ...ALL, states: ["commented", "changes-requested"] }, "")), [2, 3]);
+});
+
+test("the states label names whichever side is shorter", () => {
+  assert.equal(statesLabel(ALL.states), "States: all");
+  assert.equal(statesLabel(["requested"]), "States: requested");
+  assert.equal(statesLabel(["requested", "commented"]), "States: requested and commented");
+  assert.equal(statesLabel(["requested", "commented", "changes-requested", "unapproved"]), "States: all but approved");
+  assert.equal(statesLabel(["requested", "commented", "changes-requested"]), "States: all but approved and approval reset");
 });
 
 test("needs attention is what was never reviewed, asked again, unapproved or changed since the review", () => {

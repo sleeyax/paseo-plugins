@@ -17,7 +17,7 @@ test("with nothing saved the list hides what the reviewer approved and sorts by 
 
   assert.deepEqual(preferences, {
     provider: "all",
-    hideApproved: true,
+    states: ["requested", "commented", "changes-requested", "unapproved"],
     hideDrafts: false,
     needsAttention: false,
     sort: { key: "updated", descending: true },
@@ -29,7 +29,7 @@ test("what is saved is read back after a restart", async (t) => {
   const data = await dataDirectory(t);
   const saved: InboxPreferences = {
     provider: "gitlab",
-    hideApproved: false,
+    states: ["approved", "requested"],
     hideDrafts: true,
     needsAttention: true,
     sort: { key: "size", descending: false },
@@ -38,7 +38,7 @@ test("what is saved is read back after a restart", async (t) => {
 
   await new InboxPreferencesFile(data).save(saved);
 
-  assert.deepEqual(await new InboxPreferencesFile(data).read(), { ...saved, columns: ["title", "size", "ci"] });
+  assert.deepEqual(await new InboxPreferencesFile(data).read(), { ...saved, states: ["requested", "approved"], columns: ["title", "size", "ci"] });
 });
 
 test("the title is always among the columns", async (t) => {
@@ -51,14 +51,22 @@ test("a field the plugin no longer knows falls back on its own, keeping the rest
   const data = await dataDirectory(t);
   await writeFile(
     path.join(data, "inbox-preferences.json"),
-    JSON.stringify({ provider: "bitbucket", hideDrafts: true, sort: { key: "stars" }, columns: ["title", "reactions"], extra: 1 }),
+    JSON.stringify({ provider: "bitbucket", hideApproved: false, states: ["merged", "approved"], hideDrafts: true, sort: { key: "stars" }, columns: ["title", "reactions"], extra: 1 }),
   );
 
   assert.deepEqual(await new InboxPreferencesFile(data).read(), {
     ...DEFAULT_INBOX_PREFERENCES,
+    states: ["approved"],
     hideDrafts: true,
     columns: ["title"],
   });
+});
+
+test("a list of states that would show nothing falls back to the default", async (t) => {
+  const data = await dataDirectory(t);
+  await writeFile(path.join(data, "inbox-preferences.json"), JSON.stringify({ states: ["merged"] }));
+
+  assert.deepEqual((await new InboxPreferencesFile(data).read()).states, DEFAULT_INBOX_PREFERENCES.states);
 });
 
 test("saves sent together all land, the last one kept", async (t) => {
