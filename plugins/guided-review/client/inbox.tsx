@@ -28,7 +28,7 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
   const { preferences, change: changePreferences, error } = useInboxPreferences();
   const checkOff = useCheckOff();
   const [query, setSearch] = useState("");
-  const [width, setWidth] = useState(0);
+  const [width, setWidth] = useState<number | null>(null);
   const [choosing, setChoosing] = useState<"columns" | "states" | null>(null);
 
   const change = (update: Partial<InboxPreferences>) => {
@@ -44,7 +44,8 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
     void inbox.refetch();
   };
   const items = inbox.data ? visibleItems(inbox.data.items, preferences, query, checkOff.held) : [];
-  const table = !compact && width >= tableWidth(preferences.columns);
+  // Until the list has been measured it is not drawn, rather than as cards for a frame.
+  const shape = compact ? "cards" : width === null ? null : width >= tableWidth(preferences.columns) ? "table" : "cards";
   const rows = { toggle: checkOff.toggle, dimmed: (item: InboxItem) => checkOff.held.has(item.url) && !passesCheckOff(item, preferences) };
 
   return (
@@ -76,15 +77,15 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
             <CheckOffContext.Provider value={rows}>
               <View style={{ gap: spacing[2] }}>
                 <Note colors={colors} text={countLabel(items.length, inbox.data.items.length, hiddenCheckedOff(inbox.data.items, preferences, query, checkOff.held))} />
-                {table ? (
+                {shape === "table" ? (
                   <Table colors={colors} items={items} preferences={preferences} change={change} starter={starter} />
-                ) : (
+                ) : shape === "cards" ? (
                   <View style={{ gap: spacing[2] }}>
                     {items.map((item) => (
                       <Card key={item.url} colors={colors} item={item} columns={preferences.columns} starter={starter} />
                     ))}
                   </View>
-                )}
+                ) : null}
               </View>
             </CheckOffContext.Provider>
           )}
