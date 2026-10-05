@@ -12,6 +12,7 @@ import { numberLabel } from "../shared/reference.ts";
 import { Button } from "./button.tsx";
 import { age, visibleItems } from "./inbox-filter.ts";
 import { useInboxPreferences } from "./inbox-preferences.ts";
+import { FROM_NEW_REVIEW, NewReview } from "./new-review.tsx";
 import type { ReviewStart } from "./start-review.ts";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 
@@ -35,6 +36,7 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
         title="Assigned to me for review"
         trailing={
           <View style={{ flexDirection: "row", gap: spacing[2] }}>
+            <NewReview colors={colors} starter={starter} />
             <Button colors={colors} small label="Columns" onPress={() => setChoosing(true)} />
             <Button colors={colors} small label={inbox.isFetching ? "Refreshing…" : "Refresh"} disabled={inbox.isFetching} onPress={() => void inbox.refetch()} />
           </View>
@@ -44,6 +46,7 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
           <Toolbar colors={colors} preferences={preferences} change={change} query={query} setQuery={setQuery} />
           {error !== null ? <Note colors={colors} tone="danger" text={`Could not keep these filters for next time: ${error}`} /> : null}
           {inbox.data ? <HostNotes colors={colors} hosts={inbox.data.hosts} /> : null}
+          <NewReviewRow colors={colors} starter={starter} />
           {inbox.isPending ? (
             <Note colors={colors} text="Listing what you are asked to review…" />
           ) : inbox.isError ? (
@@ -362,6 +365,40 @@ function StartButton({ colors, item, starter }: { colors: Colors; item: InboxIte
       disabled={starter.busy}
       onPress={() => void starter.start(item.url, item.url)}
     />
+  );
+}
+
+/**
+ * How a start from the New review dialog is going, above the list, since what was pasted may not be in it.
+ * It names the URL until the change request is read, and stays once the start ended until closed.
+ */
+function NewReviewRow({ colors, starter }: { colors: Colors; starter: ReviewStart }) {
+  if (starter.from !== FROM_NEW_REVIEW || starter.started === null) return null;
+  const { url, header } = starter.started;
+  const status = starter.status ?? { text: "Starting…", tone: "muted" as const };
+  return (
+    <View style={{ padding: spacing[3], gap: spacing[1], borderWidth: 1, borderColor: colors.border, borderRadius: radius.md }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[2] }}>
+        <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: spacing[2] }}>
+          <ExternalLink href={header?.url ?? url} accessibilityLabel={`Open ${header ? numberLabel(header.forge, header.number) : url}`}>
+            <Text numberOfLines={1} style={{ color: colors.accent, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>
+              {header ? numberLabel(header.forge, header.number) : url}
+            </Text>
+          </ExternalLink>
+          {header ? (
+            <Text numberOfLines={1} style={{ flexShrink: 1, color: colors.foreground, fontSize: fontSize.base, lineHeight: leading(fontSize.base) }}>
+              {header.title}
+            </Text>
+          ) : null}
+        </View>
+        {starter.busy ? null : (
+          <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" onPress={starter.dismiss} hitSlop={spacing[2]}>
+            <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.lg, lineHeight: leading(fontSize.lg) }}>×</Text>
+          </Pressable>
+        )}
+      </View>
+      <Note colors={colors} tone={status.tone === "danger" ? "danger" : undefined} text={status.text} />
+    </View>
   );
 }
 
