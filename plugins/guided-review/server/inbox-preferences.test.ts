@@ -19,6 +19,7 @@ test("with nothing saved the list hides what the reviewer approved and sorts by 
     provider: "all",
     states: ["requested", "commented", "changes-requested", "unapproved"],
     hideDrafts: false,
+    checkedOff: "hide",
     needsAttention: false,
     sort: { key: "updated", descending: true },
     columns: ["change", "title", "author", "updated", "state", "local"],
@@ -31,6 +32,7 @@ test("what is saved is read back after a restart", async (t) => {
     provider: "gitlab",
     states: ["approved", "requested"],
     hideDrafts: true,
+    checkedOff: "only",
     needsAttention: true,
     sort: { key: "size", descending: false },
     columns: ["title", "ci", "size"],
@@ -51,7 +53,7 @@ test("a field the plugin no longer knows falls back on its own, keeping the rest
   const data = await dataDirectory(t);
   await writeFile(
     path.join(data, "inbox-preferences.json"),
-    JSON.stringify({ provider: "bitbucket", hideApproved: false, states: ["merged", "approved"], hideDrafts: true, sort: { key: "stars" }, columns: ["title", "reactions"], extra: 1 }),
+    JSON.stringify({ provider: "bitbucket", hideApproved: false, states: ["merged", "approved"], hideDrafts: true, checkedOff: "archived", sort: { key: "stars" }, columns: ["title", "reactions"], extra: 1 }),
   );
 
   assert.deepEqual(await new InboxPreferencesFile(data).read(), {

@@ -23,17 +23,46 @@ const SORT_VALUES: Record<InboxSortKey, (item: InboxItem) => number> = {
   size: (item) => item.additions + item.deletions,
 };
 
-/** The items the list shows, filtered as the preferences say and by the search, in their sort order; ties go to the latest update. */
-export function visibleItems(items: readonly InboxItem[], preferences: InboxPreferences, query: string): InboxItem[] {
+/** URLs that skip the check-off filter, as with no rows held. */
+const NONE_HELD: ReadonlySet<string> = new Set();
+
+/**
+ * The items the list shows, filtered as the preferences say and by the search, in their sort order; ties go to the latest update.
+ * A `held` row is shown whether or not the check-off filter would take it, so a row just checked off or unchecked stays put.
+ */
+export function visibleItems(items: readonly InboxItem[], preferences: InboxPreferences, query: string, held = NONE_HELD): InboxItem[] {
   const value = SORT_VALUES[preferences.sort.key];
   const direction = preferences.sort.descending ? -1 : 1;
   return items
-    .filter((item) => preferences.provider === "all" || item.forge === preferences.provider)
-    .filter((item) => preferences.states.includes(item.state))
-    .filter((item) => !preferences.hideDrafts || !item.isDraft)
-    .filter((item) => !preferences.needsAttention || needsAttention(item))
-    .filter((item) => matchesSearch(item, query))
+    .filter((item) => matchesFilters(item, preferences, query) && (held.has(item.url) || passesCheckOff(item, preferences)))
     .sort((a, b) => direction * (value(a) - value(b)) || SORT_VALUES.updated(b) - SORT_VALUES.updated(a));
+}
+
+/** How many checked-off items the list leaves out that every other filter and the search would show. */
+export function hiddenCheckedOff(items: readonly InboxItem[], preferences: InboxPreferences, query: string, held = NONE_HELD): number {
+  return items.filter((item) => item.checkedOff && !held.has(item.url) && !passesCheckOff(item, preferences) && matchesFilters(item, preferences, query)).length;
+}
+
+/** Whether the check-off filter shows the item, which a held row is not asked. */
+export function passesCheckOff(item: InboxItem, preferences: InboxPreferences): boolean {
+  switch (preferences.checkedOff) {
+    case "hide":
+      return !item.checkedOff;
+    case "show":
+      return true;
+    case "only":
+      return item.checkedOff;
+  }
+}
+
+function matchesFilters(item: InboxItem, preferences: InboxPreferences, query: string): boolean {
+  return (
+    (preferences.provider === "all" || item.forge === preferences.provider) &&
+    preferences.states.includes(item.state) &&
+    (!preferences.hideDrafts || !item.isDraft) &&
+    (!preferences.needsAttention || needsAttention(item)) &&
+    matchesSearch(item, query)
+  );
 }
 
 /** Each reviewer state as a sentence names it mid-way. */
@@ -61,10 +90,11 @@ function namesOf(states: readonly ReviewerState[]): string {
   return names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
-/** How many reviews the list shows, and of how many when the filters or the search hide some. */
-export function countLabel(shown: number, total: number): string {
+/** How many reviews the list shows, of how many when the filters or the search hide some, and how many of those are checked off. */
+export function countLabel(shown: number, total: number, checkedOff = 0): string {
   const noun = total === 1 ? "review" : "reviews";
-  return shown === total ? `${total} ${noun}` : `${shown} of ${total} ${noun}`;
+  const count = shown === total ? `${total} ${noun}` : `${shown} of ${total} ${noun}`;
+  return checkedOff > 0 ? `${count} · ${checkedOff} checked off` : count;
 }
 
 /** How long ago `iso` was, in the largest whole unit: `5m`, `3h`, `2d`, `6w`, `1y`; `now` under a minute. */

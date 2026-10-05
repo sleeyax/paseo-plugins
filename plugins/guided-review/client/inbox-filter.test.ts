@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_INBOX_PREFERENCES, type InboxPreferences } from "../shared/inbox-preferences.ts";
 import type { InboxItem } from "../shared/inbox.ts";
-import { age, countLabel, matchesSearch, needsAttention, statesLabel, visibleItems } from "./inbox-filter.ts";
+import { age, countLabel, hiddenCheckedOff, matchesSearch, needsAttention, statesLabel, visibleItems } from "./inbox-filter.ts";
 
 function item(number: number, overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -72,6 +72,34 @@ test("shows only the reviewer states chosen, updated since or not", () => {
   assert.deepEqual(numbers(visibleItems(items, { ...ALL, states: ["commented", "changes-requested"] }, "")), [2, 3]);
 });
 
+test("checked-off items are hidden by default, shown among the rest, or shown alone", () => {
+  const items = [item(1), item(2, { checkedOff: true }), item(3, { checkedOff: true, isDraft: true })];
+
+  assert.deepEqual(numbers(visibleItems(items, ALL, "")), [1]);
+  assert.deepEqual(numbers(visibleItems(items, { ...ALL, checkedOff: "show" }, "")), [1, 2, 3]);
+  assert.deepEqual(numbers(visibleItems(items, { ...ALL, checkedOff: "only" }, "")), [2, 3]);
+  assert.deepEqual(numbers(visibleItems(items, { ...ALL, checkedOff: "only", hideDrafts: true }, "")), [2], "with the other filters as well");
+});
+
+test("a held row stays whatever the check-off filter says, but not past the other filters", () => {
+  const items = [item(1), item(2, { checkedOff: true }), item(3, { checkedOff: true, isDraft: true })];
+  const held = new Set(items.map((entry) => entry.url));
+
+  assert.deepEqual(numbers(visibleItems(items, ALL, "", held)), [1, 2, 3]);
+  assert.deepEqual(numbers(visibleItems(items, { ...ALL, checkedOff: "only" }, "", held)), [1, 2, 3]);
+  assert.deepEqual(numbers(visibleItems(items, { ...ALL, hideDrafts: true }, "", held)), [1, 2]);
+});
+
+test("the checked-off count is what the check-off filter alone hides", () => {
+  const items = [item(1), item(2, { checkedOff: true }), item(3, { checkedOff: true, isDraft: true }), item(4, { checkedOff: true })];
+
+  assert.equal(hiddenCheckedOff(items, ALL, ""), 3);
+  assert.equal(hiddenCheckedOff(items, { ...ALL, hideDrafts: true }, ""), 2, "a draft the drafts filter hides anyway");
+  assert.equal(hiddenCheckedOff(items, ALL, "", new Set([items[1]!.url])), 2, "a held row is shown");
+  assert.equal(hiddenCheckedOff(items, { ...ALL, checkedOff: "show" }, ""), 0);
+  assert.equal(hiddenCheckedOff(items, { ...ALL, checkedOff: "only" }, ""), 0);
+});
+
 test("the states label names whichever side is shorter", () => {
   assert.equal(statesLabel(ALL.states), "States: all");
   assert.equal(statesLabel(["requested"]), "States: requested");
@@ -112,4 +140,5 @@ test("countLabel gives the total alone until something is hidden", () => {
   assert.equal(countLabel(1, 1), "1 review");
   assert.equal(countLabel(4, 12), "4 of 12 reviews");
   assert.equal(countLabel(1, 12), "1 of 12 reviews");
+  assert.equal(countLabel(8, 12, 3), "8 of 12 reviews · 3 checked off");
 });

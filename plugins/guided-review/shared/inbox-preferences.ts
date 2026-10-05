@@ -10,6 +10,10 @@ export const DEFAULT_INBOX_COLUMNS: readonly InboxColumn[] = ["change", "title",
 /** With nothing saved the list leaves out what the reviewer approved. */
 export const DEFAULT_INBOX_STATES: readonly ReviewerState[] = ReviewerStateSchema.options.filter((state) => state !== "approved");
 
+/** Whether the list leaves out what the reviewer checked off, shows it among the rest, or shows nothing else. */
+export const CHECK_OFF_FILTERS = ["hide", "show", "only"] as const;
+export type CheckOffFilter = (typeof CHECK_OFF_FILTERS)[number];
+
 export const INBOX_SORT_KEYS = ["updated", "created", "size"] as const;
 export type InboxSortKey = (typeof INBOX_SORT_KEYS)[number];
 
@@ -26,6 +30,7 @@ export const InboxPreferencesSchema = z.object({
     .pipe(z.array(ReviewerStateSchema).min(1))
     .catch([...DEFAULT_INBOX_STATES]),
   hideDrafts: z.boolean().catch(false),
+  checkedOff: z.enum(CHECK_OFF_FILTERS).catch("hide"),
   needsAttention: z.boolean().catch(false),
   sort: z.object({ key: z.enum(INBOX_SORT_KEYS), descending: z.boolean() }).catch({ key: "updated", descending: true }),
   columns: z
