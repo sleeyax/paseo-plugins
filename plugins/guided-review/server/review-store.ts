@@ -1,9 +1,10 @@
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ReviewHeader } from "../shared/contracts.ts";
 import type { CommentOrigin } from "../shared/drafts.ts";
 import type { LayeredGuide, LayeredNode } from "../shared/guide.ts";
 import type { ChangeRequest, ChangeRequestRef, ForgeUser } from "./forge/port.ts";
+import { readJson, writeJson } from "./json-file.ts";
 import type { BodyParagraph } from "./review-body.ts";
 import type { ReviewWorkspace } from "./workspaces/port.ts";
 
@@ -246,20 +247,4 @@ export class ReviewStore {
     }
     return index;
   }
-}
-
-/** A file this process wrote, or null when it is missing or unreadable, which reads as never written. */
-async function readJson<T>(file: string): Promise<T | null> {
-  try {
-    return JSON.parse(await readFile(file, "utf8")) as T;
-  } catch {
-    return null;
-  }
-}
-
-async function writeJson(file: string, value: unknown): Promise<void> {
-  await mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`);
-  await rename(temporary, file);
 }

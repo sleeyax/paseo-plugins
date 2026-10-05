@@ -3,6 +3,7 @@ import { z } from "zod";
 import { FileDiffSchema } from "./diff.ts";
 import { CommentOriginSchema, DraftListSchema, DraftLocationSchema, LinkedDraftSchema, QuoteSchema } from "./drafts.ts";
 import { GuideStateSchema } from "./guide.ts";
+import { InboxPreferencesSchema } from "./inbox-preferences.ts";
 import { InboxSchema } from "./inbox.ts";
 import { GuideProgressSchema } from "./progress.ts";
 import { SubmitResultSchema, VerdictOptionSchema, VerdictSchema } from "./submit.ts";
@@ -93,6 +94,19 @@ export const getInbox = defineRpc({
   name: "guided-review.inbox.list",
   input: z.object({}),
   output: InboxSchema,
+});
+
+export const getInboxPreferences = defineRpc({
+  name: "guided-review.inbox.preferences",
+  input: z.object({}),
+  output: InboxPreferencesSchema,
+});
+
+/** Saves the review list's filters, sort and columns whole, and answers them as kept. */
+export const saveInboxPreferences = defineRpc({
+  name: "guided-review.inbox.save-preferences",
+  input: InboxPreferencesSchema,
+  output: InboxPreferencesSchema,
 });
 
 export const getStartProgress = defineRpc({

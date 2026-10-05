@@ -16,6 +16,7 @@ import type {
 } from "../shared/contracts.ts";
 import type { FileDiff } from "../shared/diff.ts";
 import type { Inbox } from "../shared/inbox.ts";
+import type { InboxPreferences } from "../shared/inbox-preferences.ts";
 import type { CommentOrigin, DraftList, DraftLocation, LinkedDraft } from "../shared/drafts.ts";
 import { coveredPaths, type CoveredCode, type GuideState, type LayeredGuide } from "../shared/guide.ts";
 import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
@@ -32,6 +33,7 @@ import { GuideGenerations, isReady, marksOf } from "./guide-generation.ts";
 import { oneAtATimePer } from "./one-at-a-time.ts";
 import { regeneratedAway, ReviewDrafts } from "./review-drafts.ts";
 import { ReviewInbox } from "./review-inbox.ts";
+import { InboxPreferencesFile } from "./inbox-preferences.ts";
 import { isFinished, ReviewPreparation, startProgressAt } from "./review-preparation.ts";
 import { questionPrompt } from "./question-prompt.ts";
 import { ReviewStore, type ProgressRecord, type ReviewRecord } from "./review-store.ts";
@@ -83,6 +85,7 @@ export class ReviewService {
   readonly #preparation: ReviewPreparation;
   readonly #drafts: ReviewDrafts;
   readonly #inbox: ReviewInbox;
+  readonly #inboxPreferences: InboxPreferencesFile;
   /** The latest branch guiding asked for in each workspace, by workspace ID. */
   readonly #branchStarts = new Map<string, BranchJob>();
   /** Writes of each guide's marks, by review and head SHA, one at a time. */
@@ -108,11 +111,20 @@ export class ReviewService {
     });
     this.#drafts = new ReviewDrafts({ store: this.#store, guides: this.#guides });
     this.#inbox = new ReviewInbox({ forges: this.#forges, store: this.#store, log: this.#log });
+    this.#inboxPreferences = new InboxPreferencesFile(options.dataDirectory);
   }
 
   /** The open change requests the reviewer reviews on every forge and host, with the reviews started here. */
   async inbox(): Promise<Inbox> {
     return this.#inbox.list();
+  }
+
+  async inboxPreferences(): Promise<InboxPreferences> {
+    return this.#inboxPreferences.read();
+  }
+
+  async saveInboxPreferences(preferences: InboxPreferences): Promise<InboxPreferences> {
+    return this.#inboxPreferences.save(preferences);
   }
 
   /**
