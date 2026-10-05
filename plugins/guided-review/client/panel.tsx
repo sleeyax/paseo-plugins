@@ -2,7 +2,7 @@ import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import React, { useMemo, useRef, useState } from "react";
-import { ScrollView, Text, View, type LayoutChangeEvent } from "react-native";
+import { ScrollView, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import type { GuideState } from "../shared/guide.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
@@ -20,6 +20,7 @@ import { ProgressContext, useProgress } from "./progress.tsx";
 import { FlatContext, Strip } from "./section.tsx";
 import { Header, Note, Sidebar, SIDEBAR_WIDTH } from "./sidebar.tsx";
 import { fontSize, leading, MAX_PANEL_WIDTH, spacing } from "./theme.ts";
+import { onVisibleWidth } from "./visible-width.ts";
 
 const POLL_MS = 2_000;
 /** An empty panel is asked again now and then, since the Command Center item starts a branch's guide from outside it. */
@@ -77,7 +78,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
   const shape = layout.platform !== "web" ? "stack" : width === null ? null : layoutFor(width, layout.platform);
   // One element measures the panel whatever is drawn in it, so switching layouts never remounts what reports the width.
   const frame = (children?: React.ReactNode) => (
-    <View onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width)} style={{ flex: 1, backgroundColor: colors.surface0 }}>
+    <View onLayout={onVisibleWidth(setWidth)} style={{ flex: 1, backgroundColor: colors.surface0 }}>
       {children}
     </View>
   );

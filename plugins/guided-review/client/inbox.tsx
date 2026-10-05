@@ -3,7 +3,7 @@ import { Modal, TextInput } from "@getpaseo/plugin/client/react-native";
 import { ExternalLink, SettingsAction, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
 import React, { useContext, useState } from "react";
-import { Pressable, Text, View, type LayoutChangeEvent } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import { CHECK_OFF_FILTERS, INBOX_COLUMNS, type CheckOffFilter, type InboxColumn, type InboxPreferences, type InboxSortKey } from "../shared/inbox-preferences.ts";
 import { ReviewerStateSchema, type Inbox, type InboxItem, type ReviewerState } from "../shared/inbox.ts";
@@ -15,6 +15,7 @@ import { useInboxPreferences } from "./inbox-preferences.ts";
 import { FROM_NEW_REVIEW, NewReview } from "./new-review.tsx";
 import type { ReviewStart } from "./start-review.ts";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
+import { onVisibleWidth } from "./visible-width.ts";
 
 const FORGE_NAMES = { github: "GitHub", gitlab: "GitLab" } as const;
 
@@ -47,7 +48,7 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
   const rows = { toggle: checkOff.toggle, dimmed: (item: InboxItem) => checkOff.held.has(item.url) && !passesCheckOff(item, preferences) };
 
   return (
-    <View onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width)}>
+    <View onLayout={onVisibleWidth(setWidth)}>
       <SettingsSection
         title="Assigned to me for review"
         trailing={
