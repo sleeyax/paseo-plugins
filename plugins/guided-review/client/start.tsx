@@ -2,7 +2,6 @@ import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import React from "react";
 import { ScrollView, View } from "react-native";
 import { ReviewInbox } from "./inbox.tsx";
-import { useStartReview } from "./start-review.ts";
 import { MAX_PANEL_WIDTH, spacing } from "./theme.ts";
 
 /**
@@ -11,14 +10,13 @@ import { MAX_PANEL_WIDTH, spacing } from "./theme.ts";
  */
 export function createStartSurface(openPanel: (workspaceId: string) => void) {
   return function StartSurface({ theme, layout }: PluginSurfaceProps) {
-    const starter = useStartReview(openPanel);
     return (
       <ScrollView
         style={{ flex: 1, backgroundColor: theme.colors.surface0 }}
         contentContainerStyle={{ padding: layout.compact ? spacing[3] : spacing[4], paddingTop: spacing[6] }}
       >
         <View style={{ width: "100%", maxWidth: MAX_PANEL_WIDTH, alignSelf: "center" }}>
-          <ReviewInbox colors={theme.colors} compact={layout.compact} starter={starter} />
+          <ReviewInbox colors={theme.colors} compact={layout.compact} openPanel={openPanel} />
         </View>
       </ScrollView>
     );

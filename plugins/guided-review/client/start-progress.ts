@@ -1,4 +1,5 @@
 import type { StartPhase, StartProgress } from "../shared/contracts.ts";
+import type { LocalReview } from "../shared/inbox.ts";
 import { numberLabel } from "../shared/reference.ts";
 
 export type Tone = "muted" | "danger";
@@ -28,4 +29,18 @@ export function describeProgress(progress: StartProgress): { text: string; tone:
     case "unknown":
       return { text: "This review was interrupted before it was ready. Start it again.", tone: "danger" };
   }
+}
+
+/** Whether a review needs following no more: its start ended and its guide is not being generated. Never read is not settled. */
+export function isSettled(local: LocalReview | null | undefined): boolean {
+  if (local === undefined) return false;
+  if (local === null) return true;
+  if (local.preparing !== null) return local.preparing.phase === "failed";
+  return local.guide !== "generating";
+}
+
+/** The line a review list row shows while its review is being started, or once that failed. */
+export function describePreparing(local: LocalReview | null): { text: string; tone: Tone } | null {
+  if (local?.preparing == null) return null;
+  return describeProgress({ phase: local.preparing.phase, header: local.header, workspaceId: null, message: local.preparing.message });
 }

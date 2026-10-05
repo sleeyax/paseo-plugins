@@ -6,14 +6,15 @@ import React, { useContext, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import { CHECK_OFF_FILTERS, INBOX_COLUMNS, type CheckOffFilter, type InboxColumn, type InboxPreferences, type InboxSortKey } from "../shared/inbox-preferences.ts";
-import { headMoved, ReviewerStateSchema, type Inbox, type InboxItem, type ReviewerState } from "../shared/inbox.ts";
+import { headMoved, ReviewerStateSchema, type Inbox, type InboxItem, type LocalReview, type ReviewerState } from "../shared/inbox.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { Button } from "./button.tsx";
 import { CheckOffContext, INBOX_QUERY_KEY, useCheckOff } from "./check-off.ts";
 import { age, countLabel, hiddenCheckedOff, passesCheckOff, STATE_NAMES, statesLabel, visibleItems } from "./inbox-filter.ts";
 import { useInboxPreferences } from "./inbox-preferences.ts";
-import { FROM_NEW_REVIEW, NewReview } from "./new-review.tsx";
-import type { ReviewStart } from "./start-review.ts";
+import { NewReview } from "./new-review.tsx";
+import { describePreparing, describeProgress } from "./start-progress.ts";
+import { useReviewStarts, type Pasted, type ReviewStarts } from "./start-review.ts";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 import { onVisibleWidth } from "./visible-width.ts";
 
@@ -22,9 +23,10 @@ const FORGE_NAMES = { github: "GitHub", gitlab: "GitLab" } as const;
 const CHECK_OFF_LABELS: Record<CheckOffFilter, string> = { hide: "Hide checked off", show: "With checked off", only: "Checked off only" };
 
 /** The open change requests the reviewer reviews, to pick one and start or continue its review. */
-export function ReviewInbox({ colors, compact, starter }: { colors: Colors; compact: boolean; starter: ReviewStart }) {
+export function ReviewInbox({ colors, compact, openPanel }: { colors: Colors; compact: boolean; openPanel: (workspaceId: string) => void }) {
   const getInbox = useRpc(contracts.getInbox);
   const inbox = useQuery({ queryKey: INBOX_QUERY_KEY, queryFn: () => getInbox({}), refetchOnWindowFocus: false });
+  const starts = useReviewStarts(openPanel, inbox.data?.items ?? []);
   const { preferences, change: changePreferences, error } = useInboxPreferences();
   const checkOff = useCheckOff();
   const [query, setSearch] = useState("");
@@ -41,9 +43,13 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
   };
   const refresh = () => {
     checkOff.release();
+    starts.forget();
     void inbox.refetch();
   };
-  const items = inbox.data ? visibleItems(inbox.data.items, preferences, query, checkOff.held) : [];
+  const items = (inbox.data ? visibleItems(inbox.data.items, preferences, query, checkOff.held) : []).map((item) => ({
+    ...item,
+    local: starts.local(item.reviewId, item.local),
+  }));
   // Until the list has been measured it is not drawn, rather than as cards for a frame.
   const shape = compact ? "cards" : width === null ? null : width >= tableWidth(preferences.columns) ? "table" : "cards";
   const rows = { toggle: checkOff.toggle, dimmed: (item: InboxItem) => checkOff.held.has(item.url) && !passesCheckOff(item, preferences) };
@@ -54,7 +60,7 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
         title="Assigned to me for review"
         trailing={
           <View style={{ flexDirection: "row", gap: spacing[2] }}>
-            <NewReview colors={colors} starter={starter} />
+            <NewReview colors={colors} starts={starts} />
             <Button colors={colors} small label="Columns" onPress={() => setChoosing("columns")} />
             <Button colors={colors} small label={statesLabel(preferences.states)} onPress={() => setChoosing("states")} />
             <Button colors={colors} small label={inbox.isFetching ? "Refreshing…" : "Refresh"} disabled={inbox.isFetching || checkOff.saving} onPress={refresh} />
@@ -66,7 +72,7 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
           {error !== null ? <Note colors={colors} tone="danger" text={`Could not keep these filters for next time: ${error}`} /> : null}
           {checkOff.error !== null ? <Note colors={colors} tone="danger" text={`Could not keep that check-off: ${checkOff.error}`} /> : null}
           {inbox.data ? <HostNotes colors={colors} hosts={inbox.data.hosts} /> : null}
-          <NewReviewRow colors={colors} starter={starter} />
+          <PastedRows colors={colors} starts={starts} shown={items} />
           {inbox.isPending ? (
             <Note colors={colors} text="Listing what you are asked to review…" />
           ) : inbox.isError ? (
@@ -78,11 +84,11 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
               <View style={{ gap: spacing[2] }}>
                 <Note colors={colors} text={countLabel(items.length, inbox.data.items.length, hiddenCheckedOff(inbox.data.items, preferences, query, checkOff.held))} />
                 {shape === "table" ? (
-                  <Table colors={colors} items={items} preferences={preferences} change={change} starter={starter} />
+                  <Table colors={colors} items={items} preferences={preferences} change={change} starts={starts} />
                 ) : shape === "cards" ? (
                   <View style={{ gap: spacing[2] }}>
                     {items.map((item) => (
-                      <Card key={item.url} colors={colors} item={item} columns={preferences.columns} starter={starter} />
+                      <Card key={item.url} colors={colors} item={item} columns={preferences.columns} starts={starts} />
                     ))}
                   </View>
                 ) : null}
@@ -303,6 +309,8 @@ function stateOf(item: InboxItem): Tinted {
   }
 }
 
+const GUIDE_STATES: Record<LocalReview["guide"], string> = { none: "Started", generating: "Guide generating", ready: "Guide ready", failed: "Guide failed" };
+
 /** What this plugin has of the review, and the reviewer's pending drafts wherever they were written. */
 function localOf(item: InboxItem): Tinted | null {
   const drafts = item.pendingDrafts ? [`${item.pendingDrafts} draft${item.pendingDrafts === 1 ? "" : "s"}`] : [];
@@ -310,7 +318,7 @@ function localOf(item: InboxItem): Tinted | null {
   if (local === null) return drafts.length > 0 ? { text: drafts.join(" · "), color: "foregroundMuted" } : null;
   const failed = local.preparing?.phase === "failed";
   const state =
-    local.preparing === null ? { none: "Started", generating: "Guide generating", ready: "Guide ready", failed: "Guide failed" }[local.guide] : failed ? "Start failed" : "Preparing";
+    local.preparing === null ? GUIDE_STATES[local.guide] : failed ? "Start failed" : "Preparing";
   const moved = headMoved(item, local);
   const parts = [state, ...(moved ? ["head moved"] : []), ...drafts];
   const color = failed || (local.preparing === null && local.guide === "failed") ? "statusDanger" : moved ? "statusWarning" : "foregroundMuted";
@@ -463,36 +471,71 @@ function CheckOffBox({ colors, item }: { colors: Colors; item: InboxItem }) {
   );
 }
 
-/** The one way into the review from a row: a row itself starts nothing, so a click elsewhere on it is safe. */
-function StartButton({ colors, item, starter }: { colors: Colors; item: InboxItem; starter: ReviewStart }) {
-  const starting = starter.busy && starter.from === item.url;
+/**
+ * The one way into the review from a row: a row itself starts nothing, so a click elsewhere on it is safe.
+ * Review prepares a review without opening it, so several can be started in a row; Continue makes a closed review a workspace again and opens it.
+ */
+function StartButton({ colors, item, starts }: { colors: Colors; item: InboxItem; starts: ReviewStarts }) {
+  const { local } = item;
+  const preparing = local?.preparing != null && local.preparing.phase !== "failed";
+  if (starts.requesting(item.url) || preparing) return <Button colors={colors} small label="Starting…" disabled onPress={() => {}} />;
+  if (local?.workspaceId != null) {
+    const workspaceId = local.workspaceId;
+    return <Button colors={colors} small label="Open" onPress={() => starts.open(item.reviewId!, workspaceId)} />;
+  }
+  const resumes = local != null && local.preparing === null;
   return (
     <Button
       colors={colors}
       small
-      primary={item.local === null}
-      label={starting ? "Starting…" : item.local === null ? "Review" : "Continue"}
-      disabled={starter.busy}
-      onPress={() => void starter.start(item.url, item.url)}
+      primary={local === null}
+      label={resumes ? "Continue" : "Review"}
+      onPress={() => void starts.start(item.url, { open: resumes, pasted: false })}
     />
   );
 }
 
+/** The line under a review being started, from a row or the New review dialog: how it goes, why it was turned down or failed, or where to open it. */
+function StartStatus({ colors, url, reviewId, local, label, starts }: { colors: Colors; url: string; reviewId: string | null; local: LocalReview | null; label: string; starts: ReviewStarts }) {
+  const rejection = starts.rejection(url);
+  if (rejection !== null) return <Note colors={colors} tone="danger" text={rejection} />;
+  const line = describePreparing(local);
+  if (line !== null) return <Note colors={colors} tone={line.tone === "danger" ? "danger" : undefined} text={line.text} />;
+  if (reviewId !== null && starts.unopened(reviewId)) return <Note colors={colors} text={`The workspace for ${label} is ready; open "Review ${label}" from the sidebar.`} />;
+  return null;
+}
+
 /**
- * How a start from the New review dialog is going, above the list, since what was pasted may not be in it.
- * It names the URL until the change request is read, and stays once the start ended until closed.
+ * A line per review started from the New review dialog that the list does not show, since what was pasted may not be in it.
+ * It names the URL until the change request is read, and stays until closed.
  */
-function NewReviewRow({ colors, starter }: { colors: Colors; starter: ReviewStart }) {
-  if (starter.from !== FROM_NEW_REVIEW || starter.started === null) return null;
-  const { url, header } = starter.started;
-  const status = starter.status ?? { text: "Starting…", tone: "muted" as const };
+function PastedRows({ colors, starts, shown }: { colors: Colors; starts: ReviewStarts; shown: readonly InboxItem[] }) {
+  const listed = new Set(shown.map((item) => item.reviewId));
+  const rows = starts.pasted.filter((entry) => !listed.has(entry.reviewId));
+  if (rows.length === 0) return null;
+  return (
+    <View style={{ gap: spacing[2] }}>
+      {rows.map((entry) => (
+        <PastedRow key={entry.reviewId} colors={colors} entry={entry} starts={starts} />
+      ))}
+    </View>
+  );
+}
+
+function PastedRow({ colors, entry, starts }: { colors: Colors; entry: Pasted; starts: ReviewStarts }) {
+  // Not read yet, as just after the list was read again; null once read is a start this daemon lost.
+  const local = starts.local(entry.reviewId, undefined);
+  const header = local?.header ?? null;
+  const label = header ? numberLabel(header.forge, header.number) : entry.url;
+  const preparing = local === undefined || (local !== null && local.preparing !== null && local.preparing.phase !== "failed");
+  const guide = local != null && local.preparing === null ? GUIDE_STATES[local.guide] : null;
   return (
     <View style={{ padding: spacing[3], gap: spacing[1], borderWidth: 1, borderColor: colors.border, borderRadius: radius.md }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[2] }}>
         <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: spacing[2] }}>
-          <ExternalLink href={header?.url ?? url} accessibilityLabel={`Open ${header ? numberLabel(header.forge, header.number) : url}`}>
+          <ExternalLink href={header?.url ?? entry.url} accessibilityLabel={`Open ${label}`}>
             <Text numberOfLines={1} style={{ color: colors.accent, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>
-              {header ? numberLabel(header.forge, header.number) : url}
+              {label}
             </Text>
           </ExternalLink>
           {header ? (
@@ -501,23 +544,24 @@ function NewReviewRow({ colors, starter }: { colors: Colors; starter: ReviewStar
             </Text>
           ) : null}
         </View>
-        {starter.busy ? null : (
-          <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" onPress={starter.dismiss} hitSlop={spacing[2]}>
+        {local?.workspaceId != null && !preparing ? <Button colors={colors} small label="Open" onPress={() => starts.open(entry.reviewId, local.workspaceId!)} /> : null}
+        {preparing ? null : (
+          <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" onPress={() => starts.dismiss(entry.reviewId)} hitSlop={spacing[2]}>
             <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.lg, lineHeight: leading(fontSize.lg) }}>×</Text>
           </Pressable>
         )}
       </View>
-      <Note colors={colors} tone={status.tone === "danger" ? "danger" : undefined} text={status.text} />
+      {local === undefined ? <Note colors={colors} text="Starting…" /> : null}
+      {local === null ? <Note colors={colors} tone="danger" text={describeProgress({ phase: "unknown", header: null, workspaceId: null, message: null }).text} /> : null}
+      <StartStatus colors={colors} url={entry.url} reviewId={entry.reviewId} local={local ?? null} label={label} starts={starts} />
+      {guide !== null ? <Note colors={colors} tone={local?.guide === "failed" ? "danger" : undefined} text={guide} /> : null}
     </View>
   );
 }
 
-/** How the start from this row is going, under it, once one began from it. */
-function RowStatus({ colors, item, starter }: { colors: Colors; item: InboxItem; starter: ReviewStart }) {
-  if (starter.from !== item.url) return null;
-  if (starter.rejection !== null) return <Note colors={colors} tone="danger" text={starter.rejection} />;
-  if (starter.status === null) return null;
-  return <Note colors={colors} tone={starter.status.tone === "danger" ? "danger" : undefined} text={starter.status.text} />;
+/** How the start from this row is going, under it. */
+function RowStatus({ colors, item, starts }: { colors: Colors; item: InboxItem; starts: ReviewStarts }) {
+  return <StartStatus colors={colors} url={item.url} reviewId={item.reviewId} local={item.local} label={numberLabel(item.forge, item.number)} starts={starts} />;
 }
 
 function Table({
@@ -525,13 +569,13 @@ function Table({
   items,
   preferences,
   change,
-  starter,
+  starts,
 }: {
   colors: Colors;
   items: InboxItem[];
   preferences: InboxPreferences;
   change: (update: Partial<InboxPreferences>) => void;
-  starter: ReviewStart;
+  starts: ReviewStarts;
 }) {
   const now = new Date();
   const { dimmed } = useContext(CheckOffContext);
@@ -587,10 +631,10 @@ function Table({
               </View>
             ))}
             <View style={{ width: ACTIONS_WIDTH, alignItems: "flex-end" }}>
-              <StartButton colors={colors} item={item} starter={starter} />
+              <StartButton colors={colors} item={item} starts={starts} />
             </View>
           </View>
-          <RowStatus colors={colors} item={item} starter={starter} />
+          <RowStatus colors={colors} item={item} starts={starts} />
         </View>
       ))}
     </View>
@@ -598,7 +642,7 @@ function Table({
 }
 
 /** A row stacked for a narrow screen: the title, then whichever of the other columns are shown, as lines. */
-function Card({ colors, item, columns, starter }: { colors: Colors; item: InboxItem; columns: readonly InboxColumn[]; starter: ReviewStart }) {
+function Card({ colors, item, columns, starts }: { colors: Colors; item: InboxItem; columns: readonly InboxColumn[]; starts: ReviewStarts }) {
   const now = new Date();
   const { dimmed } = useContext(CheckOffContext);
   const shown = (column: InboxColumn) => columns.includes(column);
@@ -637,9 +681,9 @@ function Card({ colors, item, columns, starter }: { colors: Colors; item: InboxI
         </View>
       ) : null}
       <View style={{ marginTop: spacing[1], alignItems: "flex-start" }}>
-        <StartButton colors={colors} item={item} starter={starter} />
+        <StartButton colors={colors} item={item} starts={starts} />
       </View>
-      <RowStatus colors={colors} item={item} starter={starter} />
+      <RowStatus colors={colors} item={item} starts={starts} />
     </View>
   );
 }
