@@ -5,6 +5,7 @@ import { numberLabel } from "../shared/reference.ts";
 import { errorMessage } from "./error-message.ts";
 import type { ChangeRequest, ChangeRequestRef, Forge } from "./forge/port.ts";
 import type { GuideGenerations } from "./guide-generation.ts";
+import { oneAtATimePer } from "./one-at-a-time.ts";
 import { reviewIdOf, type ReviewRecord, type ReviewStore } from "./review-store.ts";
 import type { FastForwardResult, ReviewWorkspace, WorkspacePort } from "./workspaces/port.ts";
 
@@ -44,6 +45,8 @@ export class ReviewPreparation {
   readonly #now: () => Date;
   readonly #log: (message: string) => void;
   readonly #jobs = new Map<string, Job>();
+  /** Workspaces are cut one repository at a time, since two starts would otherwise both find no clone and clone over each other. */
+  readonly #perRepository = oneAtATimePer<string>();
 
   constructor(options: ReviewPreparationOptions) {
     this.#store = options.store;
@@ -213,18 +216,21 @@ export class ReviewPreparation {
 
   async #createWorkspace(forge: Forge, changeRequest: ChangeRequest, job: Job): Promise<ReviewWorkspace> {
     const { ref } = changeRequest;
-    const repositoryRoot =
-      (await this.#workspaces.findRepository({ host: ref.host, project: ref.project })) ??
-      (await this.#clone(forge, ref, job));
-
     job.progress = { ...job.progress, phase: "creating-workspace" };
-    return failingAs(`Could not create a workspace for ${ref.url}`, () =>
-      this.#workspaces.createChangeRequestWorkspace({
-        repositoryRoot,
-        ref,
-        title: workspaceTitle(changeRequest),
-      }),
-    );
+    return this.#perRepository(`${ref.host}/${ref.project}`.toLowerCase(), async () => {
+      const repositoryRoot =
+        (await this.#workspaces.findRepository({ host: ref.host, project: ref.project })) ??
+        (await this.#clone(forge, ref, job));
+
+      job.progress = { ...job.progress, phase: "creating-workspace" };
+      return failingAs(`Could not create a workspace for ${ref.url}`, () =>
+        this.#workspaces.createChangeRequestWorkspace({
+          repositoryRoot,
+          ref,
+          title: workspaceTitle(changeRequest),
+        }),
+      );
+    });
   }
 
   /**

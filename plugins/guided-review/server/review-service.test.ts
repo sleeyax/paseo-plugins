@@ -155,6 +155,23 @@ test("a repository no Paseo project has is cloned into the data directory once, 
   );
 });
 
+test("two PRs of a repository no Paseo project has, started together, clone it once and both cut their workspace from it", async (t) => {
+  const { service, forge, workspaces, data } = await withHost(t);
+  workspaces.repositories.clear();
+  const other = "https://github.com/acme/uploader/pull/8";
+  forge.changeRequests.set(other, sampleChangeRequest(other));
+  const clone = path.join(data, "clones", "github.com", "acme", "uploader");
+
+  await Promise.all([service.start({ url: URL }), service.start({ url: other })]);
+  await service.settled();
+
+  assert.deepEqual(forge.clones, [{ project: "acme/uploader", directory: clone }]);
+  assert.deepEqual(
+    workspaces.created.map((created) => created.repositoryRoot),
+    [clone, clone],
+  );
+});
+
 test("a clone that never finished is replaced rather than used", async (t) => {
   const { service, forge, workspaces, data } = await withHost(t);
   workspaces.repositories.clear();
