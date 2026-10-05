@@ -21,7 +21,7 @@ test("with nothing saved the list hides what the reviewer approved and sorts by 
     hideDrafts: false,
     needsAttention: false,
     sort: { key: "updated", descending: true },
-    columns: ["project", "title", "author", "updated", "state", "local"],
+    columns: ["platform", "change", "title", "author", "updated", "state", "local"],
   });
 });
 

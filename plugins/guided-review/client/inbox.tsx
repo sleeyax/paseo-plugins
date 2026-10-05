@@ -1,5 +1,5 @@
 import { useRpc } from "@getpaseo/plugin/client";
-import { Modal, TextInput } from "@getpaseo/plugin/client/react-native";
+import { Icon, Modal, TextInput } from "@getpaseo/plugin/client/react-native";
 import { ExternalLink, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
 import React, { useState } from "react";
@@ -16,6 +16,8 @@ import type { ReviewStart } from "./start-review.ts";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 
 const FORGE_NAMES = { github: "GitHub", gitlab: "GitLab" } as const;
+const FORGE_ICONS = { github: "Github", gitlab: "Gitlab" } as const;
+const ICON_SIZE = 16;
 
 /** The open change requests the reviewer reviews, to pick one and start or continue its review. */
 export function ReviewInbox({ colors, compact, starter }: { colors: Colors; compact: boolean; starter: ReviewStart }) {
@@ -263,12 +265,13 @@ type ColumnWidth = { width: number } | { flex: number; min: number };
 type ColumnSpec = { label: string; size: ColumnWidth; sort?: InboxSortKey; cell: (item: InboxItem, colors: Colors, now: Date) => React.ReactNode };
 
 const COLUMNS: Record<InboxColumn, ColumnSpec> = {
-  project: {
-    label: "Project",
+  platform: { label: "Platform", size: { width: 64 }, cell: (item, colors) => <ForgeIcon colors={colors} item={item} /> },
+  change: {
+    label: "PR/MR",
     size: { flex: 1.2, min: 96 },
     cell: (item, colors) => (
       <View>
-        <Cell colors={colors} text={`${numberLabel(item.forge, item.number)} · ${FORGE_NAMES[item.forge]}`} />
+        <NumberLink colors={colors} item={item} />
         <Cell colors={colors} text={item.project} color="foregroundMuted" />
       </View>
     ),
@@ -293,7 +296,7 @@ const COLUMNS: Record<InboxColumn, ColumnSpec> = {
   local: { label: "Here", size: { flex: 1.4, min: 96 }, cell: (item, colors) => <TintedCell colors={colors} value={localOf(item)} /> },
 };
 
-const ACTIONS_WIDTH = 96;
+const ACTIONS_WIDTH = 88;
 const CELL_GAP = spacing[3];
 
 function columnStyle(size: ColumnWidth) {
@@ -322,6 +325,23 @@ function TintedCell({ colors, value }: { colors: Colors; value: Tinted | null })
   return value === null ? <Cell colors={colors} text="—" color="foregroundMuted" /> : <Cell colors={colors} text={value.text} color={value.color} lines={2} />;
 }
 
+function ForgeIcon({ colors, item }: { colors: Colors; item: InboxItem }) {
+  return (
+    <View accessibilityLabel={FORGE_NAMES[item.forge]}>
+      <Icon name={FORGE_ICONS[item.forge]} size={ICON_SIZE} color={colors.foregroundMuted} />
+    </View>
+  );
+}
+
+/** The change request's number as its forge writes it, linking to it there. */
+function NumberLink({ colors, item }: { colors: Colors; item: InboxItem }) {
+  return (
+    <ExternalLink href={item.url} accessibilityLabel={`Open ${numberLabel(item.forge, item.number)} on ${FORGE_NAMES[item.forge]}`}>
+      <Text style={{ color: colors.accent, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>{numberLabel(item.forge, item.number)}</Text>
+    </ExternalLink>
+  );
+}
+
 function Title({ colors, item }: { colors: Colors; item: InboxItem }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[1] }}>
@@ -341,23 +361,18 @@ function Badge({ colors, text }: { colors: Colors; text: string }) {
   );
 }
 
-/** The row's own way into the review, and to the change request on its forge: stacked in a table's last column, side by side on a card. */
-function Actions({ colors, item, starter, stacked }: { colors: Colors; item: InboxItem; starter: ReviewStart; stacked?: boolean }) {
+/** The one way into the review from a row: a row itself starts nothing, so a click elsewhere on it is safe. */
+function StartButton({ colors, item, starter }: { colors: Colors; item: InboxItem; starter: ReviewStart }) {
   const starting = starter.busy && starter.from === item.url;
   return (
-    <View style={stacked ? { alignItems: "flex-end", gap: spacing[1] } : { flexDirection: "row", alignItems: "center", gap: spacing[2] }}>
-      <Button
-        colors={colors}
-        small
-        primary={item.local === null}
-        label={starting ? "Starting…" : item.local === null ? "Review" : "Continue"}
-        disabled={starter.busy}
-        onPress={() => void starter.start(item.url, item.url)}
-      />
-      <ExternalLink href={item.url} accessibilityLabel={`Open ${numberLabel(item.forge, item.number)} on ${FORGE_NAMES[item.forge]}`}>
-        <Text style={{ color: colors.accent, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>Open</Text>
-      </ExternalLink>
-    </View>
+    <Button
+      colors={colors}
+      small
+      primary={item.local === null}
+      label={starting ? "Starting…" : item.local === null ? "Review" : "Continue"}
+      disabled={starter.busy}
+      onPress={() => void starter.start(item.url, item.url)}
+    />
   );
 }
 
@@ -416,18 +431,9 @@ function Table({
         <View style={{ width: ACTIONS_WIDTH }} />
       </View>
       {items.map((item) => (
-        <Pressable
+        <View
           key={item.url}
-          disabled={starter.busy}
-          onPress={() => void starter.start(item.url, item.url)}
-          style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => ({
-            paddingVertical: spacing[2],
-            paddingHorizontal: spacing[3],
-            borderTopWidth: 1,
-            borderTopColor: colors.border,
-            backgroundColor: pressed || hovered ? colors.surface1 : undefined,
-            gap: spacing[1],
-          })}
+          style={{ paddingVertical: spacing[2], paddingHorizontal: spacing[3], borderTopWidth: 1, borderTopColor: colors.border, gap: spacing[1] }}
         >
           <View style={{ flexDirection: "row", gap: CELL_GAP, alignItems: "center" }}>
             {columns.map((column) => (
@@ -436,11 +442,11 @@ function Table({
               </View>
             ))}
             <View style={{ width: ACTIONS_WIDTH, alignItems: "flex-end" }}>
-              <Actions colors={colors} item={item} starter={starter} stacked />
+              <StartButton colors={colors} item={item} starter={starter} />
             </View>
           </View>
           <RowStatus colors={colors} item={item} starter={starter} />
-        </Pressable>
+        </View>
       ))}
     </View>
   );
@@ -451,8 +457,7 @@ function Card({ colors, item, columns, starter }: { colors: Colors; item: InboxI
   const now = new Date();
   const shown = (column: InboxColumn) => columns.includes(column);
   const meta = [
-    `${numberLabel(item.forge, item.number)} · ${FORGE_NAMES[item.forge]}`,
-    ...(shown("project") ? [item.project] : []),
+    ...(shown("change") ? [item.project] : []),
     ...(shown("author") ? [item.author] : []),
     ...(shown("updated") ? [`updated ${age(item.updatedAt, now)} ago`] : []),
     ...(shown("created") ? [`opened ${age(item.createdAt, now)} ago`] : []),
@@ -463,20 +468,15 @@ function Card({ colors, item, columns, starter }: { colors: Colors; item: InboxI
   );
 
   return (
-    <Pressable
-      disabled={starter.busy}
-      onPress={() => void starter.start(item.url, item.url)}
-      style={({ pressed }) => ({
-        padding: spacing[3],
-        gap: spacing[1],
-        borderWidth: 1,
-        borderColor: colors.border,
-        borderRadius: radius.md,
-        backgroundColor: pressed ? colors.surface1 : undefined,
-      })}
-    >
+    <View style={{ padding: spacing[3], gap: spacing[1], borderWidth: 1, borderColor: colors.border, borderRadius: radius.md }}>
       <Title colors={colors} item={item} />
-      <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>{meta.join(" · ")}</Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: spacing[1] }}>
+        {shown("platform") ? <ForgeIcon colors={colors} item={item} /> : null}
+        <NumberLink colors={colors} item={item} />
+        {meta.length > 0 ? (
+          <Text style={{ flexShrink: 1, color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>· {meta.join(" · ")}</Text>
+        ) : null}
+      </View>
       {tinted.length > 0 ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: spacing[3] }}>
           {tinted.map((value) => (
@@ -484,10 +484,10 @@ function Card({ colors, item, columns, starter }: { colors: Colors; item: InboxI
           ))}
         </View>
       ) : null}
-      <View style={{ marginTop: spacing[1] }}>
-        <Actions colors={colors} item={item} starter={starter} />
+      <View style={{ marginTop: spacing[1], alignItems: "flex-start" }}>
+        <StartButton colors={colors} item={item} starter={starter} />
       </View>
       <RowStatus colors={colors} item={item} starter={starter} />
-    </Pressable>
+    </View>
   );
 }

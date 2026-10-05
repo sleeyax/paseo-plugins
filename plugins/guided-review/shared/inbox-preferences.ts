@@ -1,10 +1,10 @@
 import { z } from "zod";
 
 /** Every column the review list can show, in the order it shows them; the title is what a row is, so it is always shown. */
-export const INBOX_COLUMNS = ["project", "title", "author", "updated", "created", "size", "ci", "state", "local"] as const;
+export const INBOX_COLUMNS = ["platform", "change", "title", "author", "updated", "created", "size", "ci", "state", "local"] as const;
 export type InboxColumn = (typeof INBOX_COLUMNS)[number];
 
-export const DEFAULT_INBOX_COLUMNS: readonly InboxColumn[] = ["project", "title", "author", "updated", "state", "local"];
+export const DEFAULT_INBOX_COLUMNS: readonly InboxColumn[] = ["platform", "change", "title", "author", "updated", "state", "local"];
 
 export const INBOX_SORT_KEYS = ["updated", "created", "size"] as const;
 export type InboxSortKey = (typeof INBOX_SORT_KEYS)[number];
