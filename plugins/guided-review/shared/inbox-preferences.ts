@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Every column the review list can show, in the order it shows them. */
+/** Every column the review list can show, in the order it shows them; the title is what a row is, so it is always shown. */
 export const INBOX_COLUMNS = ["project", "title", "author", "updated", "created", "size", "ci", "state", "local"] as const;
 export type InboxColumn = (typeof INBOX_COLUMNS)[number];
 
@@ -21,7 +21,7 @@ export const InboxPreferencesSchema = z.object({
   sort: z.object({ key: z.enum(INBOX_SORT_KEYS), descending: z.boolean() }).catch({ key: "updated", descending: true }),
   columns: z
     .array(z.string())
-    .transform((columns) => INBOX_COLUMNS.filter((column) => columns.includes(column)))
+    .transform((columns) => INBOX_COLUMNS.filter((column) => column === "title" || columns.includes(column)))
     .catch([...DEFAULT_INBOX_COLUMNS]),
 });
 

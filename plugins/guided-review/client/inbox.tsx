@@ -1,16 +1,17 @@
 import { useRpc } from "@getpaseo/plugin/client";
-import { TextInput } from "@getpaseo/plugin/client/react-native";
-import { ExternalLink, SettingsSection } from "@getpaseo/plugin/client/ui";
+import { Modal, TextInput } from "@getpaseo/plugin/client/react-native";
+import { ExternalLink, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
 import React, { useState } from "react";
 import { Pressable, Text, View, type LayoutChangeEvent } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
-import { DEFAULT_INBOX_PREFERENCES, type InboxColumn, type InboxPreferences, type InboxSortKey } from "../shared/inbox-preferences.ts";
+import { INBOX_COLUMNS, type InboxColumn, type InboxPreferences, type InboxSortKey } from "../shared/inbox-preferences.ts";
 import type { Inbox, InboxItem } from "../shared/inbox.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { Button } from "./button.tsx";
 import { age, visibleItems } from "./inbox-filter.ts";
+import { useInboxPreferences } from "./inbox-preferences.ts";
 import type { ReviewStart } from "./start-review.ts";
 import { fontSize, leading, MAX_CONTENT_WIDTH, radius, spacing, type Colors } from "./theme.ts";
 
@@ -20,10 +21,10 @@ const FORGE_NAMES = { github: "GitHub", gitlab: "GitLab" } as const;
 export function ReviewInbox({ colors, compact, starter }: { colors: Colors; compact: boolean; starter: ReviewStart }) {
   const getInbox = useRpc(contracts.getInbox);
   const inbox = useQuery({ queryKey: [PLUGIN_ID, "inbox"], queryFn: () => getInbox({}), refetchOnWindowFocus: false });
-  const [preferences, setPreferences] = useState<InboxPreferences>(DEFAULT_INBOX_PREFERENCES);
+  const { preferences, change, error } = useInboxPreferences();
   const [query, setQuery] = useState("");
   const [width, setWidth] = useState(0);
-  const change = (update: Partial<InboxPreferences>) => setPreferences((current) => ({ ...current, ...update }));
+  const [choosing, setChoosing] = useState(false);
 
   const items = inbox.data ? visibleItems(inbox.data.items, preferences, query) : [];
   const table = !compact && width >= MAX_CONTENT_WIDTH;
@@ -33,11 +34,15 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
       <SettingsSection
         title="Assigned to me for review"
         trailing={
-          <Button colors={colors} small label={inbox.isFetching ? "Refreshing…" : "Refresh"} disabled={inbox.isFetching} onPress={() => void inbox.refetch()} />
+          <View style={{ flexDirection: "row", gap: spacing[2] }}>
+            <Button colors={colors} small label="Columns" onPress={() => setChoosing(true)} />
+            <Button colors={colors} small label={inbox.isFetching ? "Refreshing…" : "Refresh"} disabled={inbox.isFetching} onPress={() => void inbox.refetch()} />
+          </View>
         }
       >
         <View style={{ gap: spacing[3] }}>
           <Toolbar colors={colors} preferences={preferences} change={change} query={query} setQuery={setQuery} />
+          {error !== null ? <Note colors={colors} tone="danger" text={`Could not keep these filters for next time: ${error}`} /> : null}
           {inbox.data ? <HostNotes colors={colors} hosts={inbox.data.hosts} /> : null}
           {inbox.isPending ? (
             <Note colors={colors} text="Listing what you are asked to review…" />
@@ -56,7 +61,49 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
           )}
         </View>
       </SettingsSection>
+      <ColumnChooser open={choosing} onOpenChange={setChoosing} columns={preferences.columns} change={change} />
     </View>
+  );
+}
+
+const COLUMN_HINTS: Partial<Record<InboxColumn, string>> = {
+  title: "Always shown",
+  state: "Where you stand, and whether it changed since your review",
+  local: "The guide and drafts you have for it in this plugin",
+  ci: "Whether the head's pipeline or checks passed",
+};
+
+/** Which columns the table shows; the title is what a row is, so it always is. */
+function ColumnChooser({
+  open,
+  onOpenChange,
+  columns,
+  change,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  columns: readonly InboxColumn[];
+  change: (update: Partial<InboxPreferences>) => void;
+}) {
+  const toggle = (column: InboxColumn, shown: boolean) =>
+    change({ columns: INBOX_COLUMNS.filter((candidate) => (candidate === column ? shown : columns.includes(candidate))) });
+  return (
+    <Modal title="Columns" open={open} onOpenChange={onOpenChange}>
+      <Modal.Content>
+        <SettingsCard>
+          {INBOX_COLUMNS.map((column) => (
+            <SettingsSwitch
+              key={column}
+              label={COLUMNS[column].label}
+              {...(COLUMN_HINTS[column] === undefined ? {} : { hint: COLUMN_HINTS[column] })}
+              value={column === "title" || columns.includes(column)}
+              disabled={column === "title"}
+              onValueChange={(shown) => toggle(column, shown)}
+            />
+          ))}
+        </SettingsCard>
+      </Modal.Content>
+    </Modal>
   );
 }
 

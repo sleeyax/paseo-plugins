@@ -41,6 +41,12 @@ test("what is saved is read back after a restart", async (t) => {
   assert.deepEqual(await new InboxPreferencesFile(data).read(), { ...saved, columns: ["title", "size", "ci"] });
 });
 
+test("the title is always among the columns", async (t) => {
+  const file = new InboxPreferencesFile(await dataDirectory(t));
+
+  assert.deepEqual((await file.save({ ...DEFAULT_INBOX_PREFERENCES, columns: ["author"] })).columns, ["title", "author"]);
+});
+
 test("a field the plugin no longer knows falls back on its own, keeping the rest of the file", async (t) => {
   const data = await dataDirectory(t);
   await writeFile(
