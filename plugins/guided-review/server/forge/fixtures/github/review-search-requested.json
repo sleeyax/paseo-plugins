@@ -1,0 +1,43 @@
+{
+  "data": {
+    "search": {
+      "issueCount": 2,
+      "nodes": [
+        {
+          "number": 105,
+          "url": "https://github.com/sleeyax/paseo-plugins/pull/105",
+          "title": "feat(guided-review): suggest wording for a comment",
+          "isDraft": false,
+          "createdAt": "2026-09-20T09:12:44Z",
+          "updatedAt": "2026-10-04T18:03:10Z",
+          "headRefOid": "6f1d2c0a9b8e7d6c5b4a39281706f5e4d3c2b1a0",
+          "additions": 412,
+          "deletions": 37,
+          "changedFiles": 14,
+          "author": { "login": "sleeyax-bot" },
+          "statusCheckRollup": { "state": "FAILURE" },
+          "viewerLatestReview": null,
+          "viewerLatestReviewRequest": { "requestedReviewer": { "__typename": "User" } },
+          "reviews": { "nodes": [{ "viewerDidAuthor": true, "comments": { "totalCount": 2 } }] }
+        },
+        {
+          "number": 7,
+          "url": "https://github.com/example-org/service/pull/7",
+          "title": "Retry failed uploads",
+          "isDraft": true,
+          "createdAt": "2026-09-01T10:00:00Z",
+          "updatedAt": "2026-09-30T12:00:00Z",
+          "headRefOid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "additions": 42,
+          "deletions": 7,
+          "changedFiles": 2,
+          "author": null,
+          "statusCheckRollup": null,
+          "viewerLatestReview": { "state": "CHANGES_REQUESTED", "commit": { "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
+          "viewerLatestReviewRequest": { "requestedReviewer": { "__typename": "Team", "combinedSlug": "example-org/backend" } },
+          "reviews": { "nodes": [] }
+        }
+      ]
+    }
+  }
+}

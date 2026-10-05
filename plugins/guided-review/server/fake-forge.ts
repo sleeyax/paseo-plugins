@@ -3,6 +3,7 @@ import path from "node:path";
 import { parsePullRequestUrl } from "./forge/github.ts";
 import { parseMergeRequestUrl } from "./forge/gitlab.ts";
 import { lineRefOf, type Draft, type DraftLocation } from "../shared/drafts.ts";
+import type { ReviewRequestHost } from "../shared/inbox.ts";
 import {
   ForgeError,
   type BranchChangeRequest,
@@ -51,6 +52,8 @@ export type FakeForge = Forge & {
   submitOutcome: SubmitOutcome | null;
   /** The URL of every change request whose pending review was discarded. */
   discarded: string[];
+  /** What `listReviewRequests` answers, host by host. */
+  reviewRequests: ReviewRequestHost[];
 };
 
 /** Where the forge says a draft on `anchor` is: a line by the side both forges put it on. */
@@ -86,6 +89,7 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     submissions: [],
     submitOutcome: null,
     discarded: [],
+    reviewRequests: [],
     async matchUrl(url) {
       return PARSERS[kind](url);
     },
@@ -178,6 +182,9 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     async discardReview(ref) {
       forge.discarded.push(ref.url);
       forge.drafts.delete(ref.url);
+    },
+    async listReviewRequests() {
+      return structuredClone(forge.reviewRequests);
     },
   };
   return forge;

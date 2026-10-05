@@ -588,6 +588,10 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
         throw new ForgeError(`${count} could not be deleted: ${failures.join(", ")}. Delete what is left on the merge request's page.`);
       }
     },
+
+    async listReviewRequests() {
+      return [];
+    },
   };
 }
 

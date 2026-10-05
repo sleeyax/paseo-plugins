@@ -12,6 +12,8 @@ import {
   PENDING_REVIEW_QUERY,
   PULL_REQUEST_HEAD_QUERY,
   PULL_REQUEST_QUERY,
+  REVIEW_SEARCH_QUERY,
+  REVIEW_SEARCHES,
   START_REVIEW_MUTATION,
   SUBMIT_REVIEW_MUTATION,
   UPDATE_COMMENT_MUTATION,
@@ -648,4 +650,103 @@ test("a comment on the pull request as a whole is posted to its conversation, th
       },
     ],
   );
+});
+
+test("lists what the viewer is asked to review and what they reviewed, as two searches on github.com", async () => {
+  const { forge, run } = forgeReplaying([{ stdout: fixture("review-search-requested.json") }, { stdout: fixture("review-search-reviewed.json") }]);
+
+  const [host, ...others] = await forge.listReviewRequests();
+
+  assert.deepEqual(others, []);
+  assert.deepEqual(
+    run.calls.map((call) => call.args),
+    [
+      ["api", "graphql", "--hostname", "github.com", "--input", "-"],
+      ["api", "graphql", "--hostname", "github.com", "--input", "-"],
+    ],
+  );
+  assert.deepEqual(graphqlCalls(run), [
+    { query: REVIEW_SEARCH_QUERY, variables: { query: REVIEW_SEARCHES.requested } },
+    { query: REVIEW_SEARCH_QUERY, variables: { query: REVIEW_SEARCHES.reviewed } },
+  ]);
+  assert.equal(host?.forge, "github");
+  assert.equal(host?.host, "github.com");
+  assert.equal(host?.error, null);
+  assert.equal(host?.truncated, false);
+  assert.equal(host?.requests.length, 9);
+
+  assert.deepEqual(host?.requests[0], {
+    forge: "github",
+    host: "github.com",
+    project: "sleeyax/paseo-plugins",
+    number: 105,
+    url: "https://github.com/sleeyax/paseo-plugins/pull/105",
+    title: "feat(guided-review): suggest wording for a comment",
+    author: "sleeyax-bot",
+    isDraft: false,
+    createdAt: "2026-09-20T09:12:44Z",
+    updatedAt: "2026-10-04T18:03:10Z",
+    headSha: "6f1d2c0a9b8e7d6c5b4a39281706f5e4d3c2b1a0",
+    additions: 412,
+    deletions: 37,
+    fileCount: 14,
+    ci: "failure",
+    state: "requested",
+    viaTeam: null,
+    changedSinceReview: null,
+    pendingDrafts: 2,
+  });
+});
+
+test("a PR the viewer is asked to review again reads as requested and changed, with the team it was asked of", async () => {
+  const { forge } = forgeReplaying([{ stdout: fixture("review-search-requested.json") }, { stdout: fixture("review-search-reviewed.json") }]);
+
+  const [host] = await forge.listReviewRequests();
+  const again = host?.requests.find((request) => request.number === 7);
+
+  assert.equal(again?.author, "ghost");
+  assert.equal(again?.isDraft, true);
+  assert.equal(again?.ci, null);
+  assert.equal(again?.state, "requested");
+  assert.equal(again?.viaTeam, "example-org/backend");
+  assert.equal(again?.changedSinceReview, true);
+  assert.equal(again?.pendingDrafts, 0);
+});
+
+test("a PR the viewer reviewed and is not asked again reads by their review, changed when the head moved past it", async () => {
+  const { forge } = forgeReplaying([{ stdout: fixture("review-search-requested.json") }, { stdout: fixture("review-search-reviewed.json") }]);
+
+  const [host] = await forge.listReviewRequests();
+  const byUrl = (url: string) => host?.requests.find((request) => request.url === url);
+
+  const commented = byUrl("https://github.com/themouette/claude-vm/pull/96");
+  assert.equal(commented?.state, "commented");
+  assert.equal(commented?.ci, "success");
+  assert.equal(commented?.viaTeam, null);
+  assert.equal(commented?.changedSinceReview, false);
+  assert.equal(byUrl("https://github.com/stretchr/testify/pull/1546")?.state, "approved");
+  assert.equal(byUrl("https://github.com/magisterquis/connectproxy/pull/2")?.state, "changes-requested");
+});
+
+test("a search with more results than it returned marks the host as truncated", async () => {
+  const requested = JSON.parse(fixture("review-search-requested.json"));
+  requested.data.search.issueCount = 120;
+  const { forge } = forgeReplaying([{ stdout: JSON.stringify(requested) }, { stdout: fixture("review-search-reviewed.json") }]);
+
+  const [host] = await forge.listReviewRequests();
+
+  assert.equal(host?.truncated, true);
+});
+
+test("a search gh cannot run comes back as the host's error rather than a throw", async () => {
+  const { forge } = forgeReplaying([
+    { exitCode: 4, stderr: "To get started with GitHub CLI, please run:  gh auth login\n" },
+    { stdout: fixture("review-search-reviewed.json") },
+  ]);
+
+  const hosts = await forge.listReviewRequests();
+
+  assert.deepEqual(hosts, [
+    { forge: "github", host: "github.com", requests: [], truncated: false, error: "gh failed: To get started with GitHub CLI, please run:  gh auth login" },
+  ]);
 });

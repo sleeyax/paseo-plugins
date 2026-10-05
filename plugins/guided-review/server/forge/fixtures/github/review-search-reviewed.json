@@ -1,0 +1,193 @@
+{
+  "data": {
+    "search": {
+      "issueCount": 7,
+      "nodes": [
+        {
+          "number": 96,
+          "url": "https://github.com/themouette/claude-vm/pull/96",
+          "title": "feat(session): persistent VM sessions",
+          "isDraft": false,
+          "createdAt": "2026-03-13T14:29:46Z",
+          "updatedAt": "2026-03-15T15:58:04Z",
+          "headRefOid": "41cb40de1209d756defee92783d326ba4f6fa43a",
+          "additions": 1704,
+          "deletions": 39,
+          "changedFiles": 34,
+          "author": {
+            "login": "themouette"
+          },
+          "statusCheckRollup": {
+            "state": "SUCCESS"
+          },
+          "viewerLatestReview": {
+            "state": "COMMENTED",
+            "commit": {
+              "oid": "41cb40de1209d756defee92783d326ba4f6fa43a"
+            }
+          },
+          "viewerLatestReviewRequest": null,
+          "reviews": {
+            "nodes": []
+          }
+        },
+        {
+          "number": 819,
+          "url": "https://github.com/sickcodes/Docker-OSX/pull/819",
+          "title": "Mouse fix - fixes  No mouse control when trying to run preinstalled catalina #766 ",
+          "isDraft": false,
+          "createdAt": "2024-09-03T12:39:10Z",
+          "updatedAt": "2026-02-02T15:16:57Z",
+          "headRefOid": "2332e96f892aba4935ef20e2dd1e763a86c056d7",
+          "additions": 2,
+          "deletions": 3,
+          "changedFiles": 1,
+          "author": {
+            "login": "sickcodes"
+          },
+          "statusCheckRollup": null,
+          "viewerLatestReview": {
+            "state": "APPROVED",
+            "commit": {
+              "oid": "2332e96f892aba4935ef20e2dd1e763a86c056d7"
+            }
+          },
+          "viewerLatestReviewRequest": null,
+          "reviews": {
+            "nodes": []
+          }
+        },
+        {
+          "number": 1546,
+          "url": "https://github.com/stretchr/testify/pull/1546",
+          "title": "assert: switch the diff library to go-diff",
+          "isDraft": false,
+          "createdAt": "2024-02-22T07:08:42Z",
+          "updatedAt": "2025-06-02T15:09:02Z",
+          "headRefOid": "bc848bae7a83d758609c33c7695549571eea1ee4",
+          "additions": 99,
+          "deletions": 35,
+          "changedFiles": 4,
+          "author": {
+            "login": "mitioshi"
+          },
+          "statusCheckRollup": null,
+          "viewerLatestReview": {
+            "state": "APPROVED",
+            "commit": {
+              "oid": "bc848bae7a83d758609c33c7695549571eea1ee4"
+            }
+          },
+          "viewerLatestReviewRequest": null,
+          "reviews": {
+            "nodes": []
+          }
+        },
+        {
+          "number": 1467,
+          "url": "https://github.com/stretchr/testify/pull/1467",
+          "title": "Colorizing test output",
+          "isDraft": false,
+          "createdAt": "2023-09-06T12:37:38Z",
+          "updatedAt": "2024-12-26T15:02:25Z",
+          "headRefOid": "2d756387a42c1495ab6652ebceff37b5082b3cde",
+          "additions": 91,
+          "deletions": 1,
+          "changedFiles": 5,
+          "author": {
+            "login": "hugoleborso"
+          },
+          "statusCheckRollup": null,
+          "viewerLatestReview": {
+            "state": "APPROVED",
+            "commit": {
+              "oid": "2d756387a42c1495ab6652ebceff37b5082b3cde"
+            }
+          },
+          "viewerLatestReviewRequest": null,
+          "reviews": {
+            "nodes": []
+          }
+        },
+        {
+          "number": 17,
+          "url": "https://github.com/tommy351/tsc-multi/pull/17",
+          "title": "fix(rewriteImport): fixes transformation of none js|project files",
+          "isDraft": false,
+          "createdAt": "2023-01-23T17:22:26Z",
+          "updatedAt": "2024-04-05T14:22:26Z",
+          "headRefOid": "2660962e143b451cc821149944f8dff6bf58f445",
+          "additions": 5725,
+          "deletions": 2,
+          "changedFiles": 2,
+          "author": {
+            "login": "emahuni"
+          },
+          "statusCheckRollup": null,
+          "viewerLatestReview": {
+            "state": "APPROVED",
+            "commit": {
+              "oid": "2660962e143b451cc821149944f8dff6bf58f445"
+            }
+          },
+          "viewerLatestReviewRequest": null,
+          "reviews": {
+            "nodes": []
+          }
+        },
+        {
+          "number": 79,
+          "url": "https://github.com/CyberPunkMetalHead/Binance-volatility-trading-bot/pull/79",
+          "title": "adds proper sell rounding to avoid LOT errors",
+          "isDraft": false,
+          "createdAt": "2021-05-14T14:31:56Z",
+          "updatedAt": "2025-05-04T01:19:39Z",
+          "headRefOid": "4c737709c50cb54279a184280fce7d670bf6c546",
+          "additions": 37,
+          "deletions": 21,
+          "changedFiles": 3,
+          "author": {
+            "login": "hExPY"
+          },
+          "statusCheckRollup": null,
+          "viewerLatestReview": {
+            "state": "COMMENTED",
+            "commit": {
+              "oid": "4c737709c50cb54279a184280fce7d670bf6c546"
+            }
+          },
+          "viewerLatestReviewRequest": null,
+          "reviews": {
+            "nodes": []
+          }
+        },
+        {
+          "number": 2,
+          "url": "https://github.com/magisterquis/connectproxy/pull/2",
+          "title": "fix: use correct HTTP header for proxy auth",
+          "isDraft": false,
+          "createdAt": "2019-10-27T20:37:02Z",
+          "updatedAt": "2020-07-05T19:07:12Z",
+          "headRefOid": "43907c4361b25af61eaee7f9c9b2d810061a1932",
+          "additions": 7,
+          "deletions": 1,
+          "changedFiles": 1,
+          "author": {
+            "login": "JensRantil"
+          },
+          "statusCheckRollup": null,
+          "viewerLatestReview": {
+            "state": "CHANGES_REQUESTED",
+            "commit": {
+              "oid": "43907c4361b25af61eaee7f9c9b2d810061a1932"
+            }
+          },
+          "viewerLatestReviewRequest": null,
+          "reviews": {
+            "nodes": []
+          }
+        }
+      ]
+    }
+  }
+}

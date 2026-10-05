@@ -1,5 +1,6 @@
 import type { DiffLine } from "../../shared/diff.ts";
 import type { Draft } from "../../shared/drafts.ts";
+import type { ReviewRequestHost } from "../../shared/inbox.ts";
 import type { SubmitStep, Verdict } from "../../shared/submit.ts";
 
 /**
@@ -64,6 +65,12 @@ export interface Forge {
   submitReview(target: DraftTarget, submission: ReviewSubmission): Promise<SubmitOutcome>;
   /** Throws the reviewer's pending review away with every draft on it; nothing to discard is not a failure. */
   discardReview(ref: ChangeRequestRef): Promise<void>;
+
+  /**
+   * The open change requests the current user is a reviewer of, on every host of this forge the CLI
+   * is logged in to. A host that cannot be listed comes back with its error rather than throwing.
+   */
+  listReviewRequests(): Promise<ReviewRequestHost[]>;
 }
 
 export type ReviewSubmission = { verdict: Verdict; body: string };
