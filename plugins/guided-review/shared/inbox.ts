@@ -67,7 +67,14 @@ export const LocalReviewSchema = z.object({
   headMoved: z.boolean(),
 });
 
-export const InboxItemSchema = ReviewRequestSchema.extend({ local: LocalReviewSchema.nullable() });
+export const InboxItemSchema = ReviewRequestSchema.extend({
+  local: LocalReviewSchema.nullable(),
+  /** The reviewer set it aside on this list, the forge none the wiser, until it moves on (`server/inbox-check-offs.ts`). */
+  checkedOff: z.boolean(),
+});
+
+/** What the reviewer saw of a change request when they checked it off. */
+export const CheckOffSchema = z.object({ headSha: z.string(), state: ReviewerStateSchema });
 
 /** Every host's review requests, each joined with the review started here, if any. */
 export const InboxSchema = z.object({
@@ -76,5 +83,6 @@ export const InboxSchema = z.object({
 });
 
 export type LocalReview = z.output<typeof LocalReviewSchema>;
+export type CheckOff = z.output<typeof CheckOffSchema>;
 export type InboxItem = z.output<typeof InboxItemSchema>;
 export type Inbox = z.output<typeof InboxSchema>;

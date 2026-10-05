@@ -15,7 +15,7 @@ const GITLAB_URL = "https://gitlab.com/acme/uploader/-/merge_requests/7";
 const HEAD = "b".repeat(40);
 const PUSHED = "d".repeat(40);
 
-type Host = { github: FakeForge; gitlab: FakeForge; service: ReviewService };
+type Host = { github: FakeForge; gitlab: FakeForge; service: ReviewService; restart: () => ReviewService };
 
 async function withForges(t: TestContext): Promise<Host> {
   const data = await mkdtemp(path.join(os.tmpdir(), "guided-review-inbox-"));
@@ -29,8 +29,8 @@ async function withForges(t: TestContext): Promise<Host> {
   workspaces.repositories.set("gitlab.com/acme/uploader", "/home/r/src/uploader-gl");
   const guideAgents = fakeGuideAgents();
   guideAgents.answer = () => sampleGuideReply();
-  const service = new ReviewService({ forges: [github, gitlab], workspaces, guideAgents, dataDirectory: data });
-  return { github, gitlab, service };
+  const restart = () => new ReviewService({ forges: [github, gitlab], workspaces, guideAgents, dataDirectory: data });
+  return { github, gitlab, service: restart(), restart };
 }
 
 async function startReview(service: ReviewService, url: string) {
@@ -84,8 +84,8 @@ test("lists every forge's review requests with their hosts, and none started her
     { forge: "gitlab", host: "gitlab.example.com", truncated: false, error: "glab is not logged in to gitlab.example.com." },
   ]);
   assert.deepEqual(inbox.items, [
-    { ...request(GITHUB_URL), local: null },
-    { ...request(GITLAB_URL), local: null },
+    { ...request(GITHUB_URL), local: null, checkedOff: false },
+    { ...request(GITLAB_URL), local: null, checkedOff: false },
   ]);
 });
 
@@ -141,4 +141,62 @@ test("a GitLab review published from here says whether the head moved since, ove
 
   gitlab.reviewRequests = [listed("gitlab", [request(GITLAB_URL, { state: "requested", changedSinceReview: null })])];
   assert.equal((await service.inbox()).items[0]?.changedSinceReview, null, "asked again, which the listing says");
+});
+
+async function checkedOff(service: ReviewService): Promise<string[]> {
+  return (await service.inbox()).items.filter((item) => item.checkedOff).map((item) => item.url);
+}
+
+test("a check-off holds while the change request stands still, survives a restart and is undone by unchecking", async (t) => {
+  const { github, gitlab, service, restart } = await withForges(t);
+  github.reviewRequests = [listed("github", [request(GITHUB_URL)])];
+  gitlab.reviewRequests = [listed("gitlab", [request(GITLAB_URL)])];
+
+  await service.setCheckedOff({ url: GITLAB_URL, checkOff: { headSha: HEAD, state: "requested" } });
+  assert.deepEqual(await checkedOff(service), [GITLAB_URL]);
+  assert.deepEqual(await checkedOff(restart()), [GITLAB_URL], "still requested, as when it was checked off");
+
+  await service.setCheckedOff({ url: GITLAB_URL, checkOff: null });
+  assert.deepEqual(await checkedOff(service), []);
+});
+
+test("a check-off comes back on a push, or when the reviewer is asked again or loses an approval", async (t) => {
+  const { gitlab, service } = await withForges(t);
+  const comeBack = async (checkOff: { headSha: string; state: ReviewRequest["state"] }, ...listings: Partial<ReviewRequest>[]) => {
+    await service.setCheckedOff({ url: GITLAB_URL, checkOff });
+    const seen: boolean[] = [];
+    for (const listing of listings) {
+      gitlab.reviewRequests = [listed("gitlab", [request(GITLAB_URL, listing)])];
+      seen.push((await checkedOff(service)).length === 1);
+    }
+    return seen;
+  };
+
+  assert.deepEqual(await comeBack({ headSha: HEAD, state: "commented" }, { state: "commented", headSha: PUSHED }, { state: "commented", headSha: HEAD }), [false, false]);
+  assert.deepEqual(await comeBack({ headSha: HEAD, state: "commented" }, { state: "requested" }), [false]);
+  assert.deepEqual(await comeBack({ headSha: HEAD, state: "approved" }, { state: "unapproved" }), [false]);
+  assert.deepEqual(
+    await comeBack({ headSha: HEAD, state: "requested" }, { state: "commented" }, { state: "changes-requested" }, { state: "requested" }),
+    [true, true, false],
+    "a state the reviewer moved to themselves holds, and being asked again after it brings it back",
+  );
+  assert.deepEqual(await comeBack({ headSha: HEAD, state: "requested" }, { state: "requested", headSha: "" }), [true], "a head the forge did not say is no push");
+});
+
+test("a check-off goes once a host listed in full no longer has it, and stays while its host fails or has more", async (t) => {
+  const { gitlab, service } = await withForges(t);
+  gitlab.reviewRequests = [listed("gitlab", [request(GITLAB_URL)])];
+  await service.setCheckedOff({ url: GITLAB_URL, checkOff: { headSha: HEAD, state: "requested" } });
+
+  gitlab.reviewRequests = [listed("gitlab", [], { error: "glab is not logged in to gitlab.com." })];
+  await service.inbox();
+  gitlab.reviewRequests = [listed("gitlab", [], { truncated: true })];
+  await service.inbox();
+  gitlab.reviewRequests = [listed("gitlab", [request(GITLAB_URL)])];
+  assert.deepEqual(await checkedOff(service), [GITLAB_URL]);
+
+  gitlab.reviewRequests = [listed("gitlab", [])];
+  await service.inbox();
+  gitlab.reviewRequests = [listed("gitlab", [request(GITLAB_URL)])];
+  assert.deepEqual(await checkedOff(service), []);
 });

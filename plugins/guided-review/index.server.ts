@@ -59,6 +59,7 @@ export default function contribute(server: PluginServerContext) {
   serve(contracts.getInbox, () => service.inbox());
   serve(contracts.getInboxPreferences, () => service.inboxPreferences());
   serve(contracts.saveInboxPreferences, (input) => service.saveInboxPreferences(input));
+  serve(contracts.setCheckedOff, (input) => service.setCheckedOff(input));
   serve(contracts.getPanel, (input) => service.panel(input));
   serve(contracts.generateGuide, (input) => service.generateGuide(input));
   serve(contracts.checkHead, (input) => service.checkHead(input));

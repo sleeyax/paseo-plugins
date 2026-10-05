@@ -1,16 +1,18 @@
 import type { Inbox, InboxItem, LocalReview, ReviewRequest } from "../shared/inbox.ts";
 import type { ChangeRequestRef, Forge } from "./forge/port.ts";
+import type { InboxCheckOffsFile } from "./inbox-check-offs.ts";
 import { reviewIdOf, type ReviewRecord, type ReviewStore } from "./review-store.ts";
 
 export type ReviewInboxOptions = {
   forges: readonly Forge[];
   store: ReviewStore;
+  checkOffs: InboxCheckOffsFile;
   log: (message: string) => void;
 };
 
 /**
- * The review requests of every forge, joined with the reviews started here: the start surface's
- * list. Each forge answers per host, so one that cannot be listed leaves the rest listed.
+ * The review requests of every forge, joined with the reviews started here and what the reviewer checked off: the start surface's list.
+ * Each forge answers per host, so one that cannot be listed leaves the rest listed.
  *
  * GitLab's listing cannot count drafts, which take a call per MR, so they are counted only for the
  * MRs reviewed here; and its guess at a push since the last review is replaced by the head a review
@@ -19,22 +21,25 @@ export type ReviewInboxOptions = {
 export class ReviewInbox {
   readonly #forges: readonly Forge[];
   readonly #store: ReviewStore;
+  readonly #checkOffs: InboxCheckOffsFile;
   readonly #log: (message: string) => void;
 
   constructor(options: ReviewInboxOptions) {
     this.#forges = options.forges;
     this.#store = options.store;
+    this.#checkOffs = options.checkOffs;
     this.#log = options.log;
   }
 
   async list(): Promise<Inbox> {
     const listed = (await Promise.all(this.#forges.map((forge) => forge.listReviewRequests()))).flat();
     const requests = listed.flatMap((host) => host.requests);
-    const items = await Promise.all(requests.map((request) => this.#item(request)));
+    const checkedOff = await this.#checkOffs.follow(listed);
+    const items = await Promise.all(requests.map(async (request) => ({ ...(await this.#item(request)), checkedOff: checkedOff.has(request.url) })));
     return { hosts: listed.map(({ requests: _, ...host }) => host), items };
   }
 
-  async #item(request: ReviewRequest): Promise<InboxItem> {
+  async #item(request: ReviewRequest): Promise<Omit<InboxItem, "checkedOff">> {
     const record = await this.#recordOf(request);
     if (record === null) return { ...request, local: null };
     const local: LocalReview = {

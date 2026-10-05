@@ -15,7 +15,7 @@ import type {
   SyntaxColors,
 } from "../shared/contracts.ts";
 import type { FileDiff } from "../shared/diff.ts";
-import type { Inbox } from "../shared/inbox.ts";
+import type { CheckOff, Inbox } from "../shared/inbox.ts";
 import type { InboxPreferences } from "../shared/inbox-preferences.ts";
 import type { CommentOrigin, DraftList, DraftLocation, LinkedDraft } from "../shared/drafts.ts";
 import { coveredPaths, type CoveredCode, type GuideState, type LayeredGuide } from "../shared/guide.ts";
@@ -33,6 +33,7 @@ import { GuideGenerations, isReady, marksOf } from "./guide-generation.ts";
 import { oneAtATimePer } from "./one-at-a-time.ts";
 import { regeneratedAway, ReviewDrafts } from "./review-drafts.ts";
 import { ReviewInbox } from "./review-inbox.ts";
+import { InboxCheckOffsFile } from "./inbox-check-offs.ts";
 import { InboxPreferencesFile } from "./inbox-preferences.ts";
 import { isFinished, ReviewPreparation, startProgressAt } from "./review-preparation.ts";
 import { questionPrompt } from "./question-prompt.ts";
@@ -86,6 +87,7 @@ export class ReviewService {
   readonly #drafts: ReviewDrafts;
   readonly #inbox: ReviewInbox;
   readonly #inboxPreferences: InboxPreferencesFile;
+  readonly #checkOffs: InboxCheckOffsFile;
   /** The latest branch guiding asked for in each workspace, by workspace ID. */
   readonly #branchStarts = new Map<string, BranchJob>();
   /** Writes of each guide's marks, by review and head SHA, one at a time. */
@@ -110,7 +112,8 @@ export class ReviewService {
       clones: path.join(options.dataDirectory, "clones"),
     });
     this.#drafts = new ReviewDrafts({ store: this.#store, guides: this.#guides });
-    this.#inbox = new ReviewInbox({ forges: this.#forges, store: this.#store, log: this.#log });
+    this.#checkOffs = new InboxCheckOffsFile(options.dataDirectory);
+    this.#inbox = new ReviewInbox({ forges: this.#forges, store: this.#store, checkOffs: this.#checkOffs, log: this.#log });
     this.#inboxPreferences = new InboxPreferencesFile(options.dataDirectory);
   }
 
@@ -125,6 +128,11 @@ export class ReviewService {
 
   async saveInboxPreferences(preferences: InboxPreferences): Promise<InboxPreferences> {
     return this.#inboxPreferences.save(preferences);
+  }
+
+  async setCheckedOff({ url, checkOff }: { url: string; checkOff: CheckOff | null }): Promise<null> {
+    await this.#checkOffs.set(url, checkOff);
+    return null;
   }
 
   /**

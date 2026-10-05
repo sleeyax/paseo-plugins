@@ -4,7 +4,7 @@ import { FileDiffSchema } from "./diff.ts";
 import { CommentOriginSchema, DraftListSchema, DraftLocationSchema, LinkedDraftSchema, QuoteSchema } from "./drafts.ts";
 import { GuideStateSchema } from "./guide.ts";
 import { InboxPreferencesSchema } from "./inbox-preferences.ts";
-import { InboxSchema } from "./inbox.ts";
+import { CheckOffSchema, InboxSchema } from "./inbox.ts";
 import { GuideProgressSchema } from "./progress.ts";
 import { SubmitResultSchema, VerdictOptionSchema, VerdictSchema } from "./submit.ts";
 
@@ -107,6 +107,13 @@ export const saveInboxPreferences = defineRpc({
   name: "guided-review.inbox.save-preferences",
   input: InboxPreferencesSchema,
   output: InboxPreferencesSchema,
+});
+
+/** Checks a change request off the review list as of what the row showed, or with null unchecks it. */
+export const setCheckedOff = defineRpc({
+  name: "guided-review.inbox.check-off",
+  input: z.object({ url: z.string(), checkOff: CheckOffSchema.nullable() }),
+  output: z.null(),
 });
 
 export const getStartProgress = defineRpc({
