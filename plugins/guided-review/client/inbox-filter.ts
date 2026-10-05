@@ -36,6 +36,12 @@ export function visibleItems(items: readonly InboxItem[], preferences: InboxPref
     .sort((a, b) => direction * (value(a) - value(b)) || SORT_VALUES.updated(b) - SORT_VALUES.updated(a));
 }
 
+/** How many reviews the list shows, and of how many when the filters or the search hide some. */
+export function countLabel(shown: number, total: number): string {
+  const noun = total === 1 ? "review" : "reviews";
+  return shown === total ? `${total} ${noun}` : `${shown} of ${total} ${noun}`;
+}
+
 /** How long ago `iso` was, in the largest whole unit: `5m`, `3h`, `2d`, `6w`, `1y`; `now` under a minute. */
 export function age(iso: string, now: Date): string {
   const minutes = Math.floor((now.getTime() - Date.parse(iso)) / 60_000);

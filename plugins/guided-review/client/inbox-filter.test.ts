@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_INBOX_PREFERENCES, type InboxPreferences } from "../shared/inbox-preferences.ts";
 import type { InboxItem } from "../shared/inbox.ts";
-import { age, matchesSearch, needsAttention, visibleItems } from "./inbox-filter.ts";
+import { age, countLabel, matchesSearch, needsAttention, visibleItems } from "./inbox-filter.ts";
 
 function item(number: number, overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -84,4 +84,11 @@ test("an age is the largest whole unit", () => {
   assert.equal(age("2026-08-20T12:00:00Z", now), "6w");
   assert.equal(age("2025-09-01T12:00:00Z", now), "1y");
   assert.equal(age("2026-10-06T12:00:00Z", now), "now");
+});
+
+test("countLabel gives the total alone until something is hidden", () => {
+  assert.equal(countLabel(12, 12), "12 reviews");
+  assert.equal(countLabel(1, 1), "1 review");
+  assert.equal(countLabel(4, 12), "4 of 12 reviews");
+  assert.equal(countLabel(1, 12), "1 of 12 reviews");
 });

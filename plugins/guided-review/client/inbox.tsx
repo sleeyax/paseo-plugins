@@ -10,7 +10,7 @@ import { INBOX_COLUMNS, type InboxColumn, type InboxPreferences, type InboxSortK
 import type { Inbox, InboxItem } from "../shared/inbox.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { Button } from "./button.tsx";
-import { age, visibleItems } from "./inbox-filter.ts";
+import { age, countLabel, visibleItems } from "./inbox-filter.ts";
 import { useInboxPreferences } from "./inbox-preferences.ts";
 import { FROM_NEW_REVIEW, NewReview } from "./new-review.tsx";
 import type { ReviewStart } from "./start-review.ts";
@@ -53,13 +53,18 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
             <Note colors={colors} tone="danger" text={`Could not list your reviews: ${inbox.error.message}`} />
           ) : items.length === 0 ? (
             <Note colors={colors} text={inbox.data.items.length === 0 ? "Nothing to review." : "Nothing matches these filters."} />
-          ) : table ? (
-            <Table colors={colors} items={items} preferences={preferences} change={change} starter={starter} />
           ) : (
             <View style={{ gap: spacing[2] }}>
-              {items.map((item) => (
-                <Card key={item.url} colors={colors} item={item} columns={preferences.columns} starter={starter} />
-              ))}
+              <Note colors={colors} text={countLabel(items.length, inbox.data.items.length)} />
+              {table ? (
+                <Table colors={colors} items={items} preferences={preferences} change={change} starter={starter} />
+              ) : (
+                <View style={{ gap: spacing[2] }}>
+                  {items.map((item) => (
+                    <Card key={item.url} colors={colors} item={item} columns={preferences.columns} starter={starter} />
+                  ))}
+                </View>
+              )}
             </View>
           )}
         </View>
