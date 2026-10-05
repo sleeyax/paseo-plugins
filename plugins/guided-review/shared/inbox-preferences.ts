@@ -2,10 +2,10 @@ import { z } from "zod";
 import { ReviewerStateSchema, type ReviewerState } from "./inbox.ts";
 
 /** Every column the review list can show, in the order it shows them; the title is what a row is, so it is always shown. */
-export const INBOX_COLUMNS = ["change", "title", "author", "updated", "created", "size", "ci", "state", "local"] as const;
+export const INBOX_COLUMNS = ["checked", "change", "title", "author", "updated", "created", "size", "ci", "state", "local"] as const;
 export type InboxColumn = (typeof INBOX_COLUMNS)[number];
 
-export const DEFAULT_INBOX_COLUMNS: readonly InboxColumn[] = ["change", "title", "author", "updated", "state", "local"];
+export const DEFAULT_INBOX_COLUMNS: readonly InboxColumn[] = ["checked", "change", "title", "author", "updated", "state", "local"];
 
 /** With nothing saved the list leaves out what the reviewer approved. */
 export const DEFAULT_INBOX_STATES: readonly ReviewerState[] = ReviewerStateSchema.options.filter((state) => state !== "approved");

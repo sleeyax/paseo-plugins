@@ -22,7 +22,7 @@ test("with nothing saved the list hides what the reviewer approved and sorts by 
     checkedOff: "hide",
     needsAttention: false,
     sort: { key: "updated", descending: true },
-    columns: ["change", "title", "author", "updated", "state", "local"],
+    columns: ["checked", "change", "title", "author", "updated", "state", "local"],
   });
 });
 

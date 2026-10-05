@@ -2,15 +2,15 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { Modal, TextInput } from "@getpaseo/plugin/client/react-native";
 import { ExternalLink, SettingsAction, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
-import React, { useState } from "react";
+import React, { useContext, useState } from "react";
 import { Pressable, Text, View, type LayoutChangeEvent } from "react-native";
 import * as contracts from "../shared/contracts.ts";
-import { PLUGIN_ID } from "../shared/identity.ts";
-import { INBOX_COLUMNS, type InboxColumn, type InboxPreferences, type InboxSortKey } from "../shared/inbox-preferences.ts";
+import { CHECK_OFF_FILTERS, INBOX_COLUMNS, type CheckOffFilter, type InboxColumn, type InboxPreferences, type InboxSortKey } from "../shared/inbox-preferences.ts";
 import { ReviewerStateSchema, type Inbox, type InboxItem, type ReviewerState } from "../shared/inbox.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { Button } from "./button.tsx";
-import { age, countLabel, STATE_NAMES, statesLabel, visibleItems } from "./inbox-filter.ts";
+import { CheckOffContext, INBOX_QUERY_KEY, useCheckOff } from "./check-off.ts";
+import { age, countLabel, hiddenCheckedOff, passesCheckOff, STATE_NAMES, statesLabel, visibleItems } from "./inbox-filter.ts";
 import { useInboxPreferences } from "./inbox-preferences.ts";
 import { FROM_NEW_REVIEW, NewReview } from "./new-review.tsx";
 import type { ReviewStart } from "./start-review.ts";
@@ -18,17 +18,33 @@ import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 
 const FORGE_NAMES = { github: "GitHub", gitlab: "GitLab" } as const;
 
+const CHECK_OFF_LABELS: Record<CheckOffFilter, string> = { hide: "Hide checked off", show: "With checked off", only: "Checked off only" };
+
 /** The open change requests the reviewer reviews, to pick one and start or continue its review. */
 export function ReviewInbox({ colors, compact, starter }: { colors: Colors; compact: boolean; starter: ReviewStart }) {
   const getInbox = useRpc(contracts.getInbox);
-  const inbox = useQuery({ queryKey: [PLUGIN_ID, "inbox"], queryFn: () => getInbox({}), refetchOnWindowFocus: false });
-  const { preferences, change, error } = useInboxPreferences();
-  const [query, setQuery] = useState("");
+  const inbox = useQuery({ queryKey: INBOX_QUERY_KEY, queryFn: () => getInbox({}), refetchOnWindowFocus: false });
+  const { preferences, change: changePreferences, error } = useInboxPreferences();
+  const checkOff = useCheckOff();
+  const [query, setSearch] = useState("");
   const [width, setWidth] = useState(0);
   const [choosing, setChoosing] = useState<"columns" | "states" | null>(null);
 
-  const items = inbox.data ? visibleItems(inbox.data.items, preferences, query) : [];
+  const change = (update: Partial<InboxPreferences>) => {
+    checkOff.release();
+    changePreferences(update);
+  };
+  const setQuery = (next: string) => {
+    checkOff.release();
+    setSearch(next);
+  };
+  const refresh = () => {
+    checkOff.release();
+    void inbox.refetch();
+  };
+  const items = inbox.data ? visibleItems(inbox.data.items, preferences, query, checkOff.held) : [];
   const table = !compact && width >= tableWidth(preferences.columns);
+  const rows = { toggle: checkOff.toggle, dimmed: (item: InboxItem) => checkOff.held.has(item.url) && !passesCheckOff(item, preferences) };
 
   return (
     <View onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width)}>
@@ -39,13 +55,14 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
             <NewReview colors={colors} starter={starter} />
             <Button colors={colors} small label="Columns" onPress={() => setChoosing("columns")} />
             <Button colors={colors} small label={statesLabel(preferences.states)} onPress={() => setChoosing("states")} />
-            <Button colors={colors} small label={inbox.isFetching ? "Refreshing…" : "Refresh"} disabled={inbox.isFetching} onPress={() => void inbox.refetch()} />
+            <Button colors={colors} small label={inbox.isFetching ? "Refreshing…" : "Refresh"} disabled={inbox.isFetching || checkOff.saving} onPress={refresh} />
           </View>
         }
       >
         <View style={{ gap: spacing[3] }}>
           <Toolbar colors={colors} preferences={preferences} change={change} query={query} setQuery={setQuery} />
           {error !== null ? <Note colors={colors} tone="danger" text={`Could not keep these filters for next time: ${error}`} /> : null}
+          {checkOff.error !== null ? <Note colors={colors} tone="danger" text={`Could not keep that check-off: ${checkOff.error}`} /> : null}
           {inbox.data ? <HostNotes colors={colors} hosts={inbox.data.hosts} /> : null}
           <NewReviewRow colors={colors} starter={starter} />
           {inbox.isPending ? (
@@ -55,18 +72,20 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
           ) : items.length === 0 ? (
             <Note colors={colors} text={inbox.data.items.length === 0 ? "Nothing to review." : "Nothing matches these filters."} />
           ) : (
-            <View style={{ gap: spacing[2] }}>
-              <Note colors={colors} text={countLabel(items.length, inbox.data.items.length)} />
-              {table ? (
-                <Table colors={colors} items={items} preferences={preferences} change={change} starter={starter} />
-              ) : (
-                <View style={{ gap: spacing[2] }}>
-                  {items.map((item) => (
-                    <Card key={item.url} colors={colors} item={item} columns={preferences.columns} starter={starter} />
-                  ))}
-                </View>
-              )}
-            </View>
+            <CheckOffContext.Provider value={rows}>
+              <View style={{ gap: spacing[2] }}>
+                <Note colors={colors} text={countLabel(items.length, inbox.data.items.length, hiddenCheckedOff(inbox.data.items, preferences, query, checkOff.held))} />
+                {table ? (
+                  <Table colors={colors} items={items} preferences={preferences} change={change} starter={starter} />
+                ) : (
+                  <View style={{ gap: spacing[2] }}>
+                    {items.map((item) => (
+                      <Card key={item.url} colors={colors} item={item} columns={preferences.columns} starter={starter} />
+                    ))}
+                  </View>
+                )}
+              </View>
+            </CheckOffContext.Provider>
           )}
         </View>
       </SettingsSection>
@@ -77,6 +96,7 @@ export function ReviewInbox({ colors, compact, starter }: { colors: Colors; comp
 }
 
 const COLUMN_HINTS: Partial<Record<InboxColumn, string>> = {
+  checked: "Set a review aside here until it is pushed to or you are asked again",
   title: "Always shown",
   state: "Where you stand, and whether it changed since your review",
   local: "The guide and drafts you have for it in this plugin",
@@ -200,6 +220,16 @@ function Toolbar({
         <View style={{ width: 1, alignSelf: "stretch", backgroundColor: colors.border, marginHorizontal: spacing[1] }} />
         <Chip colors={colors} label="Needs my attention" selected={preferences.needsAttention} onPress={() => change({ needsAttention: !preferences.needsAttention })} />
         <Chip colors={colors} label="Hide drafts" selected={preferences.hideDrafts} onPress={() => change({ hideDrafts: !preferences.hideDrafts })} />
+        <View style={{ width: 1, alignSelf: "stretch", backgroundColor: colors.border, marginHorizontal: spacing[1] }} />
+        {CHECK_OFF_FILTERS.map((checkedOff) => (
+          <Chip
+            key={checkedOff}
+            colors={colors}
+            label={CHECK_OFF_LABELS[checkedOff]}
+            selected={preferences.checkedOff === checkedOff}
+            onPress={() => change({ checkedOff })}
+          />
+        ))}
       </View>
     </View>
   );
@@ -305,9 +335,11 @@ function filesOf(item: InboxItem): string {
 /** A column's width: fixed for a value whose length is known, else a share of what is left, never under `min`. */
 type ColumnWidth = { width: number } | { flex: number; min: number };
 
-type ColumnSpec = { label: string; size: ColumnWidth; sort?: InboxSortKey; cell: (item: InboxItem, colors: Colors, now: Date) => React.ReactNode };
+/** `label` names the column in the chooser, and heads it unless `header` says otherwise. */
+type ColumnSpec = { label: string; header?: string; size: ColumnWidth; sort?: InboxSortKey; cell: (item: InboxItem, colors: Colors, now: Date) => React.ReactNode };
 
 const COLUMNS: Record<InboxColumn, ColumnSpec> = {
+  checked: { label: "Checked off", header: "", size: { width: 20 }, cell: (item, colors) => <CheckOffBox colors={colors} item={item} /> },
   change: {
     label: "PR/MR",
     size: { flex: 1.2, min: 96 },
@@ -395,6 +427,36 @@ function Badge({ colors, text }: { colors: Colors; text: string }) {
   );
 }
 
+/** How faint a row is that stays only because it was just checked off or unchecked. */
+const DIMMED = 0.5;
+
+function CheckOffBox({ colors, item }: { colors: Colors; item: InboxItem }) {
+  const { toggle } = useContext(CheckOffContext);
+  const checked = item.checkedOff;
+  return (
+    <Pressable
+      onPress={() => toggle(item)}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+      accessibilityLabel={`${checked ? "Uncheck" : "Check off"} ${numberLabel(item.forge, item.number)}`}
+      hitSlop={spacing[1]}
+      style={({ pressed }) => ({
+        width: 18,
+        height: 18,
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: radius.sm,
+        borderWidth: 1,
+        borderColor: checked ? colors.accent : colors.border,
+        backgroundColor: checked ? colors.accent : undefined,
+        opacity: pressed ? 0.85 : 1,
+      })}
+    >
+      {checked ? <Text style={{ color: colors.accentForeground, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>✓</Text> : null}
+    </Pressable>
+  );
+}
+
 /** The one way into the review from a row: a row itself starts nothing, so a click elsewhere on it is safe. */
 function StartButton({ colors, item, starter }: { colors: Colors; item: InboxItem; starter: ReviewStart }) {
   const starting = starter.busy && starter.from === item.url;
@@ -466,6 +528,7 @@ function Table({
   starter: ReviewStart;
 }) {
   const now = new Date();
+  const { dimmed } = useContext(CheckOffContext);
   const columns = preferences.columns.map((id) => ({ id, ...COLUMNS[id] }));
   const sortBy = (key: InboxSortKey) =>
     change({ sort: { key, descending: preferences.sort.key === key ? !preferences.sort.descending : true } });
@@ -475,7 +538,8 @@ function Table({
       <View style={{ flexDirection: "row", gap: CELL_GAP, paddingVertical: spacing[2], paddingHorizontal: spacing[3], backgroundColor: colors.surface1 }}>
         {columns.map((column) => {
           const sorted = column.sort !== undefined && preferences.sort.key === column.sort;
-          const label = sorted ? `${column.label} ${preferences.sort.descending ? "↓" : "↑"}` : column.label;
+          const header = column.header ?? column.label;
+          const label = sorted ? `${header} ${preferences.sort.descending ? "↓" : "↑"}` : header;
           const text = (
             <Text
               numberOfLines={1}
@@ -501,7 +565,14 @@ function Table({
       {items.map((item) => (
         <View
           key={item.url}
-          style={{ paddingVertical: spacing[2], paddingHorizontal: spacing[3], borderTopWidth: 1, borderTopColor: colors.border, gap: spacing[1] }}
+          style={{
+            paddingVertical: spacing[2],
+            paddingHorizontal: spacing[3],
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            gap: spacing[1],
+            opacity: dimmed(item) ? DIMMED : 1,
+          }}
         >
           <View style={{ flexDirection: "row", gap: CELL_GAP, alignItems: "center" }}>
             {columns.map((column) => (
@@ -523,6 +594,7 @@ function Table({
 /** A row stacked for a narrow screen: the title, then whichever of the other columns are shown, as lines. */
 function Card({ colors, item, columns, starter }: { colors: Colors; item: InboxItem; columns: readonly InboxColumn[]; starter: ReviewStart }) {
   const now = new Date();
+  const { dimmed } = useContext(CheckOffContext);
   const shown = (column: InboxColumn) => columns.includes(column);
   const meta = [
     ...(shown("change") ? [item.project] : []),
@@ -536,8 +608,15 @@ function Card({ colors, item, columns, starter }: { colors: Colors; item: InboxI
   );
 
   return (
-    <View style={{ padding: spacing[3], gap: spacing[1], borderWidth: 1, borderColor: colors.border, borderRadius: radius.md }}>
-      <Title colors={colors} item={item} />
+    <View style={{ padding: spacing[3], gap: spacing[1], borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, opacity: dimmed(item) ? DIMMED : 1 }}>
+      {shown("checked") ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing[2] }}>
+          <CheckOffBox colors={colors} item={item} />
+          <Title colors={colors} item={item} />
+        </View>
+      ) : (
+        <Title colors={colors} item={item} />
+      )}
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: spacing[1] }}>
         <NumberLink colors={colors} item={item} />
         {meta.length > 0 ? (
