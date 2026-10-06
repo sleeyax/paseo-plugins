@@ -1,23 +1,25 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
+import React from "react";
+import { openPanelWhenReady } from "./client/open-panel.ts";
 import { GuidePanel } from "./client/panel.tsx";
+import { keepReviewButtons } from "./client/review-buttons.ts";
 import { GuidedReviewSettings } from "./client/settings.tsx";
 import { createStartSurface } from "./client/start.tsx";
 import * as contracts from "./shared/contracts.ts";
 import { PANEL_ID, PLUGIN_ICON, PLUGIN_ID, PLUGIN_LABEL, SETTINGS_SCREEN_ID, START_SURFACE_ID } from "./shared/identity.ts";
 
 export default function contribute(client: PluginClientContext) {
+  const openPanel = (workspaceId: string) => client.openPanel(PANEL_ID, { workspaceId });
+
   client.addWorkspacePanel({
     id: PANEL_ID,
     title: PLUGIN_LABEL,
     icon: PLUGIN_ICON,
     context: "workspace",
-    Component: GuidePanel,
+    Component: (props) => <GuidePanel {...props} openPanel={(workspaceId) => void openPanelWhenReady(() => openPanel(workspaceId))} />,
   });
 
-  client.addSurface(
-    START_SURFACE_ID,
-    createStartSurface((workspaceId) => client.openPanel(PANEL_ID, { workspaceId })),
-  );
+  client.addSurface(START_SURFACE_ID, createStartSurface(openPanel));
 
   client.addSidebarItem({
     id: START_SURFACE_ID,
@@ -50,5 +52,5 @@ export default function contribute(client: PluginClientContext) {
     },
   });
 
-  return () => {};
+  return keepReviewButtons(client, openPanel);
 }

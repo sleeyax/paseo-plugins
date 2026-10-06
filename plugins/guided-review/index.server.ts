@@ -58,6 +58,7 @@ export default function contribute(server: PluginServerContext) {
   serve(contracts.getStartProgress, (input) => service.startProgress(input));
   serve(contracts.getInbox, () => service.inbox());
   serve(contracts.getLocalReviews, (input) => service.localReviews(input));
+  serve(contracts.getReviewWorkspaces, () => service.reviewWorkspaces());
   serve(contracts.getInboxPreferences, () => service.inboxPreferences());
   serve(contracts.saveInboxPreferences, (input) => service.saveInboxPreferences(input));
   serve(contracts.setCheckedOff, (input) => service.setCheckedOff(input));

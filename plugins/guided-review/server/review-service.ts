@@ -10,6 +10,7 @@ import type {
   LocalReviews,
   NodeDiff,
   PanelView,
+  ReviewWorkspaces,
   StartProgress,
   StartResult,
   Suggestion,
@@ -132,6 +133,12 @@ export class ReviewService {
 
   async localReviews({ reviewIds }: { reviewIds: string[] }): Promise<LocalReviews> {
     return { reviews: await Promise.all(reviewIds.map(async (reviewId) => ({ reviewId, local: await this.#inbox.local(reviewId) }))) };
+  }
+
+  async reviewWorkspaces(): Promise<ReviewWorkspaces> {
+    const records = await this.#store.list();
+    const active = await Promise.all(records.map((record) => this.#workspaces.isActive(record.workspace.id)));
+    return { workspaceIds: records.filter((_, index) => active[index]).map((record) => record.workspace.id).sort() };
   }
 
   async inboxPreferences(): Promise<InboxPreferences> {

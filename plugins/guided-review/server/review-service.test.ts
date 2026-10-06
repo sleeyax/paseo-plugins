@@ -203,6 +203,20 @@ test("starting the same PR again reuses its open workspace, and a new one once t
   });
 });
 
+test("the review workspaces are the open workspaces of the reviews started here", async (t) => {
+  const { service, workspaces, forge } = await withHost(t);
+  const other = "https://github.com/acme/uploader/pull/8";
+  forge.changeRequests.set(other, sampleChangeRequest(other));
+
+  assert.deepEqual(await service.reviewWorkspaces(), { workspaceIds: [] });
+  await startAndSettle(service, URL);
+  await startAndSettle(service, other);
+  assert.deepEqual(await service.reviewWorkspaces(), { workspaceIds: ["wks_0000000000000001", "wks_0000000000000002"] });
+
+  workspaces.archive("wks_0000000000000001");
+  assert.deepEqual(await service.reviewWorkspaces(), { workspaceIds: ["wks_0000000000000002"] });
+});
+
 test("the header is re-read on every start, so it follows the PR", async (t) => {
   const { service, forge } = await withHost(t);
 

@@ -15,8 +15,8 @@ export type BranchStartViewProps = {
   /** Where guiding this workspace's branch has got to; absent when it was never asked for. */
   branch: BranchStart | undefined;
   theme: PluginTheme;
-  /** Opens another workspace; absent on hosts without client navigation. */
-  openWorkspace?: (workspaceId: string) => void;
+  /** Opens the panel in another workspace. */
+  openPanel: (workspaceId: string) => void;
   /** Called once a start was asked for, so the panel reads the new state. */
   onStarted: () => void;
 };
@@ -32,7 +32,7 @@ export function isBranchRunning(branch: BranchStart | undefined): boolean {
  * which ends either with the guide here, or with the reason the branch was left alone and a link to
  * the PR workspace the guide went to instead.
  */
-export function BranchStartView({ workspaceId, branch, theme, openWorkspace, onStarted }: BranchStartViewProps) {
+export function BranchStartView({ workspaceId, branch, theme, openPanel, onStarted }: BranchStartViewProps) {
   const colors = theme.colors;
   const startBranch = useRpc(contracts.startBranchReview);
   const start = useMutation({
@@ -117,16 +117,10 @@ export function BranchStartView({ workspaceId, branch, theme, openWorkspace, onS
               {line.text}
             </Line>
           )}
-          {elsewhere && openWorkspace ? (
+          {elsewhere ? (
             <View style={{ alignItems: "flex-start" }}>
-              <Button colors={colors} label="Open the PR workspace" onPress={() => openWorkspace(progress.workspaceId!)} />
+              <Button colors={colors} label="Open the PR workspace" onPress={() => openPanel(progress.workspaceId!)} />
             </View>
-          ) : null}
-          {elsewhere && !openWorkspace ? (
-            <Line colors={colors} muted>
-              Open "Review {progress.header ? numberLabel(progress.header.forge, progress.header.number) : "the PR or MR"}" from the
-              sidebar.
-            </Line>
           ) : null}
           {progress.phase === "failed" || progress.phase === "unknown" ? (
             <View style={{ alignItems: "flex-start" }}>{guideButton("Try again")}</View>

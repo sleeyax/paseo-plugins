@@ -31,6 +31,8 @@ On the client, `client/theme.ts` holds Paseo's design scale and the one `Colors`
 
 A Command Center item cannot take text, so starting from a URL is the `start` surface, which the sidebar item opens.
 A surface is not handed the client context, so `createStartSurface` takes the panel opener through its closure, and `client/open-panel.ts` retries it: `client.openPanel` throws until the app's cache has the workspace, which a just-created one reaches a moment later.
+The panel takes it the same way, so a move to another workspace (Regenerate's, "Open the PR workspace") opens the panel there rather than just the workspace.
+`client.openPanel` always navigates to the workspace, so a tab cannot be added in the background, and Paseo restores a workspace with the tabs it last had and offers plugins no hook when one opens. A review started with Review, which does not navigate, therefore has no panel tab until the reviewer opens it, so `client/review-buttons.ts` keeps a header button that opens the panel on every workspace `getReviewWorkspaces` lists, polling it for reviews started since.
 
 Paseo cuts every plugin RPC off after 30 seconds and does not stop the handler.
 Reading a PR, cloning and `workspaces.create` can all take longer, so `start` returns a review ID at once and the work runs as a background job, which the panel follows through `startProgress` and the review list through `getLocalReviews`.

@@ -26,7 +26,7 @@ const POLL_MS = 2_000;
 const IDLE_POLL_MS = 5_000;
 
 /** The "Guided Review" tab: the review this workspace was created for, found by the workspace's ID. */
-export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWorkspacePanelProps) {
+export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }: PluginWorkspacePanelProps & { openPanel: (workspaceId: string) => void }) {
   const getPanel = useRpc(contracts.getPanel);
   const panel = useQuery({
     queryKey: [PLUGIN_ID, "panel", workspaceId],
@@ -60,7 +60,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
   const regenerate = useRegenerate({
     reviewId: panel.data?.status === "ready" ? panel.data.reviewId : null,
     workspaceId,
-    ...(navigation ? { openWorkspace: (id: string) => navigation.openWorkspace({ workspaceId: id }) } : {}),
+    openPanel,
     onRegenerated: () => void panel.refetch(),
   });
 
@@ -93,7 +93,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
           workspaceId={workspaceId}
           branch={panel.data.branch}
           theme={theme}
-          {...(navigation ? { openWorkspace: (id: string) => navigation.openWorkspace({ workspaceId: id }) } : {})}
+          openPanel={openPanel}
           onStarted={() => void panel.refetch()}
         />
       );

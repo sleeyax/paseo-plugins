@@ -45,8 +45,8 @@ export type RegenerateOptions = {
   reviewId: string | null;
   /** The workspace the panel is in; a regenerated guide may end up in another. */
   workspaceId: string;
-  /** Opens another workspace; absent on hosts without client navigation. */
-  openWorkspace?: (workspaceId: string) => void;
+  /** Opens the panel in another workspace. */
+  openPanel: (workspaceId: string) => void;
   /** Called once a regeneration has moved the review, so the panel reads the guide at the new head. */
   onRegenerated: () => void;
 };
@@ -65,7 +65,7 @@ export type RegenerateControl = {
   error: string | null;
 };
 
-export function useRegenerate({ reviewId, workspaceId, openWorkspace, onRegenerated }: RegenerateOptions): RegenerateControl {
+export function useRegenerate({ reviewId, workspaceId, openPanel, onRegenerated }: RegenerateOptions): RegenerateControl {
   const queryClient = useQueryClient();
   const regenerateGuide = useRpc(contracts.regenerateGuide);
   const getStartProgress = useRpc(contracts.getStartProgress);
@@ -98,7 +98,7 @@ export function useRegenerate({ reviewId, workspaceId, openWorkspace, onRegenera
     if (!finished) return;
     void queryClient.invalidateQueries({ queryKey: headCheckKey(reviewId) });
     onRegenerated();
-    if (movedTo !== null && openWorkspace) openWorkspace(movedTo);
+    if (movedTo !== null) openPanel(movedTo);
     if (current?.phase === "ready") setRunning(false);
   }, [finished]);
 

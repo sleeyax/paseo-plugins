@@ -87,6 +87,15 @@ export const getLocalReviews = defineRpc({
   output: LocalReviewsSchema,
 });
 
+export const ReviewWorkspacesSchema = z.object({ workspaceIds: z.array(z.string()) });
+
+/** The open workspaces of the reviews started here, which the client gives a button that opens the panel. */
+export const getReviewWorkspaces = defineRpc({
+  name: "guided-review.review.workspaces",
+  input: z.object({}),
+  output: ReviewWorkspacesSchema,
+});
+
 export const getInboxPreferences = defineRpc({
   name: "guided-review.inbox.preferences",
   input: z.object({}),
@@ -406,6 +415,7 @@ export type SyntaxColors = z.output<typeof SyntaxColorsSchema>;
 export type StartResult = z.output<typeof StartResultSchema>;
 export type StartPhase = (typeof START_PHASES)[number];
 export type LocalReviews = z.output<typeof LocalReviewsSchema>;
+export type ReviewWorkspaces = z.output<typeof ReviewWorkspacesSchema>;
 export type StartProgress = z.output<typeof StartProgressSchema>;
 export type PanelView = z.output<typeof PanelViewSchema>;
 export type GuideSubject = z.output<typeof GuideSubjectSchema>;

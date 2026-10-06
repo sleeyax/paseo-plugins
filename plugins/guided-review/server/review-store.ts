@@ -135,6 +135,10 @@ export class ReviewStore {
     return (await this.#load()).get(id) ?? null;
   }
 
+  async list(): Promise<ReviewRecord[]> {
+    return [...(await this.#load()).values()];
+  }
+
   async findByWorkspace(workspaceId: string): Promise<ReviewRecord | null> {
     for (const record of (await this.#load()).values()) {
       if (record.workspace.id === workspaceId) return record;
