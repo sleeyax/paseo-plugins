@@ -112,7 +112,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
         <View style={{ gap: spacing[3] }}>
           <Header header={panel.data.header} theme={theme} />
           <StaleGuideBanner reviewId={reviewId} header={panel.data.header} theme={theme} regenerate={regenerate} />
-          <ForeignWorkBanner reviewId={reviewId} header={panel.data.header} foreign={panel.data.foreign} colors={colors} />
+          <ForeignWorkBanner reviewId={reviewId} header={panel.data.header} foreign={panel.data.foreign} colors={colors} onScopeChosen={() => void panel.refetch()} />
           {panel.data.note ? <Note color={colors.statusWarning}>{panel.data.note}</Note> : null}
           {drafts ? <DraftsSection control={drafts} colors={colors} /> : null}
           {drafts ? <InlineFinishReview reviewId={reviewId} header={panel.data.header} drafts={drafts} colors={colors} regenerate={regenerate} /> : null}
@@ -141,7 +141,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
   if (shape === null) return frame();
 
   const { reviewId, header, note, foreign, guide } = panel.data;
-  const sidebar = <Sidebar reviewId={reviewId} header={header} note={note} foreign={foreign} drafts={drafts} regenerate={regenerate} theme={theme} />;
+  const sidebar = <Sidebar reviewId={reviewId} header={header} note={note} foreign={foreign} onScopeChosen={() => void panel.refetch()} drafts={drafts} regenerate={regenerate} theme={theme} />;
   const navigator = (
     <View style={{ borderBottomWidth: shape === "two" ? 1 : 0, borderColor: colors.border }}>
       <Strip colors={colors} title="Guide" />

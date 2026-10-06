@@ -18,16 +18,21 @@ export type ForeignWorkBannerProps = {
   header: ReviewHeader;
   foreign: ForeignWorkView | undefined;
   colors: Colors;
+  /** Called once the guide is being written from the other scope, so the panel follows it. */
+  onScopeChosen: () => void;
 };
 
 /**
  * "Commits from other MRs": shown while the change request carries commits of others its target does
  * not have, which the diff, and so the guide, shows as its own. The reviewer can ask the author to
- * take them out with a comment they edit first; their own change request they fix themselves.
+ * take them out with a comment they edit first; their own change request they fix themselves. When
+ * the own work can be told apart, it switches the guide between the whole diff and the own work.
  */
-export function ForeignWorkBanner({ reviewId, header, foreign, colors }: ForeignWorkBannerProps) {
+export function ForeignWorkBanner({ reviewId, header, foreign, colors, onScopeChosen }: ForeignWorkBannerProps) {
   const flat = useFlat();
   const postHeadsUp = useRpc(contracts.postHeadsUp);
+  const chooseScope = useRpc(contracts.chooseScope);
+  const rescope = useMutation({ mutationFn: (scope: ReviewScope) => chooseScope({ reviewId, scope }), onSuccess: onScopeChosen });
   const [writing, setWriting] = useState(false);
   const [posted, setPosted] = useState(false);
   if (foreign === undefined) return null;
@@ -58,6 +63,29 @@ export function ForeignWorkBanner({ reviewId, header, foreign, colors }: Foreign
           </Line>
         </View>
       ))}
+      {foreign.scope === null ? null : (
+        <>
+          <Line colors={colors} muted>
+            {foreign.scope === "own"
+              ? `This guide explains only the ${kind}'s own work; the files only the others change are listed apart.`
+              : "This guide explains the whole diff."}{" "}
+            Switching writes a new guide; what you marked understood carries over where the code is the same.
+          </Line>
+          {rescope.error ? (
+            <Line colors={colors} color={colors.statusDanger}>
+              {rescope.error instanceof Error ? rescope.error.message : String(rescope.error)}
+            </Line>
+          ) : null}
+          <View style={{ alignItems: "flex-start" }}>
+            <Button
+              colors={colors}
+              label={rescope.isPending ? "Switching…" : foreign.scope === "own" ? "Guide the whole diff" : "Guide own work only"}
+              disabled={rescope.isPending}
+              onPress={() => rescope.mutate(foreign.scope === "own" ? "full" : "own")}
+            />
+          </View>
+        </>
+      )}
       {viewerIsAuthor ? (
         <Line colors={colors} muted>
           Retarget it, or bring them into {work.targetBranch}, so the diff shows only your own work.

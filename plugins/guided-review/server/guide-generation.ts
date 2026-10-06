@@ -97,6 +97,25 @@ export class GuideGenerations {
   }
 
   /**
+   * Generates the review's guide again for the scope `record` now has, keeping the ready guide it
+   * replaces at the same head, and the marks made in it, for the new one to carry over.
+   */
+  async rescope(record: ReviewRecord): Promise<GuideState> {
+    const running = this.running(record);
+    if (running) return { status: "generating", agentId: running.agentId };
+    const previous = await this.#store.getGuide(record.id, record.header.headSha);
+    if (previous !== null && isReady(previous) && previous.workspaceId === record.workspace.id) {
+      await this.#store.saveReplaced(record.id, { guide: previous, progress: await this.#store.getProgress(record.id, record.header.headSha) });
+    }
+    return this.again(record);
+  }
+
+  /** What a guide the review's guide at its head would be written from now, as `generate` would write it. */
+  scopeOf(record: ReviewRecord): ReviewScope {
+    return ownWorkOf(record) === null ? "full" : "own";
+  }
+
+  /**
    * Generates the guide as a background job: creates the guide agent on the generation prompt, or
    * takes `agentId`'s, and keeps its validated answer. Returns the generation's state, which is the
    * running one's when this head has one: two panels asking at once must not make two agents.
@@ -109,7 +128,7 @@ export class GuideGenerations {
     const key = `${record.id}@${headSha}`;
     const generation: Generation = { agentId, done: Promise.resolve() };
     const own = ownWorkOf(record);
-    const scope: ReviewScope = own === null ? "full" : "own";
+    const scope = this.scopeOf(record);
     const save = (update: Pick<GuideRecord, "status" | "guide" | "message">) =>
       this.#store.saveGuide(record.id, {
         headSha,
@@ -178,17 +197,20 @@ export class GuideGenerations {
 
   /**
    * Keeps, as the marks of the guide `agentId` just wrote at the review's head, the marks of the
-   * guide at the head before it that hold for code that did not change: see `carryMarks`. Marks at
-   * the old head made in another guide than the one kept there count for nothing, as they do there.
+   * guide before it that hold for code that did not change: see `carryMarks`. That is the guide of
+   * another scope it replaced at this head, if any, else the guide at the head before. Marks made in
+   * another guide than the one kept there count for nothing, as they do there.
    */
   async #carryMarksOver(record: ReviewRecord, agentId: string, guide: LayeredGuide, files: ChangedFile[]): Promise<void> {
-    const from = record.previousHeadSha;
+    const { headSha } = record.header;
+    const replaced = await this.#store.getReplaced(record.id, headSha);
+    const from = replaced !== null && replaced.guide.agentId !== agentId ? headSha : record.previousHeadSha;
     if (from === undefined) return;
     const [before, marks, snapshot, current] = await Promise.all([
-      this.#store.getGuide(record.id, from),
-      this.#store.getProgress(record.id, from),
+      from === headSha ? replaced!.guide : this.#store.getGuide(record.id, from),
+      from === headSha ? replaced!.progress : this.#store.getProgress(record.id, from),
       this.#store.snapshot(record.id, from),
-      this.#store.getProgress(record.id, record.header.headSha),
+      this.#store.getProgress(record.id, headSha),
     ]);
     // A generation picked up again after a restart may have carried them over already.
     if (current?.agentId === agentId) return;

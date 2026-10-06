@@ -225,7 +225,7 @@ export class ReviewService {
       header: record.header,
       guide: await this.#guides.state(record),
       ...(record.note ? { note: record.note } : {}),
-      ...(record.foreign ? { foreign: { work: record.foreign, viewerIsAuthor: viewerIsAuthor(record) } } : {}),
+      ...(record.foreign ? { foreign: { work: record.foreign, viewerIsAuthor: viewerIsAuthor(record), scope: await this.#switchableScope(record) } } : {}),
     };
   }
 
@@ -273,9 +273,20 @@ export class ReviewService {
   async chooseScope({ reviewId, scope }: { reviewId: string; scope: ReviewScope }): Promise<GuideState> {
     const record = await this.#record(reviewId);
     if (!canNarrow(record.foreign)) throw new Error(`The ${changeRequestKind(record.ref.forge)}'s own work cannot be told apart, so its guide is of the whole diff.`);
+    if (this.#guides.running(record)) throw new Error("The guide is being written; choose again once it is done.");
     const chosen: ReviewRecord = { ...record, scope };
     await this.#store.update(chosen);
+    const stored = await this.#store.getGuide(chosen.id, chosen.header.headSha);
+    const written = stored !== null && stored.workspaceId === chosen.workspace.id;
+    if (written && (stored.scope ?? "full") !== this.#guides.scopeOf(chosen)) return this.#guides.rescope(chosen);
     return this.#guides.state(chosen);
+  }
+
+  /** What the guide at the review's head is written from, while the reviewer can switch it: see `ForeignWorkViewSchema`. */
+  async #switchableScope(record: ReviewRecord): Promise<ReviewScope | null> {
+    if (!canNarrow(record.foreign) || this.#guides.running(record)) return null;
+    const stored = await this.#store.getGuide(record.id, record.header.headSha);
+    return stored !== null && stored.workspaceId === record.workspace.id ? (stored.scope ?? "full") : null;
   }
 
   async postHeadsUp({ reviewId, body }: { reviewId: string; body: string }): Promise<null> {

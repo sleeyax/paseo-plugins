@@ -70,6 +70,9 @@ export type ProgressRecord = {
   updatedAt: string;
 };
 
+/** A guide `ReviewStore.saveReplaced` kept, and the marks made in it. */
+export type ReplacedGuide = { guide: GuideRecord; progress: ProgressRecord | null };
+
 /**
  * Where a draft the panel wrote came from: a node or the overview of the guide at `headSha` its agent
  * `agentId` wrote, and the passage of it the reviewer highlighted, if any. Node IDs mean something
@@ -104,6 +107,7 @@ function fromExplained(node: LayeredNode | ExplainedNode): LayeredNode {
 const RECORD_FILE = "review.json";
 const GUIDES = "guides";
 const PROGRESS = "progress";
+const REPLACED = "replaced";
 const REVIEW_BODY_FILE = "review-body.json";
 const DRAFTS_FILE = "drafts.json";
 
@@ -181,6 +185,18 @@ export class ReviewStore {
 
   async saveGuide(id: string, record: GuideRecord): Promise<void> {
     await writeJson(path.join(this.directoryOf(id), GUIDES, `${record.headSha}.json`), record);
+  }
+
+  /**
+   * The ready guide a guide of another scope replaced at the same head, with the marks made in it,
+   * which `saveGuide` would otherwise overwrite before the new guide can carry them over.
+   */
+  async getReplaced(id: string, headSha: string): Promise<ReplacedGuide | null> {
+    return readJson<ReplacedGuide>(path.join(this.directoryOf(id), REPLACED, `${headSha}.json`));
+  }
+
+  async saveReplaced(id: string, replaced: ReplacedGuide): Promise<void> {
+    await writeJson(path.join(this.directoryOf(id), REPLACED, `${replaced.guide.headSha}.json`), replaced);
   }
 
   /** The reviewer's marks in the guide at `headSha`, or null when none were ever made. */

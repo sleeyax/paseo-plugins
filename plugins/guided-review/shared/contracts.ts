@@ -55,8 +55,13 @@ export const BranchStartSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("started"), reviewId: z.string(), progress: StartProgressSchema, note: z.string().nullable() }),
 ]);
 
-/** The other change requests' commits the diff shows as the review's, and whether the reviewer wrote it, so has no one to ask about them. */
-export const ForeignWorkViewSchema = z.object({ work: ForeignWorkSchema, viewerIsAuthor: z.boolean() });
+/**
+ * The other change requests' commits the diff shows as the review's, and whether the reviewer wrote
+ * it, so has no one to ask about them. `scope` is what the guide at the review's head is written
+ * from, while it can be switched: null when its own work cannot be told apart, or no guide is
+ * written or being written there yet.
+ */
+export const ForeignWorkViewSchema = z.object({ work: ForeignWorkSchema, viewerIsAuthor: z.boolean(), scope: z.enum(REVIEW_SCOPES).nullable() });
 
 export const PanelViewSchema = z.discriminatedUnion("status", [
   /** `branch` is set while this workspace's branch is being guided, or once that ended without a guide here. */

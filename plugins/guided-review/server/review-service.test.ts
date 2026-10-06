@@ -281,6 +281,7 @@ test("the panel says which of the PR's commits belong to another PR, and whether
       ownPaths: null,
     },
     viewerIsAuthor: false,
+    scope: null,
   });
 });
 
@@ -389,6 +390,37 @@ test("a guide of the whole diff, chosen, is written from every file and commit",
   assert.doesNotMatch(prompt, /own work only/);
   assert.match(prompt, /### src\/retry\.ts/);
   assert.match(prompt, new RegExp(`- ${FOREIGN.slice(0, 7)} Back off`));
+});
+
+test("switching the guide to the own work writes a new one at the same head, and the marks carry over to the same code", async (t) => {
+  const { service, forge, guideAgents } = await withHost(t);
+  const reviewId = "github/github.com/acme/uploader/7";
+  carryForeignWorkBelowOwn(forge);
+  const progress = await startAndSettle(service, URL);
+  await service.chooseScope({ reviewId, scope: "full" });
+  await service.settled();
+  await service.setUnderstood({ reviewId, headSha: OWN, subjects: [{ kind: "node", nodeId: "uploader" }], understood: true });
+  const full = await service.panel({ workspaceId: progress.workspaceId! });
+  assert.equal(full.status === "ready" ? full.foreign?.scope : undefined, "full");
+
+  const [, uploader] = sampleGuide().nodes;
+  guideAgents.answer = () =>
+    sampleGuideReply({
+      ...sampleGuide(),
+      overview: { ...sampleGuide().overview, attention: [{ nodeId: "own-uploader", reason: "It is all there is." }] },
+      nodes: [{ ...uploader!, id: "own-uploader", dependencies: [] }],
+    });
+  assert.deepEqual(await service.chooseScope({ reviewId, scope: "own" }), { status: "generating", agentId: null });
+  await assert.rejects(service.chooseScope({ reviewId, scope: "full" }), /being written/);
+  await service.settled();
+
+  const own = await service.panel({ workspaceId: progress.workspaceId! });
+  assert.equal(own.status === "ready" ? own.foreign?.scope : undefined, "own");
+  assert.deepEqual(guideAgents.archived, ["agent-1"]);
+  assert.deepEqual((await service.readingProgress({ reviewId }))?.understood, { nodes: ["own-uploader"], files: [] });
+
+  assert.deepEqual(await service.chooseScope({ reviewId, scope: "own" }), own.status === "ready" ? own.guide : null, "the same scope again writes nothing");
+  assert.equal(guideAgents.created.length, 2);
 });
 
 test("a scope is not chosen for a PR whose own work cannot be told apart", async (t) => {
