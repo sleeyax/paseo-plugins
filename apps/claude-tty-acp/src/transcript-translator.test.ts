@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { AgentSideConnection, SessionNotification } from "@agentclientprotocol/sdk";
-import { type ModelFallback, TOOL_CALL_MIRROR_METHOD, TranscriptTranslator } from "./transcript-translator.ts";
+import { BACKGROUND_COMMAND_META, type ModelFallback, TOOL_CALL_MIRROR_METHOD, TranscriptTranslator } from "./transcript-translator.ts";
 
 /**
  * `switchModelsOnFlag` lets Claude retry a message its model's safeguards flagged on a fallback model,
@@ -798,6 +798,7 @@ test("keeps a backgrounded command's card open with what it prints, until its re
   assert.deepEqual(cardUpdates(notifications, "bash-tool"), [
     { status: "in_progress", text: "Running in the background; no output yet.", rawOutput: undefined },
   ]);
+  assert.deepEqual(notifications.at(-1)!.update._meta, { [BACKGROUND_COMMAND_META]: { taskId: "b1", outputFile } });
 
   await writeFile(outputFile, "\x1b[32mpass\x1b[0m one\nprogress 10%\rprogress 100%\n");
   const activityBefore = translator.activityAt;

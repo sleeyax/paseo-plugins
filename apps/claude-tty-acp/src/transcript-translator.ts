@@ -109,6 +109,12 @@ const BACKGROUND_OUTPUT_POLL_MS = 1_000;
 export const TOOL_CALL_MIRROR_METHOD = "_claude_tty/tool_call";
 
 /**
+ * The `_meta` key a background command's card carries its task and output file under.
+ * The plugin opens a subsession for the command from it, since nothing else on a tool call says the command runs on after its launch.
+ */
+export const BACKGROUND_COMMAND_META = "claudeTty/backgroundCommand";
+
+/**
  * A model Claude swapped under a running session, as everything that has to be said about one.
  *
  * It is handed to the runtime rather than emitted here, because what it turns into -- a notice, a card,
@@ -150,6 +156,7 @@ type BackgroundShell = {
 };
 
 type BackgroundShellCard = {
+  taskId: string;
   toolCallId: string;
   outputFile: string | null;
   status: "in_progress" | "completed" | "failed";
@@ -565,7 +572,7 @@ export class TranscriptTranslator {
     // Null for a command an agent backgrounded: the tool call that launched it is in that agent's own
     // transcript, not this session's, and its notification names it by task id rather than by call.
     const card: BackgroundShellCard | null =
-      toolCallId !== null && this.trackingBackgroundWork ? { toolCallId, outputFile, status: "in_progress", output: "" } : null;
+      toolCallId !== null && this.trackingBackgroundWork ? { taskId, toolCallId, outputFile, status: "in_progress", output: "" } : null;
     this.backgroundShells.set(taskId, { outstanding: this.trackingBackgroundWork, card });
     if (toolCallId !== null) this.backgroundShellsByToolCall.set(toolCallId, taskId);
     this.lastBackgroundShellActivity = Date.now();
@@ -724,6 +731,7 @@ export class TranscriptTranslator {
       status: card.status,
       content: text === "" ? [] : [{ type: "content", content: { type: "text", text } }],
       ...(card.status === "failed" ? { rawOutput: { error: text } } : {}),
+      _meta: { [BACKGROUND_COMMAND_META]: { taskId: card.taskId, outputFile: card.outputFile } },
     };
     if (quiet) await this.deliver(update);
     else await this.send(update);
