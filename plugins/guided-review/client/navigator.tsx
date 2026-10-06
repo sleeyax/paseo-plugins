@@ -8,9 +8,6 @@ import { plainText } from "./inline-markdown.ts";
 import { ProgressContext } from "./progress.tsx";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 
-/** Wide enough for a concept's title, narrow enough to leave the detail pane room for a diff. */
-export const NAVIGATOR_WIDTH = 280;
-
 /**
  * The entry the detail pane shows, and the way to show another. It starts where `startEntry` says,
  * and is kept once the progress is known, so marking entries understood never moves the reviewer on

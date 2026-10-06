@@ -7,6 +7,7 @@ import * as contracts from "../shared/contracts.ts";
 import type { GuideState } from "../shared/guide.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { BranchStartView, isBranchRunning } from "./branch-start.tsx";
+import { ResizeHandle, useColumnWidths } from "./column-resize.tsx";
 import { DraftsContext, DraftsSection, useDrafts } from "./drafts.tsx";
 import { GuideView } from "./guide-view.tsx";
 import { FinishBar, FinishReview, InlineFinishReview } from "./finish-review.tsx";
@@ -14,10 +15,10 @@ import { StaleGuideBanner, useRegenerate } from "./head-check.tsx";
 import { Detail } from "./detail.tsx";
 import { EntryLinksContext } from "./entry-links.ts";
 import { FINISH_KEY, guideGroups, layoutFor, OVERVIEW_KEY } from "./guide-entries.ts";
-import { Navigator, NAVIGATOR_WIDTH, useSelection } from "./navigator.tsx";
+import { Navigator, useSelection } from "./navigator.tsx";
 import { ProgressContext, useProgress } from "./progress.tsx";
 import { FlatContext, Strip } from "./section.tsx";
-import { Header, Note, Sidebar, SIDEBAR_WIDTH } from "./sidebar.tsx";
+import { Header, Note, Sidebar } from "./sidebar.tsx";
 import { fontSize, leading, MAX_PANEL_WIDTH, spacing } from "./theme.ts";
 import { onVisibleWidth } from "./visible-width.ts";
 
@@ -74,6 +75,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
   const [width, setWidth] = useState<number | null>(null);
   // Until the web panel has been measured nothing is drawn, rather than the stack for a frame.
   const shape = layout.platform !== "web" ? "stack" : width === null ? null : layoutFor(width, layout.platform);
+  const columns = useColumnWidths(workspaceId, shape, width);
   // One element measures the panel whatever is drawn in it, so switching layouts never remounts what reports the width.
   const frame = (children?: React.ReactNode) => (
     <View onLayout={onVisibleWidth(setWidth)} style={{ flex: 1, backgroundColor: colors.surface0 }}>
@@ -143,7 +145,8 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
       )}
     </View>
   );
-  const divider = { borderColor: colors.border, flexGrow: 0, flexShrink: 0 } as const;
+  // Above the detail pane, so the half of a handle that overhangs it takes the pointer.
+  const divider = { borderColor: colors.border, flexGrow: 0, flexShrink: 0, zIndex: 1 } as const;
   const finishReview = drafts ? (
     <FinishReview reviewId={reviewId} header={header} drafts={drafts} colors={colors} regenerate={regenerate} onClose={() => select(lastEntry.current)} />
   ) : null;
@@ -165,14 +168,18 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
           <DraftsContext.Provider value={drafts}>
             <EntryLinksContext.Provider value={guide.status === "ready" ? links : null}>
               {shape === "three" ? (
-                <ScrollView style={{ ...divider, width: NAVIGATOR_WIDTH, borderRightWidth: 1 }}>{navigator}</ScrollView>
+                <View style={{ ...divider, width: columns.drawn.navigator, borderRightWidth: 1 }}>
+                  <ScrollView style={{ flex: 1 }}>{navigator}</ScrollView>
+                  <ResizeHandle control={columns.handle("navigator")} colors={colors} />
+                </View>
               ) : (
-                <View style={{ ...divider, width: SIDEBAR_WIDTH, borderRightWidth: 1 }}>
+                <View style={{ ...divider, width: columns.drawn.sidebar, borderRightWidth: 1 }}>
                   <ScrollView style={{ flex: 1 }}>
                     {navigator}
                     {sidebar}
                   </ScrollView>
                   {finishBar}
+                  <ResizeHandle control={columns.handle("sidebar")} colors={colors} />
                 </View>
               )}
               {guide.status === "ready" ? (
@@ -194,9 +201,10 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
                 </ScrollView>
               )}
               {shape === "three" ? (
-                <View style={{ ...divider, width: SIDEBAR_WIDTH, borderLeftWidth: 1 }}>
+                <View style={{ ...divider, width: columns.drawn.sidebar, borderLeftWidth: 1 }}>
                   <ScrollView style={{ flex: 1 }}>{sidebar}</ScrollView>
                   {finishBar}
+                  <ResizeHandle control={columns.handle("sidebar")} colors={colors} />
                 </View>
               ) : null}
             </EntryLinksContext.Provider>

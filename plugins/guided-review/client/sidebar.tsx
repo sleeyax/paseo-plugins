@@ -11,9 +11,6 @@ import { ProgressSummary } from "./progress.tsx";
 import { Section } from "./section.tsx";
 import { fontSize, leading, radius, spacing } from "./theme.ts";
 
-/** Wide enough for a draft card's text and the progress bars, narrow enough to leave the guide its room. */
-export const SIDEBAR_WIDTH = 360;
-
 export type SidebarProps = {
   reviewId: string;
   header: ReviewHeader;
