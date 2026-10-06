@@ -701,12 +701,12 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
      * Publishes every draft note at once with `bulk_publish`, the body as its `note` and the verdict
      * as its `reviewer_state` (`requested_changes`, else `reviewed`). A GitLab older than 19.2 drops
      * both, so there the body is posted as an MR note of its own. An approval is the approve endpoint
-     * after, on the guide's head, which GitLab refuses once the MR has moved on. Every verdict ends with
+     * after, on `approveHeadSha`, which GitLab refuses once the MR has moved past it. Every verdict ends with
      * the reviewer list read for the viewer's state: an Approve or a Comment reports what it found as a
      * step of its own, and a request for changes that did not take is set through GraphQL. Nothing
      * after a failed publish is tried, so no verdict goes out without the comments it was given with.
      */
-    async submitReview(target, { verdict, body }): Promise<SubmitOutcome> {
+    async submitReview(target, { verdict, body, approveHeadSha }): Promise<SubmitOutcome> {
       const { ref } = target;
       const steps = new SubmitSteps();
       const withNote = body !== "" && (await publishesBody(ref));
@@ -729,11 +729,11 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
         else {
           await steps.run("approve", "Approve", async () => {
             try {
-              // The head the guide explained: GitLab answers 409 when the MR's is another.
-              await post(ref, `${await mergeRequest(ref)}/approve`, { sha: target.headSha });
+              // GitLab answers 409 when the MR's head is not `sha`.
+              await post(ref, `${await mergeRequest(ref)}/approve`, approveHeadSha === null ? {} : { sha: approveHeadSha });
             } catch (error) {
               if (error instanceof ForgeError && /HTTP 409/.test(error.message)) {
-                throw new ForgeError("GitLab did not approve, as the MR has commits newer than the guide. Regenerate the guide to approve them.");
+                throw new ForgeError("GitLab did not approve, as the MR got new commits while your review was being submitted. Open Finish review again to see them and approve.");
               }
               throw error;
             }

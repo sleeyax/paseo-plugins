@@ -582,7 +582,7 @@ test("submits the pending review, its comments and body with it, as the verdict 
   for (const { verdict, event, state, label } of cases) {
     const { forge, run } = forgeReplaying([{ stdout: fixture("pending-review.json") }, { stdout: submitted(state) }]);
 
-    const outcome = await forge.submitReview(PR_105_TARGET, { verdict, body: "Reads well.\n\nOne question on the lockfile." });
+    const outcome = await forge.submitReview(PR_105_TARGET, { verdict, body: "Reads well.\n\nOne question on the lockfile.", approveHeadSha: PR_105_TARGET.headSha });
 
     assert.deepEqual(
       graphqlCalls(run),
@@ -603,7 +603,7 @@ test("a submit with nothing pending, like an approval without comments, starts t
     { stdout: submitted("APPROVED") },
   ]);
 
-  await forge.submitReview(PR_105_TARGET, { verdict: "approve", body: "" });
+  await forge.submitReview(PR_105_TARGET, { verdict: "approve", body: "", approveHeadSha: PR_105_TARGET.headSha });
 
   assert.deepEqual(graphqlCalls(run).slice(1), [
     {
@@ -620,7 +620,7 @@ test("a submit GitHub turns down is reported as a failed step in GitHub's words,
     { exitCode: 1, stderr: "gh: Can not request changes on your own pull request\n" },
   ]);
 
-  const outcome = await forge.submitReview(PR_105_TARGET, { verdict: "request-changes", body: "Please split this." });
+  const outcome = await forge.submitReview(PR_105_TARGET, { verdict: "request-changes", body: "Please split this.", approveHeadSha: PR_105_TARGET.headSha });
 
   assert.deepEqual(outcome, {
     published: false,

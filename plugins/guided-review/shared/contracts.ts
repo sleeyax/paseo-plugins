@@ -341,10 +341,12 @@ export const saveReviewBody = defineRpc({
  * Publishes the drafts and the body with the verdict. The head is checked with the forge again first,
  * and a verdict not on offer then is refused with nothing sent; `headSha` is the head of the guide
  * the panel showed, and one the review has since been regenerated away from is refused too.
+ * `forgeHeadSha` is the forge head the panel's Finish review step read, and an Approve or Request
+ * changes is refused when the head now warns of another, so it goes out only under the warning shown.
  */
 export const submitReview = defineRpc({
   name: "guided-review.review.submit",
-  input: z.object({ reviewId: z.string(), headSha: z.string(), verdict: VerdictSchema, body: z.string() }),
+  input: z.object({ reviewId: z.string(), headSha: z.string(), forgeHeadSha: z.string().nullable(), verdict: VerdictSchema, body: z.string() }),
   output: SubmitResultSchema,
 });
 

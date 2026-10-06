@@ -118,9 +118,9 @@ test("on GitHub a node's comment is kept here until a submit posts it as a comme
     paragraphs: [{ id: retry.id, body: "About the retry handling: why jitter at all?" }],
   });
 
-  await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Looks good.\n\nTwo questions." });
+  await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "comment", body: "Looks good.\n\nTwo questions." });
   assert.deepEqual(forge.comments, [{ url, body: "About the retry handling: why jitter at all?" }]);
-  assert.deepEqual(forge.submissions[0]?.submission, { verdict: "comment", body: "Looks good.\n\nTwo questions." });
+  assert.deepEqual(forge.submissions[0]?.submission, { verdict: "comment", body: "Looks good.\n\nTwo questions.", approveHeadSha: HEAD });
   assert.deepEqual(await kept(host), { links: {}, paragraphs: [] }, "a published comment is gone");
 });
 
@@ -130,7 +130,7 @@ test("on GitHub each node comment is posted on its own before the review, which 
   await commentOn(host, "retry-policy", "About the retry handling: why full jitter?");
   await commentOn(host, "uploader", "About the upload loop:\n\nis every attempt logged?");
 
-  const result = await service.submit({ reviewId, headSha: HEAD, verdict: "approve", body: "Looks good overall." });
+  const result = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "approve", body: "Looks good overall." });
 
   assert.deepEqual(result, {
     status: "submitted",
@@ -145,7 +145,7 @@ test("on GitHub each node comment is posted on its own before the review, which 
     { url, body: "About the retry handling: why full jitter?" },
     { url, body: "About the upload loop:\n\nis every attempt logged?" },
   ]);
-  assert.deepEqual(forge.submissions[0]?.submission, { verdict: "approve", body: "Looks good overall." });
+  assert.deepEqual(forge.submissions[0]?.submission, { verdict: "approve", body: "Looks good overall.", approveHeadSha: HEAD });
   assert.deepEqual(await kept(host), { links: {}, paragraphs: [] });
   assert.deepEqual((await service.listDrafts({ reviewId })).drafts, []);
 });
@@ -157,7 +157,7 @@ test("on GitHub a comment that is not posted stops the submit, and trying again 
   const upload = await commentOn(host, "uploader", "About the upload loop: is every attempt logged?");
   forge.failComment = { after: 1, error: new Error("gh failed: HTTP 502") };
 
-  const failed = await service.submit({ reviewId, headSha: HEAD, verdict: "approve", body: "Looks good overall." });
+  const failed = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "approve", body: "Looks good overall." });
 
   assert.deepEqual(failed, {
     status: "partial",
@@ -172,7 +172,7 @@ test("on GitHub a comment that is not posted stops the submit, and trying again 
   assert.deepEqual((await service.listDrafts({ reviewId })).drafts, [upload], "the posted comment is no longer a draft");
   assert.equal((await service.finish({ reviewId })).body, "Looks good overall.");
 
-  const retried = await service.submit({ reviewId, headSha: HEAD, verdict: "approve", body: "Looks good overall." });
+  const retried = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "approve", body: "Looks good overall." });
 
   assert.equal(retried.status, "submitted");
   assert.deepEqual(forge.comments, [
@@ -187,7 +187,7 @@ test("on GitHub a Comment with nothing but node comments posts them and no empty
   const { forge, service, url, reviewId } = host;
   await commentOn(host, "retry-policy", "About the retry handling: why full jitter?");
 
-  const result = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "" });
+  const result = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "comment", body: "" });
 
   assert.equal(result.status, "submitted");
   assert.equal(result.published, true);
@@ -203,10 +203,10 @@ test("on GitLab the node comments are MR-level drafts the publish takes along, s
   await commentOn(host, "retry-policy", "About the retry handling: why full jitter?");
   await service.saveReviewBody({ reviewId, body: "Looks good overall." });
 
-  const result = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Looks good overall." });
+  const result = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "comment", body: "Looks good overall." });
 
   assert.equal(result.status, "submitted");
-  assert.deepEqual(forge.submissions[0]?.submission, { verdict: "comment", body: "Looks good overall." });
+  assert.deepEqual(forge.submissions[0]?.submission, { verdict: "comment", body: "Looks good overall.", approveHeadSha: HEAD });
   assert.deepEqual(await kept(host), { links: {}, paragraphs: [] });
   assert.deepEqual((await service.listDrafts({ reviewId })).drafts, []);
 });
@@ -221,7 +221,7 @@ test("on GitLab a submit that did not publish keeps every node comment and link"
     steps: [{ id: "publish", label: "Publish your drafts", status: "failed", message: "HTTP 500" }],
   };
 
-  const result = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Looks good overall." });
+  const result = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "comment", body: "Looks good overall." });
 
   assert.equal(result.status, "failed");
   assert.deepEqual(await kept(host), before);

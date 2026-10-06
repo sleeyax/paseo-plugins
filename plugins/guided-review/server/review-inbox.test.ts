@@ -181,7 +181,7 @@ test("a GitLab review published from here says whether the head moved since, ove
   gitlab.reviewRequests = [listed("gitlab", [request(GITLAB_URL, { state: "commented", changedSinceReview: null })])];
   assert.equal((await service.inbox()).items[0]?.changedSinceReview, null, "nothing published from here yet");
 
-  const submitted = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Reads well." });
+  const submitted = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "comment", body: "Reads well." });
   assert.equal(submitted.status, "submitted");
 
   gitlab.reviewRequests = [listed("gitlab", [request(GITLAB_URL, { state: "commented", changedSinceReview: true })])];

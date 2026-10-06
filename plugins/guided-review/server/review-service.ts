@@ -39,7 +39,7 @@ import { InboxPreferencesFile } from "./inbox-preferences.ts";
 import { isFinished, ReviewPreparation, startProgressAt } from "./review-preparation.ts";
 import { questionPrompt } from "./question-prompt.ts";
 import { ReviewStore, type ProgressRecord, type ReviewRecord } from "./review-store.ts";
-import { verdictOptions } from "./submit-rules.ts";
+import { verdictOptions, warnedOfAnotherHead } from "./submit-rules.ts";
 import { WordingSchema, wordingPrompt } from "./wording-prompt.ts";
 import type { ReviewWorkspace, WorkspaceCheckout, WorkspacePort } from "./workspaces/port.ts";
 
@@ -600,10 +600,22 @@ export class ReviewService {
 
   /**
    * Publishes the drafts and the body with the verdict. The head is asked of the forge again here,
-   * whatever the panel last heard, so a verdict never goes out on code the guide did not explain.
+   * whatever the panel last heard, so a verdict never goes out on code the reviewer was not warned of.
    * The forge's steps are reported one by one, since a later one can fail after an earlier landed.
    */
-  async submit({ reviewId, headSha, verdict, body }: { reviewId: string; headSha: string; verdict: Verdict; body: string }): Promise<SubmitResult> {
+  async submit({
+    reviewId,
+    headSha,
+    forgeHeadSha,
+    verdict,
+    body,
+  }: {
+    reviewId: string;
+    headSha: string;
+    forgeHeadSha: string | null;
+    verdict: Verdict;
+    body: string;
+  }): Promise<SubmitResult> {
     const record = await this.#record(reviewId);
     const forge = this.#forgeFor(record.ref);
     const text = body.trim();
@@ -615,8 +627,12 @@ export class ReviewService {
     }
     const option = verdicts.find((candidate) => candidate.verdict === verdict);
     if (!option?.allowed) return { status: "refused", message: option?.reason ?? "That verdict is not on offer.", verdicts };
+    if (verdict !== "comment" && warnedOfAnotherHead(head, forgeHeadSha)) {
+      const noun = record.ref.forge === "gitlab" ? "MR" : "PR";
+      return { status: "refused", message: `The ${noun} changed again since Finish review read it. Check the warning and submit again.`, verdicts };
+    }
 
-    const outcome = await this.#drafts.submit(record, forge, verdict, text);
+    const outcome = await this.#drafts.submit(record, forge, { verdict, body: text, approveHeadSha: head.forgeHeadSha });
     if (outcome.published) {
       const latest = (await this.#store.get(reviewId)) ?? record;
       await this.#store.update({ ...latest, submittedHeadSha: record.header.headSha });

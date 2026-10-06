@@ -62,7 +62,7 @@ test("on someone else's open PR at the guide's head every verdict is on offer, a
   assert.deepEqual(allowed(finish.verdicts), ["approve", "request-changes", "comment"]);
   assert.equal(finish.head.moved, false);
 
-  const result = await service.submit({ reviewId, headSha: HEAD, verdict: "approve", body: "  Reads well.\n" });
+  const result = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "approve", body: "  Reads well.\n" });
 
   assert.deepEqual(result, {
     status: "submitted",
@@ -72,7 +72,7 @@ test("on someone else's open PR at the guide's head every verdict is on offer, a
   assert.deepEqual(forge.submissions, [
     {
       target: { ref: changeRequest.ref, baseSha: changeRequest.baseSha, startSha: changeRequest.startSha, headSha: HEAD },
-      submission: { verdict: "approve", body: "Reads well." },
+      submission: { verdict: "approve", body: "Reads well.", approveHeadSha: HEAD },
     },
   ]);
 });
@@ -87,15 +87,16 @@ test("on the reviewer's own PR only Comment is on offer, and an approval is refu
     verdict: "approve",
     allowed: false,
     reason: "This is your own PR, so your review can only comment.",
+    warning: null,
     regenerate: false,
   });
 
-  const refused = await service.submit({ reviewId, headSha: HEAD, verdict: "request-changes", body: "" });
+  const refused = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "request-changes", body: "" });
   assert.equal(refused.status, "refused");
   assert.equal(refused.status === "refused" && refused.message, "This is your own PR, so your review can only comment.");
   assert.deepEqual(forge.submissions, []);
 
-  const commented = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Notes to self." });
+  const commented = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "comment", body: "Notes to self." });
   assert.equal(commented.status, "submitted");
   assert.equal(forge.submissions.length, 1);
 });
@@ -111,9 +112,9 @@ test("on a closed or merged PR only Comment is on offer, and drafting is still a
     assert.equal(finish.verdicts[0]?.reason, `This PR is ${state}, so your review can only comment.`, state);
 
     await service.createDraft({ reviewId, headSha: HEAD, location: { kind: "file", path: "src/retry.ts" }, body: "Worth a follow-up." });
-    const refused = await service.submit({ reviewId, headSha: HEAD, verdict: "approve", body: "" });
+    const refused = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "approve", body: "" });
     assert.equal(refused.status, "refused", state);
-    const commented = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "" });
+    const commented = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "comment", body: "" });
     assert.equal(commented.status, "submitted", state);
     assert.deepEqual(
       forge.submissions.map((submission) => submission.submission.verdict),
@@ -123,64 +124,89 @@ test("on a closed or merged PR only Comment is on offer, and drafting is still a
   }
 });
 
-test("a head moved since the guide holds Approve and Request changes back with an offer to regenerate; Comment remains", async (t) => {
+test("a head moved since the guide leaves every verdict on offer, warning of the new commits and offering to regenerate", async (t) => {
   const { service, forge, reviewId, url, changeRequest } = await withReview(t);
   forge.changeRequests.set(url, { ...changeRequest, headSha: PUSHED });
+  forge.commitsSinceAnswer = { kind: "after", count: 3 };
 
-  const finish = await service.finish({ reviewId });
-  assert.deepEqual(allowed(finish.verdicts), ["comment"]);
-  assert.deepEqual(finish.verdicts[1], {
-    verdict: "request-changes",
-    allowed: false,
-    reason: "The PR has new commits since this guide, so a verdict would apply to code it did not explain. Regenerate the guide to approve or request changes.",
-    regenerate: true,
-  });
-  assert.deepEqual(finish.head, { guideHeadSha: HEAD, forgeHeadSha: PUSHED, moved: true, newCommits: 1, rewritten: false, state: "open", message: null });
-
-  const refused = await service.submit({ reviewId, headSha: HEAD, verdict: "approve", body: "LGTM" });
-  assert.equal(refused.status, "refused");
-  const commented = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Looking at the new commits next." });
-  assert.equal(commented.status, "submitted");
-  // The comment goes on the head the guide explained, which is where the drafts were anchored.
-  assert.equal(forge.submissions[0]?.target.headSha, HEAD);
-});
-
-test("the head is asked of the forge again at submit, so a push after the step opened still holds a verdict back", async (t) => {
-  const { service, forge, reviewId, url, changeRequest } = await withReview(t);
   const finish = await service.finish({ reviewId });
   assert.deepEqual(allowed(finish.verdicts), ["approve", "request-changes", "comment"]);
+  assert.deepEqual(finish.verdicts[1], {
+    verdict: "request-changes",
+    allowed: true,
+    reason: null,
+    warning: "3 new commits were pushed since this guide (bbbbbbb → ddddddd), so a verdict would apply to code it did not explain. Regenerate the guide to read them first.",
+    regenerate: true,
+  });
+  assert.deepEqual(finish.verdicts[2], { verdict: "comment", allowed: true, reason: null, warning: null, regenerate: false });
+  assert.deepEqual(finish.head, { guideHeadSha: HEAD, forgeHeadSha: PUSHED, moved: true, newCommits: 3, rewritten: false, state: "open", message: null });
+
+  const approved = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: PUSHED, verdict: "approve", body: "LGTM" });
+  assert.equal(approved.status, "submitted");
+  // The review stays on the head the guide explained, where the drafts were anchored; an approval names the forge's.
+  assert.equal(forge.submissions[0]?.target.headSha, HEAD);
+  assert.deepEqual(forge.submissions[0]?.submission, { verdict: "approve", body: "LGTM", approveHeadSha: PUSHED });
+});
+
+test("a branch rewritten since the guide says so rather than counting", async (t) => {
+  const { service, forge, reviewId, url, changeRequest } = await withReview(t, { kind: "gitlab" });
+  forge.changeRequests.set(url, { ...changeRequest, headSha: PUSHED });
+  forge.commitsSinceAnswer = { kind: "rewritten" };
+
+  const finish = await service.finish({ reviewId });
+
+  assert.equal(
+    finish.verdicts[0]?.warning,
+    "The branch was rewritten since this guide (bbbbbbb → ddddddd), so a verdict would apply to code it did not explain. Regenerate the guide to read them first.",
+  );
+});
+
+test("a push after the step opened refuses a verdict once, so it goes out only under the warning the reviewer saw", async (t) => {
+  const { service, forge, reviewId, url, changeRequest } = await withReview(t);
+  const finish = await service.finish({ reviewId });
+  assert.equal(finish.verdicts[0]?.warning, null);
   const reads = forge.headReads;
 
   forge.changeRequests.set(url, { ...changeRequest, headSha: PUSHED });
-  const result = await service.submit({ reviewId, headSha: HEAD, verdict: "approve", body: "LGTM" });
+  const refused = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: finish.head.forgeHeadSha, verdict: "approve", body: "LGTM" });
 
   assert.equal(forge.headReads, reads + 1);
-  assert.equal(result.status, "refused");
-  assert.equal(result.status === "refused" && result.verdicts.find((option) => option.verdict === "approve")?.regenerate, true);
+  assert.equal(refused.status, "refused");
+  assert.equal(refused.status === "refused" && refused.message, "The PR changed again since Finish review read it. Check the warning and submit again.");
+  assert.match(refused.status === "refused" ? (refused.verdicts[0]?.warning ?? "") : "", /new commit was pushed/);
   assert.deepEqual(forge.submissions, []);
+
+  const commented = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: finish.head.forgeHeadSha, verdict: "comment", body: "" });
+  assert.equal(commented.status, "submitted", "a comment is never held back by the head");
+  const approved = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: PUSHED, verdict: "approve", body: "LGTM" });
+  assert.equal(approved.status, "submitted");
 });
 
-test("a head the forge cannot be asked about holds a verdict back, since it may have moved; Comment remains", async (t) => {
-  const { service, forge, reviewId } = await withReview(t);
+test("a head the forge cannot be asked about leaves every verdict on offer with a warning, and an approval names no head", async (t) => {
+  const { service, forge, reviewId } = await withReview(t, { kind: "gitlab" });
 
-  forge.failFetchHead = new ForgeError("gh failed: connection reset");
-  const refused = await service.submit({ reviewId, headSha: HEAD, verdict: "request-changes", body: "Please split this." });
-  assert.equal(refused.status, "refused");
-  assert.equal(
-    refused.status === "refused" && refused.message,
-    "Could not check https://github.com/acme/uploader/pull/7 for new commits: gh failed: connection reset. Until it can be, your review can only comment, since a verdict must apply to the code the guide explained.",
-  );
-  assert.equal(refused.status === "refused" && refused.verdicts.find((option) => option.verdict === "approve")?.regenerate, false);
+  forge.failFetchHead = new ForgeError("glab failed: connection reset");
+  const finish = await service.finish({ reviewId });
+  assert.deepEqual(allowed(finish.verdicts), ["approve", "request-changes", "comment"]);
+  assert.deepEqual(finish.verdicts[0], {
+    verdict: "approve",
+    allowed: true,
+    reason: null,
+    warning:
+      "Could not check https://gitlab.com/acme/uploader/-/merge_requests/7 for new commits: glab failed: connection reset. It may have commits the guide did not explain, which a verdict would apply to as well.",
+    regenerate: false,
+  });
 
-  forge.failFetchHead = new ForgeError("gh failed: connection reset");
-  const commented = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Please split this." });
-  assert.equal(commented.status, "submitted");
+  forge.failFetchHead = new ForgeError("glab failed: connection reset");
+  const approved = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: null, verdict: "approve", body: "LGTM" });
+  assert.equal(approved.status, "submitted");
+  assert.deepEqual(forge.submissions[0]?.submission, { verdict: "approve", body: "LGTM", approveHeadSha: null });
 });
 
 test("a submit from a guide the review was regenerated away from is refused", async (t) => {
   const { service, forge, reviewId } = await withReview(t);
 
-  const result = await service.submit({ reviewId, headSha: "e".repeat(40), verdict: "comment", body: "" });
+  const result = await service.submit({ reviewId, headSha: "e".repeat(40), forgeHeadSha: HEAD, verdict: "comment", body: "" });
 
   assert.equal(result.status, "refused");
   assert.match(result.status === "refused" ? result.message : "", /regenerated for bbbbbbb/);
@@ -196,7 +222,7 @@ test("a submit whose later steps fail says which landed and which did not", asyn
   ];
   forge.submitOutcome = { published: true, steps };
 
-  const partial = await service.submit({ reviewId, headSha: HEAD, verdict: "approve", body: "LGTM" });
+  const partial = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "approve", body: "LGTM" });
 
   assert.deepEqual(partial, { status: "partial", published: true, steps });
 
@@ -204,7 +230,7 @@ test("a submit whose later steps fail says which landed and which did not", asyn
     published: false,
     steps: [{ id: "submit", label: "Publish the review and approve", status: "failed", message: "gh failed: Something went wrong" }],
   };
-  const failed = await service.submit({ reviewId, headSha: HEAD, verdict: "approve", body: "LGTM" });
+  const failed = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "approve", body: "LGTM" });
   assert.deepEqual(failed, {
     status: "failed",
     published: false,
@@ -237,11 +263,11 @@ for (const kind of ["github", "gitlab"] as const) {
       published: false,
       steps: [{ id: "publish", label: "Publish the drafts and the review body", status: "failed", message: "HTTP 500" }],
     };
-    const failed = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Mostly questions, and one ask." });
+    const failed = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "comment", body: "Mostly questions, and one ask." });
     assert.equal(failed.status, "failed");
     assert.equal((await service.finish({ reviewId })).body, "Mostly questions, and one ask.");
 
-    const submitted = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "Mostly questions, and one ask." });
+    const submitted = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "comment", body: "Mostly questions, and one ask." });
     assert.equal(submitted.status, "submitted");
     assert.equal(forge.submissions[1]?.submission.body, "Mostly questions, and one ask.");
     assert.equal((await service.finish({ reviewId })).body, "", "a published body is gone");
@@ -260,20 +286,18 @@ test("on an MR the reasons say MR", async (t) => {
   assert.equal(finish.verdicts[0]?.reason, "This is your own MR, so your review can only comment.");
 });
 
-test("on a merged MR, or one pushed to since the guide, only Comment goes out, with the body kept here", async (t) => {
-  for (const change of [{ state: "merged" as const }, { headSha: PUSHED }]) {
-    const { service, forge, reviewId, url, changeRequest } = await withReview(t, { kind: "gitlab" });
-    forge.changeRequests.set(url, { ...changeRequest, ...change });
-    await service.saveReviewBody({ reviewId, body: "After the fact." });
+test("on a merged MR only Comment goes out, with the body kept here", async (t) => {
+  const { service, forge, reviewId, url, changeRequest } = await withReview(t, { kind: "gitlab" });
+  forge.changeRequests.set(url, { ...changeRequest, state: "merged" });
+  await service.saveReviewBody({ reviewId, body: "After the fact." });
 
-    const refused = await service.submit({ reviewId, headSha: HEAD, verdict: "request-changes", body: "After the fact." });
-    assert.equal(refused.status, "refused");
-    assert.equal(forge.submissions.length, 0, "nothing was sent");
+  const refused = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "request-changes", body: "After the fact." });
+  assert.equal(refused.status, "refused");
+  assert.equal(forge.submissions.length, 0, "nothing was sent");
 
-    const commented = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "After the fact." });
-    assert.equal(commented.status, "submitted");
-    assert.deepEqual(forge.submissions[0]?.submission, { verdict: "comment", body: "After the fact." });
-  }
+  const commented = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "comment", body: "After the fact." });
+  assert.equal(commented.status, "submitted");
+  assert.deepEqual(forge.submissions[0]?.submission, { verdict: "comment", body: "After the fact.", approveHeadSha: HEAD });
 });
 
 test("a GitLab submit that published the drafts but not the body keeps the body for another try", async (t) => {
@@ -286,7 +310,7 @@ test("a GitLab submit that published the drafts but not the body keeps the body 
     ],
   };
 
-  const result = await service.submit({ reviewId, headSha: HEAD, verdict: "comment", body: "One question." });
+  const result = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "comment", body: "One question." });
 
   assert.equal(result.status, "partial");
   assert.equal((await service.finish({ reviewId })).body, "One question.");

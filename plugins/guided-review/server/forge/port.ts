@@ -79,7 +79,11 @@ export interface Forge {
   listReviewRequests(): Promise<ReviewRequestHost[]>;
 }
 
-export type ReviewSubmission = { verdict: Verdict; body: string };
+/**
+ * `approveHeadSha` is the head the forge had when the submit checked it, which an approval on GitLab
+ * names so a push after that check is refused; null when it could not be checked, so it names none.
+ */
+export type ReviewSubmission = { verdict: Verdict; body: string; approveHeadSha: string | null };
 
 /**
  * How a submit went, step by step. `published` is whether the drafts and the body went out, so

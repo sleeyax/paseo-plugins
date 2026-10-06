@@ -5,13 +5,15 @@ export const VERDICTS = ["approve", "request-changes", "comment"] as const;
 
 export const VerdictSchema = z.enum(VERDICTS);
 
-/** A verdict as the Finish review step offers it: on offer, or not and why. */
+/** A verdict as the Finish review step offers it: on offer, or not and why, and what to know before sending it. */
 export const VerdictOptionSchema = z.object({
   verdict: VerdictSchema,
   allowed: z.boolean(),
   /** Why the verdict is not on offer, as a sentence; null when it is. */
   reason: z.string().nullable(),
-  /** Held back only because the head moved since the guide was written, which Regenerate answers. */
+  /** Why the verdict may apply to code the guide did not explain, as a sentence; null when it cannot. */
+  warning: z.string().nullable(),
+  /** The head moved since the guide was written, which Regenerate answers. */
   regenerate: z.boolean(),
 });
 

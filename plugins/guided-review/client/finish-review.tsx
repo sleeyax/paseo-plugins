@@ -99,7 +99,8 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate, onC
     },
   });
   const submit = useMutation({
-    mutationFn: (verdict: Verdict) => submitReview({ reviewId, headSha: header.headSha, verdict, body }),
+    mutationFn: (verdict: Verdict) =>
+      submitReview({ reviewId, headSha: header.headSha, forgeHeadSha: finish.data?.head.forgeHeadSha ?? null, verdict, body }),
     onMutate: () => {
       setResult(null);
       setNotice(null);
@@ -132,6 +133,7 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate, onC
 
   const verdicts = finish.data?.verdicts ?? [];
   const reasons = [...new Set(verdicts.flatMap((option) => (option.reason === null ? [] : [option.reason])))];
+  const warnings = [...new Set(verdicts.flatMap((option) => (option.warning === null ? [] : [option.warning])))];
   const offerRegenerate = verdicts.some((option) => option.regenerate);
   const error = [save.error, submit.error, discard.error].find((failure) => failure);
 
@@ -192,6 +194,11 @@ export function FinishReview({ reviewId, header, drafts, colors, regenerate, onC
             drafts.drafts.map((draft) => <DraftCard key={draft.id} control={drafts} draft={draft} place="finish" colors={colors} showPath />)
           )}
 
+          {warnings.map((warning) => (
+            <Text key={warning} style={{ ...small, color: colors.statusWarning }}>
+              {warning}
+            </Text>
+          ))}
           <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing[2] }}>
             {verdicts.map((option) => (
               <Button small

@@ -743,7 +743,7 @@ test("a request for changes publishes the drafts with the body and the state, an
     requestedChanges(),
   ]);
 
-  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: BODY });
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: BODY, approveHeadSha: MR_3931_TARGET.headSha });
 
   assert.deepEqual(sent(run), [
     ["api", "--hostname", "gitlab.com", "version"],
@@ -769,7 +769,7 @@ test("a request for changes GitLab recorded with the publish is not sent again",
     reviewers("requested_changes"),
   ]);
 
-  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: BODY });
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: BODY, approveHeadSha: MR_3931_TARGET.headSha });
 
   assert.equal(run.calls.length, 6, "no GraphQL call");
   assert.deepEqual(sent(run)[2]?.at(-1), { note: BODY, reviewer_state: "requested_changes" });
@@ -791,7 +791,7 @@ test("a GitLab older than 19.2, which drops the body and the state on publish, g
     requestedChanges(),
   ]);
 
-  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: BODY });
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: BODY, approveHeadSha: MR_3931_TARGET.headSha });
 
   assert.deepEqual(sent(run).slice(2), [
     // No `note`: were this GitLab to take it after all, the body would go out twice.
@@ -818,7 +818,7 @@ test("a GitLab whose version cannot be read is taken for an old one, so the body
     reviewers("reviewed"),
   ]);
 
-  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "comment", body: BODY });
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "comment", body: BODY, approveHeadSha: MR_3931_TARGET.headSha });
 
   assert.deepEqual(sent(run).slice(2), [
     ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${DRAFT_NOTES}/bulk_publish`, { reviewer_state: "reviewed" }],
@@ -832,7 +832,7 @@ test("a GitLab whose version cannot be read is taken for an old one, so the body
   });
 });
 
-test("an approval publishes the drafts as reviewed, approves the head the guide explained, and confirms the state in the reviewer list", async () => {
+test("an approval publishes the drafts as reviewed, approves the head it was given, and confirms the state in the reviewer list", async () => {
   const { forge, run } = forgeReplaying([
     LOGGED_IN,
     version("19.5.0-pre"),
@@ -843,7 +843,7 @@ test("an approval publishes the drafts as reviewed, approves the head the guide 
     reviewers("approved"),
   ]);
 
-  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "approve", body: BODY });
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "approve", body: BODY, approveHeadSha: MR_3931_TARGET.headSha });
 
   assert.deepEqual(sent(run).slice(2), [
     ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${DRAFT_NOTES}/bulk_publish`, { note: BODY, reviewer_state: "reviewed" }],
@@ -860,7 +860,7 @@ test("an approval publishes the drafts as reviewed, approves the head the guide 
 test("a comment without a body publishes the drafts as reviewed, without asking the version, and says a viewer who is no reviewer has no state", async () => {
   const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, {}, { stdout: fixture("user.json") }, reviewers(null)]);
 
-  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "comment", body: "" });
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "comment", body: "", approveHeadSha: MR_3931_TARGET.headSha });
 
   assert.deepEqual(sent(run), [
     ["api", "--hostname", "gitlab.com", "projects/gitlab-org%2Fcli"],
@@ -903,7 +903,7 @@ test("an Approve or a Comment whose state did not take, or whose reviewer list c
   for (const { verdict, answers, message } of cases) {
     const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, {}, ...answers]);
 
-    const outcome = await forge.submitReview(MR_3931_TARGET, { verdict, body: "" });
+    const outcome = await forge.submitReview(MR_3931_TARGET, { verdict, body: "", approveHeadSha: MR_3931_TARGET.headSha });
 
     assert.equal(run.calls.length, 3 + answers.length, "no GraphQL call");
     assert.equal(outcome.published, true);
@@ -923,7 +923,7 @@ test("a request for changes the GraphQL mutation turns down with HTTP 200 and er
     requestedChanges(["Reviewer not found"]),
   ]);
 
-  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: BODY });
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: BODY, approveHeadSha: MR_3931_TARGET.headSha });
 
   assert.equal(outcome.published, true);
   assert.deepEqual(outcome.steps.at(-1), {
@@ -944,7 +944,7 @@ test("a request for changes whose reviewer list cannot be read is set through Gr
     { stdout: JSON.stringify({ errors: [{ message: "Field 'mergeRequestRequestChanges' doesn't exist on type 'Mutation'" }] }) },
   ]);
 
-  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: "" });
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "request-changes", body: "", approveHeadSha: MR_3931_TARGET.headSha });
 
   assert.deepEqual(run.calls.at(-1)?.args, REQUEST_CHANGES_CALL);
   assert.deepEqual(
@@ -966,7 +966,7 @@ test("a publish GitLab turns down leaves the drafts pending and tries nothing af
       { exitCode: 1, stderr: "glab: 403 Forbidden (HTTP 403)\n" },
     ]);
 
-    const outcome = await forge.submitReview(MR_3931_TARGET, { verdict, body: BODY });
+    const outcome = await forge.submitReview(MR_3931_TARGET, { verdict, body: BODY, approveHeadSha: MR_3931_TARGET.headSha });
 
     assert.equal(run.calls.length, 4, verdict);
     const notTried = "Not tried, since your drafts were not published.";
@@ -1002,7 +1002,7 @@ test("a body that could not be posted leaves the review unpublished, and the app
     reviewers("approved"),
   ]);
 
-  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "approve", body: BODY });
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "approve", body: BODY, approveHeadSha: MR_3931_TARGET.headSha });
 
   assert.match(String(run.calls.at(-3)?.args.at(-1)), /\/approve$/);
   assert.equal(outcome.published, false, "the body is kept for another try");
@@ -1017,7 +1017,25 @@ test("a body that could not be posted leaves the review unpublished, and the app
   );
 });
 
-test("an approval GitLab refuses because the MR moved on says to regenerate", async () => {
+test("an approval names the head the submit checked, the forge's own when it moved past the guide's, and none when it could not be checked", async () => {
+  for (const approveHeadSha of ["f".repeat(40), null]) {
+    const { forge, run } = forgeReplaying([
+      LOGGED_IN,
+      { stdout: fixture("project.json") },
+      {},
+      { stdout: JSON.stringify({ approved: true }) },
+      { stdout: fixture("user.json") },
+      reviewers("approved"),
+    ]);
+
+    await forge.submitReview(MR_3931_TARGET, { verdict: "approve", body: "", approveHeadSha });
+
+    const approve = sent(run).find((call) => call.includes(`${MERGE_REQUEST}/approve`));
+    assert.deepEqual(approve?.at(-1), approveHeadSha === null ? {} : { sha: approveHeadSha }, String(approveHeadSha));
+  }
+});
+
+test("an approval GitLab refuses because the MR moved on during the submit says to look again", async () => {
   const { forge } = forgeReplaying([
     LOGGED_IN,
     { stdout: fixture("project.json") },
@@ -1027,14 +1045,14 @@ test("an approval GitLab refuses because the MR moved on says to regenerate", as
     reviewers("reviewed"),
   ]);
 
-  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "approve", body: "" });
+  const outcome = await forge.submitReview(MR_3931_TARGET, { verdict: "approve", body: "", approveHeadSha: MR_3931_TARGET.headSha });
 
   assert.deepEqual(outcome.steps.at(-1), done("reviewer-state", "Confirm your reviewer state"));
   assert.deepEqual(outcome.steps.at(-2), {
     id: "approve",
     label: "Approve",
     status: "failed",
-    message: "GitLab did not approve, as the MR has commits newer than the guide. Regenerate the guide to approve them.",
+    message: "GitLab did not approve, as the MR got new commits while your review was being submitted. Open Finish review again to see them and approve.",
   });
 });
 

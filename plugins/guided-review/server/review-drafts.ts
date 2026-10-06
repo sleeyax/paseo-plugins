@@ -1,8 +1,7 @@
 import type { CommentOrigin, Draft, DraftList, DraftLocation, LinkedDraft } from "../shared/drafts.ts";
-import type { Verdict } from "../shared/submit.ts";
 import { anchorAt } from "./anchors.ts";
 import { followNode, type GuideAtHead } from "./carry-over.ts";
-import type { DraftTarget, Forge, SubmitOutcome } from "./forge/port.ts";
+import type { DraftTarget, Forge, ReviewSubmission, SubmitOutcome } from "./forge/port.ts";
 import { SubmitSteps } from "./forge/submit-steps.ts";
 import { isReady, type GuideGenerations } from "./guide-generation.ts";
 import { oneAtATimePer } from "./one-at-a-time.ts";
@@ -130,7 +129,8 @@ export class ReviewDrafts {
    * here as soon as it is posted, and the first that fails stops the submit, so trying again posts
    * none twice. Once the forge says the review is published, nothing kept here is wanted any more.
    */
-  async submit(record: ReviewRecord, forge: Forge, verdict: Verdict, body: string): Promise<SubmitOutcome> {
+  async submit(record: ReviewRecord, forge: Forge, submission: ReviewSubmission): Promise<SubmitOutcome> {
+    const { verdict, body } = submission;
     const outcome = await this.#changing(record.id, async () => {
       const steps = new SubmitSteps();
       let kept = await this.#store.getDrafts(record.id);
@@ -150,7 +150,7 @@ export class ReviewDrafts {
         await forge.discardReview(record.ref);
         return { published: true, steps: steps.steps };
       }
-      const outcome = await forge.submitReview(await this.#reviewTarget(record), { verdict, body });
+      const outcome = await forge.submitReview(await this.#reviewTarget(record), submission);
       if (outcome.published) await this.#store.saveDrafts(record.id, { links: {}, paragraphs: [] });
       return { published: outcome.published, steps: [...steps.steps, ...outcome.steps] };
     });
