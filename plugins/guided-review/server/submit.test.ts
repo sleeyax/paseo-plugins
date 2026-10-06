@@ -135,7 +135,7 @@ test("a head moved since the guide holds Approve and Request changes back with a
     reason: "The PR has new commits since this guide, so a verdict would apply to code it did not explain. Regenerate the guide to approve or request changes.",
     regenerate: true,
   });
-  assert.deepEqual(finish.head, { guideHeadSha: HEAD, forgeHeadSha: PUSHED, moved: true, state: "open", message: null });
+  assert.deepEqual(finish.head, { guideHeadSha: HEAD, forgeHeadSha: PUSHED, moved: true, newCommits: 1, rewritten: false, state: "open", message: null });
 
   const refused = await service.submit({ reviewId, headSha: HEAD, verdict: "approve", body: "LGTM" });
   assert.equal(refused.status, "refused");

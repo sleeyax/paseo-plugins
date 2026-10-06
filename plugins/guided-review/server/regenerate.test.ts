@@ -116,6 +116,8 @@ test("a guide at the forge's head has not moved", async (t) => {
     guideHeadSha: OLD,
     forgeHeadSha: OLD,
     moved: false,
+    newCommits: null,
+    rewritten: false,
     state: "open",
     message: null,
   });
@@ -124,11 +126,14 @@ test("a guide at the forge's head has not moved", async (t) => {
 test("a push shows as moved, and nothing is regenerated or moved until Regenerate", async (t) => {
   const { service, forge, workspaces, agents } = await withGuide(t);
   forge.changeRequests.set(URL, { ...atNewHead(), state: "closed" });
+  forge.commitsSinceAnswer = { kind: "after", count: 3 };
 
   assert.deepEqual(await service.checkHead({ reviewId: REVIEW_ID }), {
     guideHeadSha: OLD,
     forgeHeadSha: NEW,
     moved: true,
+    newCommits: 3,
+    rewritten: false,
     state: "closed",
     message: null,
   });
@@ -143,6 +148,19 @@ test("a push shows as moved, and nothing is regenerated or moved until Regenerat
   assert.equal(forge.headReads, 2, "only the head is read, not the whole PR");
 });
 
+test("a head the guide's is no longer among the commits of reads as rewritten, and a count the forge cannot give is left out", async (t) => {
+  const { service, forge } = await withGuide(t);
+  forge.changeRequests.set(URL, atNewHead());
+
+  forge.commitsSinceAnswer = { kind: "rewritten" };
+  const rewritten = await service.checkHead({ reviewId: REVIEW_ID });
+  assert.deepEqual([rewritten.moved, rewritten.newCommits, rewritten.rewritten], [true, null, true]);
+
+  forge.failCommitsSince = new ForgeError("gh failed: HTTP 502");
+  const uncounted = await service.checkHead({ reviewId: REVIEW_ID });
+  assert.deepEqual([uncounted.moved, uncounted.newCommits, uncounted.rewritten, uncounted.message], [true, null, false, null]);
+});
+
 test("a forge that cannot be asked is reported and reads as not moved", async (t) => {
   const { service, forge } = await withGuide(t);
   forge.failFetchHead = new ForgeError("gh failed: HTTP 502");
@@ -151,6 +169,8 @@ test("a forge that cannot be asked is reported and reads as not moved", async (t
     guideHeadSha: OLD,
     forgeHeadSha: null,
     moved: false,
+    newCommits: null,
+    rewritten: false,
     state: null,
     message: `Could not check ${URL} for new commits: gh failed: HTTP 502`,
   });

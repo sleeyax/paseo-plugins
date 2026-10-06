@@ -5,6 +5,7 @@ import React, { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import type { HeadCheck, ReviewHeader } from "../shared/contracts.ts";
+import { describeHeadChange, shortSha } from "../shared/head-change.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { describeProgress, isFinished } from "./start-progress.ts";
 import { Section, useFlat } from "./section.tsx";
@@ -149,7 +150,7 @@ export function StaleGuideBanner({ reviewId, header, theme, regenerate }: StaleG
       )}
       <Line colors={colors} muted>
         {head?.forgeHeadSha
-          ? `New commits were pushed: the guide explains ${short(head.guideHeadSha)}, the ${kind} is at ${short(head.forgeHeadSha)}. `
+          ? `${describeHeadChange(head)}: the guide explains ${shortSha(head.guideHeadSha)}, the ${kind} is at ${shortSha(head.forgeHeadSha)}. `
           : null}
         Regenerate writes a guide for the new head; what you marked understood carries over where the code did not change.
       </Line>
@@ -173,10 +174,6 @@ export function StaleGuideBanner({ reviewId, header, theme, regenerate }: StaleG
       </View>
     </Section>
   );
-}
-
-function short(sha: string): string {
-  return sha.slice(0, 7);
 }
 
 function Line({ colors, muted, color, children }: { colors: Colors; muted?: boolean; color?: string; children: React.ReactNode }) {

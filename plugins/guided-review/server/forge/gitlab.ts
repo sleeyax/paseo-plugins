@@ -9,6 +9,7 @@ import { GITHUB_HOST } from "./github.ts";
 import { CLONE_TIMEOUT_MS, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, userOf } from "./common.ts";
 import { SubmitSteps } from "./submit-steps.ts";
 import {
+  commitsSinceIn,
   ForgeError,
   type AnchorLine,
   type BranchChangeRequest,
@@ -76,6 +77,11 @@ const CommitsResponse = z.array(
     authored_date: z.string(),
   }),
 );
+
+const CommitIdsResponse = z.array(z.object({ id: z.string() }));
+
+/** How far back a count of the commits since a guide's head goes. */
+const COMMITS_SINCE_PAGE = 100;
 
 /** An issue in an external tracker comes back with an ID and a title, and no IID. */
 const ClosesIssuesResponse = z.array(
@@ -604,6 +610,12 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       const headSha = mr.diff_refs?.head_sha ?? mr.sha;
       if (headSha === null) throw new ForgeError(`GitLab has not worked out the diff of ${ref.url} yet. Try again in a moment.`);
       return { headSha, state: STATES[mr.state] };
+    },
+
+    async commitsSince(ref, sha) {
+      // Newest first; a page shorter than asked for is all of them.
+      const commits = await api(ref, CommitIdsResponse, `${await mergeRequest(ref)}/commits?per_page=${COMMITS_SINCE_PAGE}`);
+      return commitsSinceIn(commits.map((commit) => commit.id), sha, commits.length < COMMITS_SINCE_PAGE);
     },
 
     async currentUser(ref): Promise<ForgeUser> {

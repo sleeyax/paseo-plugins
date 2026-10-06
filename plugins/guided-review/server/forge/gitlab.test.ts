@@ -312,6 +312,17 @@ test("reads where a merge request's diff head is now and its state, by the proje
   assert.deepEqual(run.calls.at(-1)?.args, ["api", "--hostname", "gitlab.com", "projects/34675721/merge_requests/3931"]);
 });
 
+test("counts the commits since an earlier head from the merge request's latest, newest first", async () => {
+  const commits = (ids: string[]) => ({ stdout: JSON.stringify(ids.map((id) => ({ id }))) });
+  const full = Array.from({ length: 100 }, (_, index) => `c${index}`);
+  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, commits(["d", "c", "b", "a"]), commits(["d", "c"]), commits(full)]);
+
+  assert.deepEqual(await forge.commitsSince(MR_3931, "b"), { kind: "after", count: 2 });
+  assert.deepEqual(await forge.commitsSince(MR_3931, "b"), { kind: "rewritten" });
+  assert.equal(await forge.commitsSince(MR_3931, "b"), null);
+  assert.deepEqual(run.calls.at(-1)?.args, ["api", "--hostname", "gitlab.com", "projects/34675721/merge_requests/3931/commits?per_page=100"]);
+});
+
 test("a merge request whose diff GitLab has not worked out yet has its source branch's head", async () => {
   const mr = { ...JSON.parse(fixture("merge-request.json")), state: "opened", diff_refs: null, sha: "d".repeat(40) };
   const { forge } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, { stdout: JSON.stringify(mr) }]);

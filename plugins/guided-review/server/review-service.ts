@@ -27,7 +27,7 @@ import { commentSubjectContext, type CommentSubjectContext } from "./comment-sub
 import { DiffHighlighter, syntaxColors, syntaxThemes } from "./diff-highlight.ts";
 import { entryCode, resolveCode } from "./diff.ts";
 import { errorMessage } from "./error-message.ts";
-import { ForgeError, type BranchChangeRequest, type ChangeRequestRef, type Forge } from "./forge/port.ts";
+import { ForgeError, type BranchChangeRequest, type ChangeRequestHead, type ChangeRequestRef, type CommitsSince, type Forge } from "./forge/port.ts";
 import { GuideAgentError, type GuideAgentPort } from "./guide-agent/port.ts";
 import { runStructured } from "./guide-agent/structured.ts";
 import { GuideGenerations, isReady, marksOf } from "./guide-generation.ts";
@@ -241,14 +241,37 @@ export class ReviewService {
   async checkHead({ reviewId }: { reviewId: string }): Promise<HeadCheck> {
     const record = await this.#record(reviewId);
     const guideHeadSha = record.header.headSha;
+    const forge = this.#forgeFor(record.ref);
+    let head: ChangeRequestHead;
     try {
-      const head = await this.#forgeFor(record.ref).fetchHead(record.ref);
-      return { guideHeadSha, forgeHeadSha: head.headSha, moved: head.headSha !== guideHeadSha, state: head.state, message: null };
+      head = await forge.fetchHead(record.ref);
     } catch (error) {
       if (!(error instanceof ForgeError)) throw error;
       const message = `Could not check ${record.ref.url} for new commits: ${error.message}`;
       this.#log(message);
-      return { guideHeadSha, forgeHeadSha: null, moved: false, state: null, message };
+      return { guideHeadSha, forgeHeadSha: null, moved: false, newCommits: null, rewritten: false, state: null, message };
+    }
+    const moved = head.headSha !== guideHeadSha;
+    const since = moved ? await this.#commitsSince(forge, record.ref, guideHeadSha) : null;
+    return {
+      guideHeadSha,
+      forgeHeadSha: head.headSha,
+      moved,
+      newCommits: since?.kind === "after" ? since.count : null,
+      rewritten: since?.kind === "rewritten",
+      state: head.state,
+      message: null,
+    };
+  }
+
+  /** A count the forge cannot give is left out of the head check rather than failing it. */
+  async #commitsSince(forge: Forge, ref: ChangeRequestRef, sha: string): Promise<CommitsSince | null> {
+    try {
+      return await forge.commitsSince(ref, sha);
+    } catch (error) {
+      if (!(error instanceof ForgeError)) throw error;
+      this.#log(`Could not count the commits on ${ref.url} since ${sha}: ${error.message}`);
+      return null;
     }
   }
 

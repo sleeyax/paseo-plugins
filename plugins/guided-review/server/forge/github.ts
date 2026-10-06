@@ -8,6 +8,7 @@ import type { Verdict } from "../../shared/submit.ts";
 import { CLONE_TIMEOUT_MS, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, userOf } from "./common.ts";
 import { SubmitSteps } from "./submit-steps.ts";
 import {
+  commitsSinceIn,
   ForgeError,
   type AnchorLine,
   type BranchChangeRequest,
@@ -92,6 +93,25 @@ export const PULL_REQUEST_HEAD_QUERY = `query GuidedReviewPullRequestHead($owner
     pullRequest(number: $number) { headRefOid state }
   }
 }`;
+
+/** GitHub lists at most 250 commits on a pull request; the latest 100 are as far back as a count goes. */
+export const PULL_REQUEST_COMMITS_QUERY = `query GuidedReviewPullRequestCommits($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) { commits(last: 100) { totalCount nodes { commit { oid } } } }
+  }
+}`;
+
+const PullRequestCommitsResponse = z.object({
+  data: z.object({
+    repository: z
+      .object({
+        pullRequest: z
+          .object({ commits: z.object({ totalCount: z.number(), nodes: z.array(z.object({ commit: z.object({ oid: z.string() }) })) }) })
+          .nullable(),
+      })
+      .nullable(),
+  }),
+});
 
 const PullRequestHeadResponse = z.object({
   data: z.object({
@@ -538,6 +558,14 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
       const pr = response.data.repository?.pullRequest;
       if (!pr) throw new ForgeError(`${ref.project} has no pull request #${ref.number}.`);
       return { headSha: pr.headRefOid, state: STATES[pr.state] };
+    },
+
+    async commitsSince(ref, sha) {
+      const response = await graphql(ref, PullRequestCommitsResponse, PULL_REQUEST_COMMITS_QUERY, pullRequestVariables(ref));
+      const commits = response.data.repository?.pullRequest?.commits;
+      if (!commits) throw new ForgeError(`${ref.project} has no pull request #${ref.number}.`);
+      const newestFirst = commits.nodes.map((node) => node.commit.oid).reverse();
+      return commitsSinceIn(newestFirst, sha, commits.totalCount <= newestFirst.length);
     },
 
     async currentUser(ref): Promise<ForgeUser> {

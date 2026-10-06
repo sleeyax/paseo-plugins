@@ -9,6 +9,7 @@ import {
   type BranchChangeRequest,
   type ChangeRequest,
   type ChangeRequestRef,
+  type CommitsSince,
   type DraftAnchor,
   type DraftTarget,
   type Forge,
@@ -42,6 +43,10 @@ export type FakeForge = Forge & {
   failFetchHead: Error | null;
   /** How many times the head alone was read. */
   headReads: number;
+  /** What `commitsSince` answers, whatever it is asked about. */
+  commitsSinceAnswer: CommitsSince | null;
+  /** When set, the next `commitsSince` fails with it. */
+  failCommitsSince: Error | null;
   /** Every comment posted outside a review, by change request URL, in order. */
   comments: { url: string; body: string }[];
   /** When set, the comment post after this many more fails with it. */
@@ -84,6 +89,8 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     created: [],
     failFetchHead: null,
     headReads: 0,
+    commitsSinceAnswer: { kind: "after", count: 1 },
+    failCommitsSince: null,
     comments: [],
     failComment: null,
     submissions: [],
@@ -123,6 +130,14 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
       const changeRequest = forge.changeRequests.get(ref.url);
       if (!changeRequest) throw new ForgeError(`gh failed: Could not resolve to a PullRequest with the number of ${ref.number}.`);
       return { headSha: changeRequest.headSha, state: changeRequest.state };
+    },
+    async commitsSince() {
+      if (forge.failCommitsSince) {
+        const error = forge.failCommitsSince;
+        forge.failCommitsSince = null;
+        throw error;
+      }
+      return structuredClone(forge.commitsSinceAnswer);
     },
     async currentUser() {
       return forge.viewer;

@@ -282,6 +282,10 @@ export const HeadCheckSchema = z.object({
   forgeHeadSha: z.string().nullable(),
   /** New commits were pushed, or the branch was rewritten, since the guide was written. False when unknown. */
   moved: z.boolean(),
+  /** How many commits came after the guide's head, when it moved and that could be read. */
+  newCommits: z.number().nullable(),
+  /** The guide's head is no longer among the PR/MR's commits: it was force-pushed or rebased away. */
+  rewritten: z.boolean(),
   /** The state the forge has the PR/MR in now; null when it could not be asked. */
   state: z.enum(["open", "closed", "merged"]).nullable(),
   /** Why the forge could not be asked, as a sentence. */

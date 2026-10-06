@@ -10,6 +10,7 @@ import {
   DELETE_REVIEW_MUTATION,
   DRAFTS_QUERY,
   PENDING_REVIEW_QUERY,
+  PULL_REQUEST_COMMITS_QUERY,
   PULL_REQUEST_HEAD_QUERY,
   PULL_REQUEST_QUERY,
   REVIEW_SEARCH_QUERY,
@@ -197,6 +198,21 @@ test("reads only where a pull request's head is now and its state, for noticing 
       },
     ],
   );
+});
+
+test("counts the commits since an earlier head from the pull request's latest, newest last", async () => {
+  const answer = (oids: string[], totalCount: number) => ({
+    stdout: JSON.stringify({ data: { repository: { pullRequest: { commits: { totalCount, nodes: oids.map((oid) => ({ commit: { oid } })) } } } } }),
+  });
+  const { forge, run } = forgeReplaying([answer(["a", "b", "c", "d"], 4), answer(["c", "d"], 2), answer(["c", "d"], 180)]);
+
+  assert.deepEqual(await forge.commitsSince(PR_105, "b"), { kind: "after", count: 2 });
+  assert.deepEqual(await forge.commitsSince(PR_105, "b"), { kind: "rewritten" });
+  assert.equal(await forge.commitsSince(PR_105, "b"), null);
+  assert.deepEqual(JSON.parse(run.calls[0]?.input ?? ""), {
+    query: PULL_REQUEST_COMMITS_QUERY,
+    variables: { owner: "sleeyax", name: "paseo-plugins", number: 105 },
+  });
 });
 
 test("the head of a pull request GitHub does not have fails with a sentence", async () => {

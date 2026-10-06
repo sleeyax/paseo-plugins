@@ -229,6 +229,8 @@ test("after a push, guiding the branch again leaves it and its guide where they 
     guideHeadSha: HEAD,
     forgeHeadSha: "d".repeat(40),
     moved: true,
+    newCommits: 1,
+    rewritten: false,
     state: "open",
     message: null,
   });

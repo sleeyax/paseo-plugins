@@ -31,6 +31,12 @@ export interface Forge {
    * since the guide was written without reading the whole change request again.
    */
   fetchHead(ref: ChangeRequestRef): Promise<ChangeRequestHead>;
+  /**
+   * How the change request's commits now stand against `sha`, an earlier head: read from its latest
+   * commits, so `sha` gone from a list that is complete means the branch was rewritten. Null when the
+   * list is cut off before `sha` turns up, so it cannot tell.
+   */
+  commitsSince(ref: ChangeRequestRef, sha: string): Promise<CommitsSince | null>;
   /** Who the CLI is logged in as on the change request's host. */
   currentUser(ref: ChangeRequestRef): Promise<ForgeUser>;
   /** Clones the change request's repository into `directory`, which must not exist yet. */
@@ -156,6 +162,15 @@ export type ChangeRequestHead = {
   headSha: string;
   state: ChangeRequestState;
 };
+
+export type CommitsSince = { kind: "after"; count: number } | { kind: "rewritten" };
+
+/** Where `sha` sits in `newestFirst`, a change request's latest commits, which `complete` says are all of them. */
+export function commitsSinceIn(newestFirst: readonly string[], sha: string, complete: boolean): CommitsSince | null {
+  const index = newestFirst.indexOf(sha);
+  if (index !== -1) return { kind: "after", count: index };
+  return complete ? { kind: "rewritten" } : null;
+}
 
 export type ForgeUser = {
   login: string;
