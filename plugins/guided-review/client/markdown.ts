@@ -1,4 +1,5 @@
-import MarkdownIt from "markdown-it";
+// The standalone build, with its dependencies inlined: Paseo's client compiler resolves only packages with an `exports` map, which its `punycode.js` lacks.
+import MarkdownIt from "markdown-it/dist/markdown-it.js";
 import type Token from "markdown-it/lib/token.mjs";
 
 /** A run of text and the marks on it; a line break is a run of "\n". */
