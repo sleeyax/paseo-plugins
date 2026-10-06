@@ -3,7 +3,7 @@ import { Pressable, Text, View } from "react-native";
 import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
 import type { LinkedDraft } from "../shared/drafts.ts";
 import { isUnderstood, type GuideProgress } from "../shared/progress.ts";
-import { DESCRIPTION_KEY, draftCounts, FINISH_KEY, OVERVIEW_KEY, resolveSelection, type Entry, type EntryGroup } from "./guide-entries.ts";
+import { DESCRIPTION_KEY, draftCounts, FINISH_KEY, ISSUES_KEY, OVERVIEW_KEY, resolveSelection, type Entry, type EntryGroup } from "./guide-entries.ts";
 import { plainText } from "./inline-markdown.ts";
 import { ProgressContext } from "./progress.tsx";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
@@ -15,7 +15,7 @@ import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
  */
 export function useSelection(groups: readonly EntryGroup[], progress: GuideProgress | null): [string, (key: string) => void] {
   const [selected, setSelected] = useState<string | null>(null);
-  const resolved = resolveSelection(selected, groups, progress, [FINISH_KEY]);
+  const resolved = resolveSelection(selected, groups, progress, [FINISH_KEY, ISSUES_KEY]);
   if (progress !== null && resolved !== selected) setSelected(resolved);
   return [resolved, setSelected];
 }
@@ -27,11 +27,13 @@ export type NavigatorProps = {
   drafts: readonly LinkedDraft[];
   /** The forge has the description edited since the guide was read. */
   descriptionEdited: boolean;
+  /** How many issues the Issues page lists; it is listed only when there are some. */
+  issues: number;
   colors: Colors;
 };
 
-/** The guide as a tree: the description and the overview, then each group with its entries, each with its understood tick and its number of drafts. */
-export function Navigator({ groups, selected, select, drafts, descriptionEdited, colors }: NavigatorProps) {
+/** The guide as a tree: its issues, the description and the overview, then each group with its entries, each with its understood tick and its number of drafts. */
+export function Navigator({ groups, selected, select, drafts, descriptionEdited, issues, colors }: NavigatorProps) {
   const progress = useContext(ProgressContext)?.progress ?? null;
   const counts = draftCounts(groups, drafts);
   /** The groups the reviewer folded or unfolded themselves; any other folds once every entry in it is understood. */
@@ -41,6 +43,12 @@ export function Navigator({ groups, selected, select, drafts, descriptionEdited,
 
   return (
     <View accessibilityRole="list" style={{ paddingBottom: spacing[2] }}>
+      {issues > 0 ? (
+        <Row colors={colors} selected={selected === ISSUES_KEY} onPress={() => select(ISSUES_KEY)} depth={0}>
+          <Text style={{ flex: 1, color: colors.statusWarning, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm), fontWeight: "600" }}>⚠ Issues</Text>
+          <Text style={{ color: colors.statusWarning, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>{issues}</Text>
+        </Row>
+      ) : null}
       <Row colors={colors} selected={selected === DESCRIPTION_KEY} onPress={() => select(DESCRIPTION_KEY)} depth={0}>
         <Title colors={colors} strong>
           Description
@@ -95,7 +103,7 @@ function EntryTitle({ entry, colors }: { entry: Entry; colors: Colors }) {
     );
   }
   const slash = entry.path.lastIndexOf("/");
-  const note = entry.category === null || entry.category === "test" || entry.category === "docs" ? null : entry.category;
+  const note = entry.category === null || entry.category === "test" || entry.category === "docs" || entry.category === "foreign" ? null : entry.category;
   return (
     <>
       <Title colors={colors}>{entry.path.slice(slash + 1)}</Title>

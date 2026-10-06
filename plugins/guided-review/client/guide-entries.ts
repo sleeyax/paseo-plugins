@@ -22,6 +22,8 @@ export const DESCRIPTION_KEY = "description";
 export const OVERVIEW_KEY = "overview";
 /** Finish review, which the detail pane shows like an entry though the navigator does not list it. */
 export const FINISH_KEY = "finish";
+/** What is wrong with the change request itself, like other change requests' commits, and what to do about it: a page no progress marks, and none of the guide's order. */
+export const ISSUES_KEY = "issues";
 
 /**
  * The guide's groups trunk first: each layer from the foundations up, then Tests, Documentation,

@@ -12,11 +12,11 @@ import { DescriptionCard, useDescriptionEdited } from "./description.tsx";
 import { DraftsContext, DraftsSection, useDrafts } from "./drafts.tsx";
 import { GuideView } from "./guide-view.tsx";
 import { FinishBar, FinishReview, InlineFinishReview } from "./finish-review.tsx";
-import { ForeignWorkBanner, ScopeChoice } from "./foreign-work.tsx";
+import { ForeignWorkBanner, ForeignWorkStrip, IssuesPending } from "./foreign-work.tsx";
 import { StaleGuideBanner, useRegenerate } from "./head-check.tsx";
 import { Detail } from "./detail.tsx";
 import { EntryLinksContext } from "./entry-links.ts";
-import { DESCRIPTION_KEY, FINISH_KEY, guideGroups, layoutFor, OVERVIEW_KEY } from "./guide-entries.ts";
+import { DESCRIPTION_KEY, FINISH_KEY, guideGroups, ISSUES_KEY, layoutFor, OVERVIEW_KEY } from "./guide-entries.ts";
 import { Navigator, useSelection } from "./navigator.tsx";
 import { ProgressContext, useProgress } from "./progress.tsx";
 import { FlatContext, Strip } from "./section.tsx";
@@ -112,7 +112,14 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
         <View style={{ gap: spacing[3] }}>
           <Header header={panel.data.header} theme={theme} />
           <StaleGuideBanner reviewId={reviewId} header={panel.data.header} theme={theme} regenerate={regenerate} />
-          <ForeignWorkBanner reviewId={reviewId} header={panel.data.header} foreign={panel.data.foreign} colors={colors} onScopeChosen={() => void panel.refetch()} />
+          <ForeignWorkBanner
+            reviewId={reviewId}
+            header={panel.data.header}
+            foreign={panel.data.foreign}
+            colors={colors}
+            choosing={panel.data.guide.status === "choosing-scope"}
+            onScopeChosen={() => void panel.refetch()}
+          />
           {panel.data.note ? <Note color={colors.statusWarning}>{panel.data.note}</Note> : null}
           {drafts ? <DraftsSection control={drafts} colors={colors} /> : null}
           {drafts ? <InlineFinishReview reviewId={reviewId} header={panel.data.header} drafts={drafts} colors={colors} regenerate={regenerate} /> : null}
@@ -141,11 +148,11 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
   if (shape === null) return frame();
 
   const { reviewId, header, note, foreign, guide } = panel.data;
-  const sidebar = <Sidebar reviewId={reviewId} header={header} note={note} foreign={foreign} onScopeChosen={() => void panel.refetch()} drafts={drafts} regenerate={regenerate} theme={theme} />;
+  const sidebar = <Sidebar reviewId={reviewId} header={header} note={note} drafts={drafts} regenerate={regenerate} theme={theme} />;
   const navigator = (
     <View style={{ borderBottomWidth: shape === "two" ? 1 : 0, borderColor: colors.border }}>
       <Strip colors={colors} title="Guide" />
-      <Navigator groups={groups} selected={selected} select={select} drafts={drafts?.drafts ?? []} descriptionEdited={descriptionEdited} colors={colors} />
+      <Navigator groups={groups} selected={selected} select={select} drafts={drafts?.drafts ?? []} descriptionEdited={descriptionEdited} issues={foreign ? 1 : 0} colors={colors} />
       {guide.status === "ready" ? null : (
         <Text style={{ paddingHorizontal: spacing[3], paddingBottom: spacing[3], color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>
           {guide.status === "generating"
@@ -160,6 +167,19 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
   // Above the detail pane, so the half of a handle that overhangs it takes the pointer.
   const divider = { borderColor: colors.border, flexGrow: 0, flexShrink: 0, zIndex: 1 } as const;
   const descriptionCard = <DescriptionCard reviewId={reviewId} headSha={header.headSha} colors={colors} />;
+  // A card on a page of its own, where the strip's Fix leads, rather than a pane of the grid.
+  const issuesPage = (
+    <FlatContext.Provider value={false}>
+      <ForeignWorkBanner
+        reviewId={reviewId}
+        header={header}
+        foreign={foreign}
+        colors={colors}
+        choosing={guide.status === "choosing-scope"}
+        onScopeChosen={() => void panel.refetch()}
+      />
+    </FlatContext.Provider>
+  );
   const finishReview = drafts ? (
     <FinishReview reviewId={reviewId} header={header} drafts={drafts} colors={colors} regenerate={regenerate} onClose={() => select(lastEntry.current)} />
   ) : null;
@@ -195,25 +215,37 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
                   <ResizeHandle control={columns.handle("sidebar")} colors={colors} />
                 </View>
               )}
-              {guide.status === "ready" ? (
-                <Detail
-                  key={guide.agentId}
-                  reviewId={reviewId}
-                  agentId={guide.agentId}
-                  guide={guide.guide}
-                  groups={groups}
-                  selected={selected}
-                  select={select}
-                  theme={theme}
-                  {...(openAgent ? { openAgent } : {})}
-                  finish={finishReview}
-                  description={descriptionCard}
-                />
-              ) : (
-                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[4] }}>
-                  {selected === FINISH_KEY ? finishReview : selected === DESCRIPTION_KEY ? descriptionCard : guideView(reviewId, guide, false)}
-                </ScrollView>
-              )}
+              <View style={{ flex: 1 }}>
+                <ForeignWorkStrip header={header} foreign={foreign} colors={colors} onFix={() => select(ISSUES_KEY)} />
+                {guide.status === "ready" ? (
+                  <Detail
+                    key={guide.agentId}
+                    reviewId={reviewId}
+                    agentId={guide.agentId}
+                    guide={guide.guide}
+                    groups={groups}
+                    selected={selected}
+                    select={select}
+                    theme={theme}
+                    {...(openAgent ? { openAgent } : {})}
+                    finish={finishReview}
+                    description={descriptionCard}
+                    issues={issuesPage}
+                  />
+                ) : (
+                  <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[4] }}>
+                    {selected === FINISH_KEY ? (
+                      finishReview
+                    ) : selected === DESCRIPTION_KEY ? (
+                      descriptionCard
+                    ) : selected === ISSUES_KEY ? (
+                      issuesPage
+                    ) : (
+                      guideView(reviewId, guide, false, <IssuesPending header={header} colors={colors} onOpen={() => select(ISSUES_KEY)} />)
+                    )}
+                  </ScrollView>
+                )}
+              </View>
               {shape === "three" ? (
                 <View style={{ ...divider, width: columns.drawn.sidebar, borderLeftWidth: 1 }}>
                   <ScrollView style={{ flex: 1 }}>{sidebar}</ScrollView>
@@ -228,7 +260,12 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
     </View>
   );
 
-  function guideView(reviewId: string, state: GuideState, withProgress: boolean) {
+  /** `waiting` is what it shows while the guide waits for the reviewer to choose what it explains. */
+  function stackWaiting() {
+    return panel.data?.status === "ready" ? <IssuesPending header={panel.data.header} colors={colors} onOpen={null} /> : null;
+  }
+
+  function guideView(reviewId: string, state: GuideState, withProgress: boolean, waiting: React.ReactNode = stackWaiting()) {
     return (
       <GuideView
         reviewId={reviewId}
@@ -237,11 +274,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
         {...(openAgent ? { openAgent } : {})}
         withProgress={withProgress}
         forge={forge ?? "github"}
-        scopeChoice={
-          panel.data?.status === "ready" ? (
-            <ScopeChoice reviewId={reviewId} header={panel.data.header} foreign={panel.data.foreign} colors={colors} onChosen={() => void panel.refetch()} />
-          ) : null
-        }
+        scopeChoice={waiting}
         retry={{
           run: () => retry.mutate(reviewId),
           pending: retry.isPending,

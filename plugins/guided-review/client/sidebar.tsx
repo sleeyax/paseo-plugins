@@ -2,10 +2,9 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { ExternalLink } from "@getpaseo/plugin/client/ui";
 import React from "react";
 import { Text, View } from "react-native";
-import type { ForeignWorkView, ReviewHeader } from "../shared/contracts.ts";
+import type { ReviewHeader } from "../shared/contracts.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { DraftsSection, type DraftsControl } from "./drafts.tsx";
-import { ForeignWorkBanner } from "./foreign-work.tsx";
 import { layerTitle } from "./guide-entries.ts";
 import { StaleGuideBanner, type RegenerateControl } from "./head-check.tsx";
 import { ProgressSummary } from "./progress.tsx";
@@ -16,22 +15,18 @@ export type SidebarProps = {
   reviewId: string;
   header: ReviewHeader;
   note: string | null | undefined;
-  foreign: ForeignWorkView | undefined;
-  /** Called once the guide is being written from another scope. */
-  onScopeChosen: () => void;
   drafts: DraftsControl | null;
   regenerate: RegenerateControl;
   theme: PluginTheme;
 };
 
-/** What stays in view beside the guide, as flat sections: the change request, whether the guide is still current, whether it carries other change requests' commits, the reviewer's progress and their drafts. Finish review is pinned under it by the panel. */
-export function Sidebar({ reviewId, header, note, foreign, onScopeChosen, drafts, regenerate, theme }: SidebarProps) {
+/** What stays in view beside the guide, as flat sections: the change request, whether the guide is still current, the reviewer's progress and their drafts. Finish review is pinned under it by the panel. */
+export function Sidebar({ reviewId, header, note, drafts, regenerate, theme }: SidebarProps) {
   const colors = theme.colors;
   return (
     <>
       <Header header={header} theme={theme} />
       <StaleGuideBanner reviewId={reviewId} header={header} theme={theme} regenerate={regenerate} />
-      <ForeignWorkBanner reviewId={reviewId} header={header} foreign={foreign} colors={colors} onScopeChosen={onScopeChosen} />
       {note ? (
         <Section colors={colors} title="Workspace" tone={colors.statusWarning}>
           <Note color={colors.statusWarning}>{note}</Note>
