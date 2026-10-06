@@ -14,7 +14,7 @@ import {
 } from "../shared/guide.ts";
 import { EntryLinksContext } from "./entry-links.ts";
 import { guideGroups, layerTitle, type Entry } from "./guide-entries.ts";
-import { AskAction, type AskControl } from "./ask-action.tsx";
+import { AskAction } from "./ask-action.tsx";
 import { NodeCode } from "./diff-view.tsx";
 import { ItemCommentBox, NodeComments, OverviewComments, useCommentOnHold, useCommentOnRelease, type Selected } from "./drafts.tsx";
 import { GroupUnderstoodToggle, ProgressSummary, UnderstoodToggle, useCollapsed } from "./progress.tsx";
@@ -30,14 +30,12 @@ export type GuideViewProps = {
   /** Opens the guide agent's chat; absent on hosts without client navigation. */
   openAgent?: (agentId: string) => void;
   retry: { run: () => void; pending: boolean; error: string | null };
-  /** "Ask about this" on each node, and on each Supporting and Unsorted entry. */
-  ask: AskControl;
   /** Draws the progress summary above the groups, where no sidebar shows it. */
   withProgress: boolean;
 };
 
 /** The guide under the header: its generation while it runs, its failure with a retry, or the guide itself. */
-export function GuideView({ reviewId, state, theme, openAgent, retry, ask, withProgress }: GuideViewProps) {
+export function GuideView({ reviewId, state, theme, openAgent, retry, withProgress }: GuideViewProps) {
   const colors = theme.colors;
   const agentLink =
     state.agentId !== null && openAgent ? (
@@ -76,7 +74,7 @@ export function GuideView({ reviewId, state, theme, openAgent, retry, ask, withP
         <>
           <Overview guide={state.guide} colors={colors} />
           {agentLink ? <View style={{ alignItems: "flex-start" }}>{agentLink}</View> : null}
-          <Tree reviewId={reviewId} agentId={state.agentId} guide={state.guide} theme={theme} ask={ask} withProgress={withProgress} />
+          <Tree reviewId={reviewId} agentId={state.agentId} guide={state.guide} theme={theme} withProgress={withProgress} />
         </>
       );
   }
@@ -88,14 +86,12 @@ function Tree({
   agentId,
   guide,
   theme,
-  ask,
   withProgress,
 }: {
   reviewId: string;
   agentId: string;
   guide: LayeredGuide;
   theme: PluginTheme;
-  ask: AskControl;
   withProgress: boolean;
 }) {
   const colors = theme.colors;
@@ -111,12 +107,12 @@ function Tree({
           </Heading>
           {group.kind === "layer" ? (
             group.entries.map((entry) =>
-              entry.kind === "node" ? <NodeCard key={entry.key} node={entry.node} titles={titles} colors={colors} ask={ask} code={code(entry)} /> : null,
+              entry.kind === "node" ? <NodeCard key={entry.key} node={entry.node} titles={titles} colors={colors} code={code(entry)} /> : null,
             )
           ) : (
             <Card colors={colors} light={group.kind !== "unsorted"}>
               {group.kind === "unsorted" ? <UnsortedNote colors={colors} /> : null}
-              {group.entries.map((entry) => (entry.kind === "file" ? <FileEntry key={entry.key} colors={colors} entry={entry} ask={ask} code={code(entry)} /> : null))}
+              {group.entries.map((entry) => (entry.kind === "file" ? <FileEntry key={entry.key} colors={colors} entry={entry} code={code(entry)} /> : null))}
             </Card>
           )}
         </React.Fragment>
@@ -188,14 +184,12 @@ export function NodeCard({
   node,
   titles,
   colors,
-  ask,
   code,
   collapsible = true,
 }: {
   node: LayeredNode;
   titles: ReadonlyMap<string, string>;
   colors: Colors;
-  ask: AskControl;
   code: React.ReactNode;
   collapsible?: boolean;
 }) {
@@ -255,7 +249,7 @@ export function NodeCard({
             ))}
           </>
         ) : null}
-        <AskAction subject={{ kind: "node", nodeId: node.id }} ask={ask} colors={colors} />
+        <AskAction subject={{ kind: "node", nodeId: node.id }} colors={colors} />
         {code}
         <NodeComments nodeId={node.id} colors={colors} selected={selected} />
       </Collapsible>
@@ -317,13 +311,11 @@ function NodeLink({ nodeId, title, colors }: { nodeId: string; title: string; co
 export function FileEntry({
   colors,
   entry,
-  ask,
   code,
   collapsible = true,
 }: {
   colors: Colors;
   entry: Extract<Entry, { kind: "file" }>;
-  ask: AskControl;
   code: React.ReactNode;
   collapsible?: boolean;
 }) {
@@ -343,7 +335,7 @@ export function FileEntry({
         <UnderstoodToggle subject={{ kind: "file", path }} colors={colors} />
       </View>
       <Collapsible collapsed={collapsed} gap={spacing[1]}>
-        <AskAction subject={{ kind: "file", path }} ask={ask} colors={colors} />
+        <AskAction subject={{ kind: "file", path }} colors={colors} />
         <View style={{ alignItems: "flex-start" }}>
           <Link colors={colors} label={open ? "Hide the diff" : "Show the diff"} onPress={() => setOpen(!open)} />
         </View>

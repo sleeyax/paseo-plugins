@@ -6,7 +6,6 @@ import { ScrollView, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import type { GuideState } from "../shared/guide.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
-import { useAskAbout } from "./ask-action.tsx";
 import { BranchStartView, isBranchRunning } from "./branch-start.tsx";
 import { DraftsContext, DraftsSection, useDrafts } from "./drafts.tsx";
 import { GuideView } from "./guide-view.tsx";
@@ -46,7 +45,6 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
   });
   const colors = theme.colors;
   const openAgent = navigation ? (agentId: string) => navigation.openAgent({ agentId }) : undefined;
-  const ask = useAskAbout(panel.data?.status === "ready" ? panel.data.reviewId : null, openAgent);
   const progress = useProgress(
     panel.data?.status === "ready" ? panel.data.reviewId : null,
     panel.data?.status === "ready" && panel.data.guide.status === "ready" ? panel.data.guide.agentId : null,
@@ -187,7 +185,6 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
                   selected={selected}
                   select={select}
                   theme={theme}
-                  ask={ask}
                   {...(openAgent ? { openAgent } : {})}
                   finish={finishReview}
                 />
@@ -216,7 +213,6 @@ export function GuidePanel({ workspaceId, theme, layout, navigation }: PluginWor
         state={state}
         theme={theme}
         {...(openAgent ? { openAgent } : {})}
-        ask={ask}
         withProgress={withProgress}
         retry={{
           run: () => retry.mutate(reviewId),

@@ -4,7 +4,6 @@ import { ScrollView, Text, View } from "react-native";
 import { subjectKey } from "../shared/contracts.ts";
 import type { LayeredGuide } from "../shared/guide.ts";
 import { isUnderstood } from "../shared/progress.ts";
-import type { AskControl } from "./ask-action.tsx";
 import { Button } from "./button.tsx";
 import { NodeCode } from "./diff-view.tsx";
 import { FINISH_KEY, nextNotUnderstood, OVERVIEW_KEY, stepEntry, type Entry, type EntryGroup } from "./guide-entries.ts";
@@ -20,7 +19,6 @@ export type DetailProps = {
   selected: string;
   select: (key: string) => void;
   theme: PluginTheme;
-  ask: AskControl;
   openAgent?: (agentId: string) => void;
   /** The Finish review page, shown for `FINISH_KEY`. */
   finish: React.ReactNode;
@@ -31,7 +29,7 @@ export type DetailProps = {
  * An entry is drawn the first time it is selected and kept, hidden, after, so a comment half written
  * in it and where it was scrolled to are still there when the reviewer comes back.
  */
-export function Detail({ reviewId, agentId, guide, groups, selected, select, theme, ask, openAgent, finish }: DetailProps) {
+export function Detail({ reviewId, agentId, guide, groups, selected, select, theme, openAgent, finish }: DetailProps) {
   const colors = theme.colors;
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
   const visited = useRef(new Set<string>());
@@ -60,11 +58,11 @@ export function Detail({ reviewId, agentId, guide, groups, selected, select, the
       <>
         <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>{group.title}</Text>
         {entry.kind === "node" ? (
-          <NodeCard node={entry.node} titles={titles} colors={colors} ask={ask} code={code} collapsible={false} />
+          <NodeCard node={entry.node} titles={titles} colors={colors} code={code} collapsible={false} />
         ) : (
           <Card colors={colors}>
             {group.kind === "unsorted" ? <UnsortedNote colors={colors} /> : null}
-            <FileEntry colors={colors} entry={entry} ask={ask} code={code} collapsible={false} />
+            <FileEntry colors={colors} entry={entry} code={code} collapsible={false} />
           </Card>
         )}
       </>

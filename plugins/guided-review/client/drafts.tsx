@@ -22,11 +22,12 @@ import { Button } from "./button.tsx";
  * on text the reviewer highlighted in the guide carries that text as its `quote`, and the `item`
  * of its card it opens under (see `Selected`); one that opened on its own when the reviewer let go
  * of the highlight has `keepSelection`, so it leaves the highlight in place to copy rather than
- * taking focus.
+ * taking focus. An `ask` box takes only a question, for "Ask about this" on the node or entry at `place`.
  */
 export type OpenBox =
   | { kind: "new"; place: string; location: DraftLocation; quote?: string; item?: string | undefined; keepSelection?: boolean }
-  | { kind: "edit"; place: string; draftId: string };
+  | { kind: "edit"; place: string; draftId: string }
+  | { kind: "ask"; place: string };
 
 /**
  * The reviewer's drafts and what the panel does with them, shared through `DraftsContext` so the
@@ -159,7 +160,8 @@ export function useDrafts(
 
 /**
  * The box for a new comment at `location`. Every comment box in the panel is opened through this
- * or `DraftCard`, which is where actions for all of them, like "Suggest wording", go. The comment
+ * or `DraftCard`, which is where actions for all of them, like "Suggest wording", go; `AskAction`'s
+ * box takes a question, not a comment. The comment
  * is linked to the node whose code the box is drawn in, or for a general comment to `from`, with
  * the `quote` highlighted there. Only a new comment offers "Ask agent", which asks about the same
  * subject instead of saving.
