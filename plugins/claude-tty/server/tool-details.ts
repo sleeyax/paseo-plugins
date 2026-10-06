@@ -1,5 +1,6 @@
 import type { AcpTransformer } from "@getpaseo/plugin/server/acp";
 import type { ProviderConnection, ProviderEvent, ProviderToolCallDetail } from "@getpaseo/plugin/server/provider";
+import { parseBackgroundCommandMeta, type BackgroundCommand } from "./background-commands.ts";
 
 /** Mirrors the adapter's own `TOOL_CALL_MIRROR_METHOD`; the plugin runs in the daemon and cannot import it. */
 export const TOOL_CALL_MIRROR_METHOD = "_claude_tty/tool_call";
@@ -17,6 +18,7 @@ type Snapshot = {
   locations: string[] | null;
   rawInput: Json;
   rawOutput: Json;
+  backgroundCommand: { taskId: string; outputFile: string | null } | null;
 };
 
 /**
@@ -39,7 +41,12 @@ type Snapshot = {
  * session shows on the daemon's built-in bridge. The one branch left out is the terminal content
  * block, which needs ACP terminals the adapter does not implement.
  */
-export function toolCallDetails(): { transformer: AcpTransformer; wrap(connection: ProviderConnection): ProviderConnection } {
+export function toolCallDetails(): {
+  transformer: AcpTransformer;
+  wrap(connection: ProviderConnection): ProviderConnection;
+  /** The background command a session's tool call launched, or null where it launched none. */
+  backgroundCommand(sessionId: string, callId: string): BackgroundCommand | null;
+} {
   // Per session, because a call is only named within one and because a session ending is then the
   // whole of the bookkeeping. What is held is a second copy of what the bridge holds for itself.
   const snapshots = new Map<string, Map<string, Snapshot>>();
@@ -80,6 +87,16 @@ export function toolCallDetails(): { transformer: AcpTransformer; wrap(connectio
         },
       };
     },
+    backgroundCommand(sessionId, callId) {
+      const snapshot = snapshots.get(sessionId)?.get(callId);
+      if (snapshot === undefined || snapshot.backgroundCommand === null) return null;
+      const input = asRecord(snapshot.rawInput);
+      return {
+        ...snapshot.backgroundCommand,
+        command: shellCommand(input) ?? snapshot.title,
+        description: readString(input, ["description"]) ?? null,
+      };
+    },
   };
 }
 
@@ -92,6 +109,7 @@ function merge(update: JsonRecord, previous: Snapshot | undefined): Snapshot {
     locations: asLocations(update.locations) ?? previous?.locations ?? null,
     rawInput: update.rawInput !== undefined ? update.rawInput : (previous?.rawInput ?? null),
     rawOutput: update.rawOutput !== undefined ? update.rawOutput : (previous?.rawOutput ?? null),
+    backgroundCommand: parseBackgroundCommandMeta(update._meta) ?? previous?.backgroundCommand ?? null,
   };
 }
 
