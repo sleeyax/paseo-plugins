@@ -1,8 +1,10 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { ReviewHeader, StartPhase, StartProgress } from "../shared/contracts.ts";
+import type { ForeignWork } from "../shared/foreign-work.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { errorMessage } from "./error-message.ts";
+import { foreignWorkOf } from "./foreign-work.ts";
 import type { ChangeRequest, ChangeRequestRef, Forge } from "./forge/port.ts";
 import type { GuideGenerations } from "./guide-generation.ts";
 import { oneAtATimePer } from "./one-at-a-time.ts";
@@ -117,6 +119,8 @@ export class ReviewPreparation {
       return;
     }
 
+    // Read beside the workspace's preparation, which it does not depend on.
+    const foreign = this.#foreignWork(forge, changeRequest);
     const workspace = await this.#workspaceFor(id, forge, changeRequest, job, own, headMoved);
     if (previous !== null && previous.workspace.id !== workspace.id) {
       // The `workspace.archived` hook is not replayed after a restart, so an old workspace's agents are ended here too.
@@ -127,6 +131,7 @@ export class ReviewPreparation {
     }
 
     const previousHeadSha = headMoved ? previous.header.headSha : previous?.previousHeadSha;
+    const foreignWork = await foreign;
     const record: ReviewRecord = {
       id,
       ref,
@@ -136,9 +141,25 @@ export class ReviewPreparation {
       updatedAt: this.#now().toISOString(),
       ...(job.note === null ? {} : { note: job.note }),
       ...(previousHeadSha === undefined ? {} : { previousHeadSha }),
+      ...(foreignWork === null ? {} : { foreign: foreignWork }),
     };
     await this.#store.save(record, changeRequest);
     await this.#ready(job, record);
+  }
+
+  /**
+   * The other change requests' work `changeRequest` carries, or null when it carries none. Failing
+   * to read it is logged and reads as none, since the review does not need it; it never rejects, as
+   * it is awaited only once the workspace is ready, which may fail first.
+   */
+  async #foreignWork(forge: Forge, changeRequest: ChangeRequest): Promise<ForeignWork | null> {
+    try {
+      const belongsTo = await forge.commitChangeRequests(changeRequest.ref, changeRequest.commits.map((commit) => commit.sha));
+      return foreignWorkOf(changeRequest, belongsTo);
+    } catch (error) {
+      this.#log(`Could not read which change requests the commits of ${changeRequest.ref.url} belong to: ${errorMessage(error)}`);
+      return null;
+    }
   }
 
   /** Ready only once the guide is asked for, so nothing following the job reads a ready review as having none. */

@@ -245,6 +245,73 @@ test("a start after a push keeps the guide at its head, and only the title and s
   });
 });
 
+/** Has the sample PR's one commit come from #5 on another branch, merged into `main`. */
+function carryForeignCommit(forge: FakeForge) {
+  forge.commitChangeRequestsAnswer.set("c".repeat(40), [
+    { number: 5, url: "https://github.com/acme/uploader/pull/5", title: "Back off", state: "merged", sourceBranch: "backoff", targetBranch: "main" },
+  ]);
+}
+
+test("the panel says which of the PR's commits belong to another PR, and whether the reviewer wrote it", async (t) => {
+  const { service, forge } = await withHost(t);
+  carryForeignCommit(forge);
+
+  const progress = await startAndSettle(service, URL);
+
+  const panel = await service.panel({ workspaceId: progress.workspaceId! });
+  assert.equal(panel.status, "ready");
+  assert.deepEqual(panel.status === "ready" ? panel.foreign : null, {
+    work: {
+      targetBranch: "main",
+      changeRequests: [
+        {
+          number: 5,
+          url: "https://github.com/acme/uploader/pull/5",
+          title: "Back off",
+          state: "merged",
+          sourceBranch: "backoff",
+          targetBranch: "main",
+          commits: ["c".repeat(40)],
+        },
+      ],
+      foreignCommits: 1,
+      totalCommits: 1,
+      truncated: false,
+      ownFrom: null,
+    },
+    viewerIsAuthor: false,
+  });
+});
+
+test("a forge that cannot say which PRs the commits belong to leaves the start to go ahead with none", async (t) => {
+  const { service, forge } = await withHost(t);
+  carryForeignCommit(forge);
+  forge.failCommitChangeRequests = new ForgeError("gh failed: HTTP 502");
+
+  const progress = await startAndSettle(service, URL);
+
+  assert.equal(progress.phase, "ready");
+  const panel = await service.panel({ workspaceId: progress.workspaceId! });
+  assert.equal(panel.status === "ready" && "foreign" in panel, false);
+});
+
+test("a start after a push keeps the foreign work read at the guide's head, and Regenerate reads it at the new one", async (t) => {
+  const { service, forge } = await withHost(t);
+  carryForeignCommit(forge);
+  const progress = await startAndSettle(service, URL);
+  forge.commitChangeRequestsAnswer.clear();
+  forge.changeRequests.set(URL, sampleChangeRequest(URL, { headSha: "d".repeat(40) }));
+
+  await startAndSettle(service, URL);
+  const kept = await service.panel({ workspaceId: progress.workspaceId! });
+  assert.equal(kept.status === "ready" ? kept.foreign?.work.foreignCommits : null, 1);
+
+  await service.regenerate({ reviewId: "github/github.com/acme/uploader/7" });
+  await service.settled();
+  const regenerated = await service.panel({ workspaceId: progress.workspaceId! });
+  assert.equal(regenerated.status === "ready" && "foreign" in regenerated, false);
+});
+
 test("a review survives a plugin restart, and keeps what the forge said at its head SHA", async (t) => {
   const { service, restart, data } = await withHost(t);
 

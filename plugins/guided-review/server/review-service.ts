@@ -224,6 +224,7 @@ export class ReviewService {
       header: record.header,
       guide: await this.#guides.state(record),
       ...(record.note ? { note: record.note } : {}),
+      ...(record.foreign ? { foreign: { work: record.foreign, viewerIsAuthor: viewerIsAuthor(record) } } : {}),
     };
   }
 
@@ -816,11 +817,15 @@ function ownWorkspace(checkout: LocalCheckout): ReviewWorkspace {
 function verdictsFor(record: ReviewRecord, head: HeadCheck): VerdictOption[] {
   return verdictOptions({
     forge: record.ref.forge,
-    // Both forges take a username in any case.
-    own: record.viewer.login.toLowerCase() === record.header.author.toLowerCase(),
+    own: viewerIsAuthor(record),
     state: head.state ?? record.header.state,
     head,
   });
+}
+
+function viewerIsAuthor(record: ReviewRecord): boolean {
+  // Both forges take a username in any case.
+  return record.viewer.login.toLowerCase() === record.header.author.toLowerCase();
 }
 
 /** A screenshot is well within it, and every image is one RPC message, base64 and all. */

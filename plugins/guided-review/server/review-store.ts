@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ReviewHeader } from "../shared/contracts.ts";
 import type { CommentOrigin } from "../shared/drafts.ts";
+import type { ForeignWork } from "../shared/foreign-work.ts";
 import type { LayeredGuide, LayeredNode } from "../shared/guide.ts";
 import type { ChangeRequest, ChangeRequestRef, ForgeUser } from "./forge/port.ts";
 import { readJson, writeJson } from "./json-file.ts";
@@ -26,6 +27,8 @@ export type ReviewRecord = {
   previousHeadSha?: string;
   /** The head the reviewer's last review from here was published at; absent until one is. */
   submittedHeadSha?: string;
+  /** The other change requests' commits the change request carries at `header.headSha`; absent when it carries none, or they could not be read. */
+  foreign?: ForeignWork;
 };
 
 /**

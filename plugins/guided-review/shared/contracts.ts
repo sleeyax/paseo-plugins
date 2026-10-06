@@ -2,6 +2,7 @@ import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { FileDiffSchema } from "./diff.ts";
 import { CommentOriginSchema, DraftListSchema, DraftLocationSchema, LinkedDraftSchema, QuoteSchema } from "./drafts.ts";
+import { ForeignWorkSchema } from "./foreign-work.ts";
 import { GuideStateSchema } from "./guide.ts";
 import { InboxPreferencesSchema } from "./inbox-preferences.ts";
 import { CheckOffSchema, InboxSchema, LocalReviewSchema } from "./inbox.ts";
@@ -64,6 +65,8 @@ export const PanelViewSchema = z.discriminatedUnion("status", [
     guide: GuideStateSchema,
     /** Why the reviewer's own branch was left alone and the guide lives in this PR workspace instead. */
     note: z.string().optional(),
+    /** The other change requests' commits the diff shows as this one's, and whether the reviewer wrote it. */
+    foreign: z.object({ work: ForeignWorkSchema, viewerIsAuthor: z.boolean() }).optional(),
   }),
 ]);
 
