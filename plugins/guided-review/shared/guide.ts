@@ -141,6 +141,8 @@ export const GuideStateSchema = z.discriminatedUnion("status", [
   /** The guide agent is writing it; `agentId` is null until the agent exists. */
   z.object({ status: z.literal("generating"), agentId: z.string().nullable() }),
   z.object({ status: z.literal("ready"), agentId: z.string(), guide: LayeredGuideSchema }),
+  /** Nothing is generated until the reviewer chooses between the whole diff and the change request's own work. */
+  z.object({ status: z.literal("choosing-scope"), agentId: z.null() }),
   /** Generation failed; `message` is a sentence, and the panel offers to try again. */
   z.object({ status: z.literal("failed"), agentId: z.string().nullable(), message: z.string() }),
 ]);

@@ -1,10 +1,11 @@
 import { useRpc } from "@getpaseo/plugin/client";
 import { ExternalLink } from "@getpaseo/plugin/client/ui";
+import { useMutation } from "@tanstack/react-query";
 import React, { useState } from "react";
 import { View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import type { ForeignWorkView, ReviewHeader } from "../shared/contracts.ts";
-import { changeRequestKind, describeForeignCount, headsUpNote, type ForeignChangeRequest } from "../shared/foreign-work.ts";
+import { changeRequestKind, describeForeignCount, headsUpNote, type ForeignChangeRequest, type ReviewScope } from "../shared/foreign-work.ts";
 import { shortSha } from "../shared/head-change.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { Button } from "./button.tsx";
@@ -84,6 +85,51 @@ export function ForeignWorkBanner({ reviewId, header, foreign, colors }: Foreign
         </View>
       )}
     </Section>
+  );
+}
+
+export type ScopeChoiceProps = {
+  reviewId: string;
+  header: ReviewHeader;
+  foreign: ForeignWorkView | undefined;
+  colors: Colors;
+  /** Called once the choice is made, so the panel reads the guide being generated. */
+  onChosen: () => void;
+};
+
+/**
+ * Asks, before the guide is generated, whether it is to explain the whole diff or only the files the
+ * change request's own work changes, when its own work can be told from the other change requests'.
+ */
+export function ScopeChoice({ reviewId, header, foreign, colors, onChosen }: ScopeChoiceProps) {
+  const chooseScope = useRpc(contracts.chooseScope);
+  const choose = useMutation({ mutationFn: (scope: ReviewScope) => chooseScope({ reviewId, scope }), onSuccess: onChosen });
+  if (foreign === undefined) return null;
+
+  const { work } = foreign;
+  const kind = changeRequestKind(header.forge);
+  const count = describeForeignCount(work, header.forge);
+  const others = work.changeRequests.map((other) => numberLabel(header.forge, other.number)).join(", ");
+  const busy = choose.isPending;
+  return (
+    <>
+      <Line colors={colors}>
+        {count.charAt(0).toUpperCase() + count.slice(1)} come from {others}. The guide can explain the whole diff, or only this {kind}'s own work
+        {work.ownFrom === null ? "" : `, from ${shortSha(work.ownFrom)} on`}.
+      </Line>
+      <Line colors={colors} muted>
+        With its own work only, the files just the others change are listed apart, unexplained, and a file both change is explained whole.
+      </Line>
+      {choose.error ? (
+        <Line colors={colors} color={colors.statusDanger}>
+          {choose.error instanceof Error ? choose.error.message : String(choose.error)}
+        </Line>
+      ) : null}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing[2] }}>
+        <Button colors={colors} primary label="Own work only" disabled={busy} onPress={() => choose.mutate("own")} />
+        <Button colors={colors} label="Whole diff" disabled={busy} onPress={() => choose.mutate("full")} />
+      </View>
+    </>
   );
 }
 

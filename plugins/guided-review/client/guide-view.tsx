@@ -32,10 +32,12 @@ export type GuideViewProps = {
   retry: { run: () => void; pending: boolean; error: string | null };
   /** Draws the progress summary above the groups, where no sidebar shows it. */
   withProgress: boolean;
+  /** What the panel shows while the guide waits for the reviewer to choose what it is written from. */
+  scopeChoice: React.ReactNode;
 };
 
 /** The guide under the header: its generation while it runs, its failure with a retry, or the guide itself. */
-export function GuideView({ reviewId, state, theme, openAgent, retry, withProgress }: GuideViewProps) {
+export function GuideView({ reviewId, state, theme, openAgent, retry, withProgress, scopeChoice }: GuideViewProps) {
   const colors = theme.colors;
   const agentLink =
     state.agentId !== null && openAgent ? (
@@ -43,6 +45,8 @@ export function GuideView({ reviewId, state, theme, openAgent, retry, withProgre
     ) : null;
 
   switch (state.status) {
+    case "choosing-scope":
+      return <Card colors={colors}>{scopeChoice}</Card>;
     case "generating":
       return (
         <Card colors={colors}>

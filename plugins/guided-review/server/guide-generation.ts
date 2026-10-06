@@ -1,3 +1,4 @@
+import { canNarrow } from "../shared/foreign-work.ts";
 import { GuideSchema, type GuideState, type LayeredGuide } from "../shared/guide.ts";
 import { carryMarks } from "./carry-over.ts";
 import { errorMessage } from "./error-message.ts";
@@ -68,7 +69,9 @@ export class GuideGenerations {
     if (running) return { status: "generating", agentId: running.agentId };
 
     const stored = await this.#store.getGuide(record.id, record.header.headSha);
-    if (stored === null || stored.workspaceId !== record.workspace.id) return this.generate(record, null);
+    if (stored === null || stored.workspaceId !== record.workspace.id) {
+      return awaitsScope(record) ? { status: "choosing-scope", agentId: null } : this.generate(record, null);
+    }
     switch (stored.status) {
       case "ready":
         return { status: "ready", agentId: stored.agentId!, guide: stored.guide! };
@@ -191,6 +194,14 @@ export class GuideGenerations {
       updatedAt: this.#now().toISOString(),
     });
   }
+}
+
+/**
+ * Whether the review's guide waits for the reviewer to choose what it is written from: its own work
+ * can be told from another change request's, and they have not chosen yet.
+ */
+export function awaitsScope(record: ReviewRecord): boolean {
+  return record.scope === undefined && canNarrow(record.foreign);
 }
 
 export function isReady(record: GuideRecord): record is ReadyGuide {

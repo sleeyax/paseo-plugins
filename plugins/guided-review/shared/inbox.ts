@@ -68,7 +68,7 @@ export const LocalReviewSchema = z.object({
   header: ReviewHeaderSchema.nullable(),
   /** The review's start or Regenerate while it runs, and once it failed. */
   preparing: z.object({ phase: z.enum(START_PHASES), message: z.string().nullable() }).nullable(),
-  guide: z.enum(["none", "generating", "ready", "failed"]),
+  guide: z.enum(["none", "choosing-scope", "generating", "ready", "failed"]),
   workspaceId: z.string().nullable(),
 });
 

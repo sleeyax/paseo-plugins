@@ -2,7 +2,7 @@ import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { FileDiffSchema } from "./diff.ts";
 import { CommentOriginSchema, DraftListSchema, DraftLocationSchema, LinkedDraftSchema, QuoteSchema } from "./drafts.ts";
-import { ForeignWorkSchema } from "./foreign-work.ts";
+import { ForeignWorkSchema, REVIEW_SCOPES } from "./foreign-work.ts";
 import { GuideStateSchema } from "./guide.ts";
 import { InboxPreferencesSchema } from "./inbox-preferences.ts";
 import { CheckOffSchema, InboxSchema, LocalReviewSchema } from "./inbox.ts";
@@ -303,6 +303,17 @@ export const HeadCheckSchema = z.object({
  * Asks the forge where the review's head is now. Nothing changes on its own when it has moved: the
  * panel shows a banner and `regenerateGuide` is the only way to a guide at the new head.
  */
+/**
+ * Has the review's guide written from `scope`: the whole diff, or only the files the change request's
+ * own work changes, when its own work can be told from other change requests'. The choice holds for
+ * every later head. Returns at once; the panel follows the generation through `getPanel`.
+ */
+export const chooseScope = defineRpc({
+  name: "guided-review.review.scope",
+  input: z.object({ reviewId: z.string(), scope: z.enum(REVIEW_SCOPES) }),
+  output: GuideStateSchema,
+});
+
 /**
  * Posts the reviewer's comment asking the author to take other change requests' commits out of the
  * diff, as a thread the author resolves where the forge has one. Refused on the reviewer's own change

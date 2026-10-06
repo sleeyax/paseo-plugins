@@ -23,7 +23,7 @@ import type { CheckOff, Inbox } from "../shared/inbox.ts";
 import type { InboxPreferences } from "../shared/inbox-preferences.ts";
 import type { CommentOrigin, DraftList, DraftLocation, LinkedDraft } from "../shared/drafts.ts";
 import type { CoveredCode, GuideState, LayeredGuide } from "../shared/guide.ts";
-import { changeRequestKind } from "../shared/foreign-work.ts";
+import { canNarrow, changeRequestKind, type ReviewScope } from "../shared/foreign-work.ts";
 import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
 import type { SubmitResult, Verdict, VerdictOption } from "../shared/submit.ts";
 import { commentSubjectContext, type CommentSubjectContext } from "./comment-subject.ts";
@@ -268,6 +268,14 @@ export class ReviewService {
       description: head.description,
       message: null,
     };
+  }
+
+  async chooseScope({ reviewId, scope }: { reviewId: string; scope: ReviewScope }): Promise<GuideState> {
+    const record = await this.#record(reviewId);
+    if (!canNarrow(record.foreign)) throw new Error(`The ${changeRequestKind(record.ref.forge)}'s own work cannot be told apart, so its guide is of the whole diff.`);
+    const chosen: ReviewRecord = { ...record, scope };
+    await this.#store.update(chosen);
+    return this.#guides.state(chosen);
   }
 
   async postHeadsUp({ reviewId, body }: { reviewId: string; body: string }): Promise<null> {

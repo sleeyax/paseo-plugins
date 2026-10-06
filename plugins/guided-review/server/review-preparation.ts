@@ -142,6 +142,7 @@ export class ReviewPreparation {
       ...(job.note === null ? {} : { note: job.note }),
       ...(previousHeadSha === undefined ? {} : { previousHeadSha }),
       ...(foreignWork === null ? {} : { foreign: foreignWork }),
+      ...(previous?.scope === undefined ? {} : { scope: previous.scope }),
     };
     await this.#store.save(record, changeRequest);
     await this.#ready(job, record);

@@ -309,7 +309,13 @@ function stateOf(item: InboxItem): Tinted {
   }
 }
 
-const GUIDE_STATES: Record<LocalReview["guide"], string> = { none: "Started", generating: "Guide generating", ready: "Guide ready", failed: "Guide failed" };
+const GUIDE_STATES: Record<LocalReview["guide"], string> = {
+  none: "Started",
+  "choosing-scope": "Choose what to guide",
+  generating: "Guide generating",
+  ready: "Guide ready",
+  failed: "Guide failed",
+};
 
 /** What this plugin has of the review, and the reviewer's pending drafts wherever they were written. */
 function localOf(item: InboxItem): Tinted | null {

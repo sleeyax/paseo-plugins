@@ -40,8 +40,17 @@ export const ForeignWorkSchema = z.object({
   ownPaths: z.array(z.string()).nullable(),
 });
 
+/** What a guide is written from: the whole diff, or only the files the change request's own work changes. */
+export const REVIEW_SCOPES = ["full", "own"] as const;
+export type ReviewScope = (typeof REVIEW_SCOPES)[number];
+
 export type ForeignChangeRequest = z.output<typeof ForeignChangeRequestSchema>;
 export type ForeignWork = z.output<typeof ForeignWorkSchema>;
+
+/** Whether a guide can be written from the own work alone, which needs the files it changes. */
+export function canNarrow(work: ForeignWork | undefined): work is ForeignWork & { ownPaths: string[] } {
+  return work?.ownPaths != null;
+}
 
 /** The forge's word for a change request. */
 export function changeRequestKind(forge: "github" | "gitlab"): "MR" | "PR" {

@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ReviewHeader } from "../shared/contracts.ts";
 import type { CommentOrigin } from "../shared/drafts.ts";
-import type { ForeignWork } from "../shared/foreign-work.ts";
+import type { ForeignWork, ReviewScope } from "../shared/foreign-work.ts";
 import type { LayeredGuide, LayeredNode } from "../shared/guide.ts";
 import type { ChangeRequest, ChangeRequestRef, ForgeUser } from "./forge/port.ts";
 import { readJson, writeJson } from "./json-file.ts";
@@ -29,6 +29,8 @@ export type ReviewRecord = {
   submittedHeadSha?: string;
   /** The other change requests' commits the change request carries at `header.headSha`; absent when it carries none, or they could not be read. */
   foreign?: ForeignWork;
+  /** What the reviewer chose the guide be written from, for every head from then on; absent until they choose. */
+  scope?: ReviewScope;
 };
 
 /**

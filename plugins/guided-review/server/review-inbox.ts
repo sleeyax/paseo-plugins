@@ -1,6 +1,6 @@
 import type { Inbox, InboxItem, LocalReview, ReviewRequest } from "../shared/inbox.ts";
 import type { ChangeRequestRef, Forge } from "./forge/port.ts";
-import type { GuideGenerations } from "./guide-generation.ts";
+import { awaitsScope, type GuideGenerations } from "./guide-generation.ts";
 import type { InboxCheckOffsFile } from "./inbox-check-offs.ts";
 import type { ReviewPreparation } from "./review-preparation.ts";
 import { reviewIdOf, type ReviewRecord, type ReviewStore } from "./review-store.ts";
@@ -61,7 +61,7 @@ export class ReviewInbox {
     return {
       header: record.header,
       preparing,
-      guide: this.#guides.running(record) ? "generating" : (stored?.status ?? "none"),
+      guide: this.#guides.running(record) ? "generating" : (stored?.status ?? (awaitsScope(record) ? "choosing-scope" : "none")),
       workspaceId: (await this.#workspaces.isActive(record.workspace.id)) ? record.workspace.id : null,
     };
   }

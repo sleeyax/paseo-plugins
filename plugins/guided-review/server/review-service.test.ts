@@ -284,23 +284,30 @@ test("the panel says which of the PR's commits belong to another PR, and whether
   });
 });
 
-test("own work after another PR's lists the files it changes since the commit it was written on", async (t) => {
-  const { service, forge } = await withHost(t);
-  const [foreign, own] = ["e".repeat(40), "f".repeat(40)];
+const [FOREIGN, OWN] = ["e".repeat(40), "f".repeat(40)];
+
+/** Has the sample PR's own commit come after one of #5's, still open, with the files it changes listed. */
+function carryForeignWorkBelowOwn(forge: FakeForge) {
   forge.changeRequests.set(
     URL,
     sampleChangeRequest(URL, {
-      headSha: own,
+      headSha: OWN,
       commits: [
-        { sha: foreign, headline: "Back off", body: "", author: "other", authoredAt: "2026-09-01T10:00:00Z", parents: ["a".repeat(40)] },
-        { sha: own, headline: "Retry uploads", body: "", author: "author", authoredAt: "2026-09-02T10:00:00Z", parents: [foreign] },
+        { sha: FOREIGN, headline: "Back off", body: "", author: "other", authoredAt: "2026-09-01T10:00:00Z", parents: ["a".repeat(40)] },
+        { sha: OWN, headline: "Retry uploads", body: "", author: "author", authoredAt: "2026-09-02T10:00:00Z", parents: [FOREIGN] },
       ],
     }),
   );
-  forge.commitChangeRequestsAnswer.set(foreign, [
+  forge.commitChangeRequestsAnswer.set(FOREIGN, [
     { number: 5, url: "https://github.com/acme/uploader/pull/5", title: "Back off", state: "open", sourceBranch: "backoff", targetBranch: "main" },
   ]);
-  forge.changedPathsAnswer.set(`${foreign}..${own}`, ["src/upload.ts"]);
+  forge.changedPathsAnswer.set(`${FOREIGN}..${OWN}`, ["src/upload.ts"]);
+}
+
+test("own work after another PR's lists the files it changes since the commit it was written on", async (t) => {
+  const { service, forge } = await withHost(t);
+  const [foreign, own] = [FOREIGN, OWN];
+  carryForeignWorkBelowOwn(forge);
 
   const progress = await startAndSettle(service, URL);
 
@@ -313,6 +320,42 @@ test("own work after another PR's lists the files it changes since the commit it
   await service.settled();
   const unlisted = await service.panel({ workspaceId: progress.workspaceId! });
   assert.equal(unlisted.status === "ready" ? unlisted.foreign?.work.ownPaths : undefined, null, "a forge that cannot list them leaves none");
+});
+
+test("own work that can be told apart has the guide wait for the reviewer to choose what it explains, for every later head", async (t) => {
+  const { service, forge, guideAgents } = await withHost(t);
+  const reviewId = "github/github.com/acme/uploader/7";
+  carryForeignWorkBelowOwn(forge);
+
+  const progress = await startAndSettle(service, URL);
+
+  assert.equal(progress.phase, "ready");
+  const waiting = await service.panel({ workspaceId: progress.workspaceId! });
+  assert.deepEqual(waiting.status === "ready" ? waiting.guide : null, { status: "choosing-scope", agentId: null });
+  assert.equal(guideAgents.created.length, 0, "no guide agent is asked before the choice");
+  assert.equal((await service.localReviews({ reviewIds: [reviewId] })).reviews[0]?.local?.guide, "choosing-scope");
+
+  assert.deepEqual(await service.chooseScope({ reviewId, scope: "own" }), { status: "generating", agentId: null });
+  await service.settled();
+  assert.equal(guideAgents.created.length, 1);
+
+  const next = "d".repeat(40);
+  const current = forge.changeRequests.get(URL)!;
+  forge.changeRequests.set(URL, { ...current, headSha: next, commits: [...current.commits, { ...current.commits[1]!, sha: next, parents: [OWN] }] });
+  forge.changedPathsAnswer.set(`${FOREIGN}..${next}`, ["src/upload.ts"]);
+  await service.regenerate({ reviewId });
+  await service.settled();
+  const moved = await service.panel({ workspaceId: progress.workspaceId! });
+  assert.equal(moved.status === "ready" ? moved.guide.status : null, "ready", "the choice holds at the new head");
+  assert.equal(guideAgents.created.length, 2);
+});
+
+test("a scope is not chosen for a PR whose own work cannot be told apart", async (t) => {
+  const { service, forge } = await withHost(t);
+  carryForeignCommit(forge);
+  await startAndSettle(service, URL);
+
+  await assert.rejects(service.chooseScope({ reviewId: "github/github.com/acme/uploader/7", scope: "own" }), /cannot be told apart/);
 });
 
 test("a forge that cannot say which PRs the commits belong to leaves the start to go ahead with none", async (t) => {

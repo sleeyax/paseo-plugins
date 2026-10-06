@@ -12,7 +12,7 @@ import { DescriptionCard, useDescriptionEdited } from "./description.tsx";
 import { DraftsContext, DraftsSection, useDrafts } from "./drafts.tsx";
 import { GuideView } from "./guide-view.tsx";
 import { FinishBar, FinishReview, InlineFinishReview } from "./finish-review.tsx";
-import { ForeignWorkBanner } from "./foreign-work.tsx";
+import { ForeignWorkBanner, ScopeChoice } from "./foreign-work.tsx";
 import { StaleGuideBanner, useRegenerate } from "./head-check.tsx";
 import { Detail } from "./detail.tsx";
 import { EntryLinksContext } from "./entry-links.ts";
@@ -147,7 +147,11 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
       <Navigator groups={groups} selected={selected} select={select} drafts={drafts?.drafts ?? []} descriptionEdited={descriptionEdited} colors={colors} />
       {guide.status === "ready" ? null : (
         <Text style={{ paddingHorizontal: spacing[3], paddingBottom: spacing[3], color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>
-          {guide.status === "generating" ? "Its entries appear once the guide is written." : "No guide to list."}
+          {guide.status === "generating"
+            ? "Its entries appear once the guide is written."
+            : guide.status === "choosing-scope"
+              ? "Its entries appear once you choose what it explains."
+              : "No guide to list."}
         </Text>
       )}
     </View>
@@ -231,6 +235,11 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
         theme={theme}
         {...(openAgent ? { openAgent } : {})}
         withProgress={withProgress}
+        scopeChoice={
+          panel.data?.status === "ready" ? (
+            <ScopeChoice reviewId={reviewId} header={panel.data.header} foreign={panel.data.foreign} colors={colors} onChosen={() => void panel.refetch()} />
+          ) : null
+        }
         retry={{
           run: () => retry.mutate(reviewId),
           pending: retry.isPending,
