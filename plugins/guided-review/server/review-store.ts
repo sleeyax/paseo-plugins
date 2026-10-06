@@ -48,6 +48,8 @@ export type GuideRecord = {
   guide: LayeredGuide | null;
   /** Why generation failed, as a sentence. */
   message: string | null;
+  /** What the guide is written from; absent on a guide kept before there was a choice, which is of the whole diff. */
+  scope?: ReviewScope;
   updatedAt: string;
 };
 

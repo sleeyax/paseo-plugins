@@ -1,3 +1,5 @@
+import type { ForeignWork } from "../shared/foreign-work.ts";
+import { numberLabel } from "../shared/reference.ts";
 import { splitHunks } from "./diff.ts";
 import type { ChangedFile, ChangeRequest } from "./forge/port.ts";
 
@@ -10,13 +12,24 @@ export const MAX_PATCH_CHARS = 40_000;
  *
  * `changeRequest.files` is what the agent is to place; `setAside` counts the lockfiles and generated
  * files the caller kept from it, which are only mentioned so the size line does not mislead.
+ * `ownWork` is the foreign work of a guide of the change request's own work alone, whose commits
+ * are left out, and `foreignFiles` counts the files only they change, which the caller kept too.
  */
-export function guidePrompt(changeRequest: ChangeRequest, setAside = 0): string {
+export function guidePrompt(changeRequest: ChangeRequest, setAside = 0, ownWork: { foreign: ForeignWork; foreignFiles: number } | null = null): string {
   const { ref } = changeRequest;
+  const kind = ref.forge === "gitlab" ? "merge request" : "pull request";
+  const foreign = new Set(ownWork?.foreign.changeRequests.flatMap((other) => other.commits) ?? []);
+  const commits = changeRequest.commits.filter((commit) => !foreign.has(commit.sha));
+  const others = ownWork?.foreign.changeRequests.map((other) => numberLabel(ref.forge, other.number)).join(", ") ?? "";
   const sections = [
     `You are the guide agent for a code review. Write a guide to ${ref.url} that explains the change to a reviewer in the order it should be understood.`,
     RULES,
-    `# The ${ref.forge === "gitlab" ? "merge request" : "pull request"}`,
+    ...(ownWork === null
+      ? []
+      : [
+          `This guide is of the ${kind}'s own work only. Its branch also carries the commits of ${others}, which its target does not have yet; they are reviewed there, so they are left out of the commits below, and so are the files only they change. A file below may still hold some of their changes: place those like the rest.`,
+        ]),
+    `# The ${kind}`,
     [
       `Title: ${changeRequest.title}`,
       `Repository: ${ref.project}`,
@@ -28,9 +41,9 @@ export function guidePrompt(changeRequest: ChangeRequest, setAside = 0): string 
     "## Description",
     changeRequest.description.trim() || "(none)",
     "## Commits",
-    changeRequest.commits.length === 0
+    commits.length === 0
       ? "(none)"
-      : changeRequest.commits
+      : commits
           .map((commit) => {
             const body = commit.body.trim();
             return `- ${commit.sha.slice(0, 7)} ${commit.headline}${body ? `\n${indent(body)}` : ""}`;
@@ -50,6 +63,9 @@ export function guidePrompt(changeRequest: ChangeRequest, setAside = 0): string 
       ...changeRequest.files.map(describeFile),
       ...(setAside > 0
         ? [`(${setAside} lockfile or generated ${setAside === 1 ? "file is" : "files are"} left out: they are placed already.)`]
+        : []),
+      ...(ownWork !== null && ownWork.foreignFiles > 0
+        ? [`(${ownWork.foreignFiles} ${ownWork.foreignFiles === 1 ? "file" : "files"} only ${others} ${ownWork.foreignFiles === 1 ? "changes is" : "change are"} left out: they are placed already.)`]
         : []),
     ].join("\n"),
     "## Diff",

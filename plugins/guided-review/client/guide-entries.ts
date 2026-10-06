@@ -1,5 +1,6 @@
 import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
 import { pathOf, type LinkedDraft } from "../shared/drafts.ts";
+import { foreignGroupTitle } from "../shared/foreign-work.ts";
 import { splitSupporting, type LayeredGuide, type LayeredNode, type SupportingCategory } from "../shared/guide.ts";
 import { isUnderstood, type GuideProgress } from "../shared/progress.ts";
 
@@ -11,7 +12,7 @@ export type Entry =
 /** `id` is stable within a guide, so a fold or a progress row can name its group. */
 export type EntryGroup = {
   id: string;
-  kind: "layer" | "tests" | "docs" | "supporting" | "unsorted";
+  kind: "layer" | "tests" | "docs" | "supporting" | "unsorted" | "foreign";
   title: string;
   entries: Entry[];
 };
@@ -22,11 +23,14 @@ export const OVERVIEW_KEY = "overview";
 /** Finish review, which the detail pane shows like an entry though the navigator does not list it. */
 export const FINISH_KEY = "finish";
 
-/** The guide's groups trunk first: each layer from the foundations up, then Tests, Documentation, Supporting and Unsorted, leaving out empty ones. */
-export function guideGroups(guide: LayeredGuide): EntryGroup[] {
+/**
+ * The guide's groups trunk first: each layer from the foundations up, then Tests, Documentation,
+ * Supporting, Unsorted and the files only other change requests change, leaving out empty ones.
+ */
+export function guideGroups(guide: LayeredGuide, forge: "github" | "gitlab"): EntryGroup[] {
   const layers: Entry[][] = [];
   for (const node of guide.nodes) (layers[node.layer] ??= []).push(nodeEntry(node));
-  const { tests, docs, supporting } = splitSupporting(guide.supporting);
+  const { tests, docs, supporting, foreign } = splitSupporting(guide.supporting);
   const files = (entries: readonly { path: string; category: SupportingCategory | null }[]) => entries.map(({ path, category }) => fileEntry(path, category));
   const groups: EntryGroup[] = [
     // A node's layer is one past a node's it builds on, so no layer is empty.
@@ -35,6 +39,7 @@ export function guideGroups(guide: LayeredGuide): EntryGroup[] {
     { id: "docs", kind: "docs", title: "Documentation", entries: files(docs) },
     { id: "supporting", kind: "supporting", title: "Supporting", entries: files(supporting) },
     { id: "unsorted", kind: "unsorted", title: "Unsorted", entries: files(guide.unsorted.map((path) => ({ path, category: null }))) },
+    { id: "foreign", kind: "foreign", title: foreignGroupTitle(forge), entries: files(foreign) },
   ];
   return groups.filter((group) => group.entries.length > 0);
 }

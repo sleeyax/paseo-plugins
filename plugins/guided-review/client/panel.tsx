@@ -72,7 +72,8 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
   });
 
   const readyGuide = panel.data?.status === "ready" && panel.data.guide.status === "ready" ? panel.data.guide.guide : null;
-  const groups = useMemo(() => (readyGuide === null ? [] : guideGroups(readyGuide)), [readyGuide]);
+  const forge = panel.data?.status === "ready" ? panel.data.header.forge : null;
+  const groups = useMemo(() => (readyGuide === null || forge === null ? [] : guideGroups(readyGuide, forge)), [readyGuide, forge]);
   const [selected, select] = useSelection(groups, progress.progress);
   const links = useMemo(() => ({ groups, select }), [groups, select]);
   /** Where Finish review's Close goes back to. */
@@ -235,6 +236,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
         theme={theme}
         {...(openAgent ? { openAgent } : {})}
         withProgress={withProgress}
+        forge={forge ?? "github"}
         scopeChoice={
           panel.data?.status === "ready" ? (
             <ScopeChoice reviewId={reviewId} header={panel.data.header} foreign={panel.data.foreign} colors={colors} onChosen={() => void panel.refetch()} />

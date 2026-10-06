@@ -335,7 +335,7 @@ test("own work that can be told apart has the guide wait for the reviewer to cho
   assert.equal(guideAgents.created.length, 0, "no guide agent is asked before the choice");
   assert.equal((await service.localReviews({ reviewIds: [reviewId] })).reviews[0]?.local?.guide, "choosing-scope");
 
-  assert.deepEqual(await service.chooseScope({ reviewId, scope: "own" }), { status: "generating", agentId: null });
+  assert.deepEqual(await service.chooseScope({ reviewId, scope: "full" }), { status: "generating", agentId: null });
   await service.settled();
   assert.equal(guideAgents.created.length, 1);
 
@@ -348,6 +348,47 @@ test("own work that can be told apart has the guide wait for the reviewer to cho
   const moved = await service.panel({ workspaceId: progress.workspaceId! });
   assert.equal(moved.status === "ready" ? moved.guide.status : null, "ready", "the choice holds at the new head");
   assert.equal(guideAgents.created.length, 2);
+});
+
+test("a guide of the own work is written from its files and commits only, and lists the others' files apart", async (t) => {
+  const { service, forge, guideAgents } = await withHost(t);
+  const reviewId = "github/github.com/acme/uploader/7";
+  carryForeignWorkBelowOwn(forge);
+  const [retryPolicy] = sampleGuide().nodes;
+  guideAgents.answer = () =>
+    sampleGuideReply({ ...sampleGuide(), nodes: [{ ...retryPolicy!, covers: [{ path: "src/upload.ts", hunks: [], lines: [] }] }] });
+  const progress = await startAndSettle(service, URL);
+
+  await service.chooseScope({ reviewId, scope: "own" });
+  await service.settled();
+
+  const prompt = guideAgents.created[0]!.prompt;
+  assert.match(prompt, /This guide is of the pull request's own work only\. Its branch also carries the commits of #5/);
+  assert.match(prompt, /### src\/upload\.ts/);
+  assert.doesNotMatch(prompt, /### src\/retry\.ts/);
+  assert.match(prompt, /\(1 file only #5 changes is left out: they are placed already\.\)/);
+  assert.match(prompt, new RegExp(`- ${OWN.slice(0, 7)} Retry uploads`));
+  assert.doesNotMatch(prompt, new RegExp(`- ${FOREIGN.slice(0, 7)} Back off`));
+
+  const panel = await service.panel({ workspaceId: progress.workspaceId! });
+  assert.equal(panel.status, "ready");
+  const guide = panel.status === "ready" && panel.guide.status === "ready" ? panel.guide.guide : null;
+  assert.deepEqual(guide?.supporting, [{ path: "src/retry.ts", category: "foreign" }]);
+  assert.deepEqual((await service.readingProgress({ reviewId }))?.foreign, { understood: 0, total: 1 });
+});
+
+test("a guide of the whole diff, chosen, is written from every file and commit", async (t) => {
+  const { service, forge, guideAgents } = await withHost(t);
+  carryForeignWorkBelowOwn(forge);
+  await startAndSettle(service, URL);
+
+  await service.chooseScope({ reviewId: "github/github.com/acme/uploader/7", scope: "full" });
+  await service.settled();
+
+  const prompt = guideAgents.created[0]!.prompt;
+  assert.doesNotMatch(prompt, /own work only/);
+  assert.match(prompt, /### src\/retry\.ts/);
+  assert.match(prompt, new RegExp(`- ${FOREIGN.slice(0, 7)} Back off`));
 });
 
 test("a scope is not chosen for a PR whose own work cannot be told apart", async (t) => {

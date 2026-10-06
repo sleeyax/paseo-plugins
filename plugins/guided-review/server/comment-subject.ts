@@ -111,7 +111,9 @@ export function placementSentences(path: string, placement: FilePlacement | null
   const where =
     placement.category === null
       ? " Your guide did not place it in any node or in its Supporting group; it lists it as Unsorted."
-      : ` Your guide lists it under Supporting, as ${placement.category}.`;
+      : placement.category === "foreign"
+        ? " Your guide explains only this change request's own work, which does not change it: only other change requests' commits it carries do, so you were not shown it."
+        : ` Your guide lists it under Supporting, as ${placement.category}.`;
   if (placement.rest === null) return where;
   return `${where} What it lists there is the part no node covers: ${path}${rangesOf(placement.rest)}.`;
 }

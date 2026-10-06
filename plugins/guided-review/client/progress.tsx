@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
+import { foreignGroupTitle } from "../shared/foreign-work.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { isUnderstood, type GuideProgress, type Tally } from "../shared/progress.ts";
 import { EntryLinksContext } from "./entry-links.ts";
@@ -129,8 +130,8 @@ function MarkToggle({ place, subjects, label, colors }: { place: string; subject
   );
 }
 
-/** Progress through the guide trunk first: each layer from the foundations up, then Tests, Documentation, Supporting, Unsorted and overall. */
-export function ProgressSummary({ colors, layerTitle }: { colors: Colors; layerTitle: (layer: number) => string }) {
+/** Progress through the guide trunk first: each layer from the foundations up, then Tests, Documentation, Supporting, Unsorted, other change requests' files and overall. */
+export function ProgressSummary({ colors, layerTitle, forge }: { colors: Colors; layerTitle: (layer: number) => string; forge: "github" | "gitlab" }) {
   const progress = useContext(ProgressContext)?.progress ?? null;
   const links = useContext(EntryLinksContext);
   if (progress === null) return null;
@@ -159,6 +160,7 @@ export function ProgressSummary({ colors, layerTitle }: { colors: Colors; layerT
       {progress.docs.total > 0 ? <Row colors={colors} label="Documentation" tally={progress.docs} onPress={open("docs")} /> : null}
       {progress.supporting.total > 0 ? <Row colors={colors} label="Supporting" tally={progress.supporting} onPress={open("supporting")} /> : null}
       {progress.unsorted.total > 0 ? <Row colors={colors} label="Unsorted" tally={progress.unsorted} onPress={open("unsorted")} /> : null}
+      {progress.foreign.total > 0 ? <Row colors={colors} label={foreignGroupTitle(forge)} tally={progress.foreign} onPress={open("foreign")} /> : null}
       <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>{next}</Text>
     </Section>
   );

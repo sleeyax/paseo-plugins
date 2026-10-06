@@ -34,10 +34,11 @@ export type GuideViewProps = {
   withProgress: boolean;
   /** What the panel shows while the guide waits for the reviewer to choose what it is written from. */
   scopeChoice: React.ReactNode;
+  forge: "github" | "gitlab";
 };
 
 /** The guide under the header: its generation while it runs, its failure with a retry, or the guide itself. */
-export function GuideView({ reviewId, state, theme, openAgent, retry, withProgress, scopeChoice }: GuideViewProps) {
+export function GuideView({ reviewId, state, theme, openAgent, retry, withProgress, scopeChoice, forge }: GuideViewProps) {
   const colors = theme.colors;
   const agentLink =
     state.agentId !== null && openAgent ? (
@@ -78,7 +79,7 @@ export function GuideView({ reviewId, state, theme, openAgent, retry, withProgre
         <>
           <Overview guide={state.guide} colors={colors} />
           {agentLink ? <View style={{ alignItems: "flex-start" }}>{agentLink}</View> : null}
-          <Tree reviewId={reviewId} agentId={state.agentId} guide={state.guide} theme={theme} withProgress={withProgress} />
+          <Tree reviewId={reviewId} agentId={state.agentId} guide={state.guide} theme={theme} withProgress={withProgress} forge={forge} />
         </>
       );
   }
@@ -91,20 +92,22 @@ function Tree({
   guide,
   theme,
   withProgress,
+  forge,
 }: {
   reviewId: string;
   agentId: string;
   guide: LayeredGuide;
   theme: PluginTheme;
   withProgress: boolean;
+  forge: "github" | "gitlab";
 }) {
   const colors = theme.colors;
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
   const code = (entry: Entry) => <NodeCode reviewId={reviewId} agentId={agentId} subject={entry.subject} theme={theme} />;
   return (
     <>
-      {withProgress ? <ProgressSummary colors={colors} layerTitle={layerTitle} /> : null}
-      {guideGroups(guide).map((group) => (
+      {withProgress ? <ProgressSummary colors={colors} layerTitle={layerTitle} forge={forge} /> : null}
+      {guideGroups(guide, forge).map((group) => (
         <React.Fragment key={group.id}>
           <Heading colors={colors} subjects={group.entries.map((entry) => entry.subject)}>
             {group.title}
@@ -134,7 +137,7 @@ export function UnsortedNote({ colors }: { colors: Colors }) {
 }
 
 /** The overview, whose text the reviewer can highlight, or hold in the phone app, to comment on. */
-export function Overview({ guide, colors }: { guide: Guide; colors: Colors }) {
+export function Overview({ guide, colors }: { guide: Pick<Guide, "overview" | "nodes">; colors: Colors }) {
   const { overview } = guide;
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
   const { prose, text, selected } = useCardText({ kind: "overview" });
@@ -324,8 +327,8 @@ export function FileEntry({
   collapsible?: boolean;
 }) {
   const { path, category } = entry;
-  // Tests and Documentation are groups of their own, so only the rest of Supporting names its category.
-  const note = category === null || category === "test" || category === "docs" ? undefined : category;
+  // Tests, Documentation and other change requests' files are groups of their own, so only the rest of Supporting names its category.
+  const note = category === null || category === "test" || category === "docs" || category === "foreign" ? undefined : category;
   const [open, setOpen] = React.useState(category !== "lockfile" && category !== "generated");
   const [folded, setCollapsed] = useCollapsed({ kind: "file", path });
   const collapsed = collapsible && folded;

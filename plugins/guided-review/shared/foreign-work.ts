@@ -57,6 +57,11 @@ export function changeRequestKind(forge: "github" | "gitlab"): "MR" | "PR" {
   return forge === "gitlab" ? "MR" : "PR";
 }
 
+/** The group a guide of the own work lists the files only other change requests change in. */
+export function foreignGroupTitle(forge: "github" | "gitlab"): string {
+  return `From other ${changeRequestKind(forge)}s`;
+}
+
 /** "26 of the MR's 37 commits", or "at least 26 of the MR's commits" when the forge cut the list off. */
 export function describeForeignCount(work: ForeignWork, forge: "github" | "gitlab", whose: "the" | "this" = "the"): string {
   const kind = changeRequestKind(forge);

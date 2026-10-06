@@ -42,7 +42,7 @@ const guide: LayeredGuide = {
   unsorted: ["src/stray.ts"],
 };
 
-const groups = guideGroups(guide);
+const groups = guideGroups(guide, "github");
 
 function progress(marks: Partial<Understood>) {
   return summariseProgress(guide, "head", { nodes: [], files: [], ...marks });
@@ -68,7 +68,7 @@ test("orders the groups trunk first, with Tests and Documentation split from Sup
 });
 
 test("leaves out an empty group", () => {
-  const titles = guideGroups({ ...guide, supporting: [], unsorted: [] }).map((group) => group.title);
+  const titles = guideGroups({ ...guide, supporting: [], unsorted: [] }, "github").map((group) => group.title);
   assert.deepEqual(titles, ["Layer 1", "Layer 2"]);
 });
 

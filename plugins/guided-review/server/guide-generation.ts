@@ -1,8 +1,8 @@
-import { canNarrow } from "../shared/foreign-work.ts";
+import { canNarrow, type ForeignWork, type ReviewScope } from "../shared/foreign-work.ts";
 import { GuideSchema, type GuideState, type LayeredGuide } from "../shared/guide.ts";
 import { carryMarks } from "./carry-over.ts";
 import { errorMessage } from "./error-message.ts";
-import { setAside } from "./file-classes.ts";
+import { keepOwnWork, setAside } from "./file-classes.ts";
 import type { ChangedFile } from "./forge/port.ts";
 import { GUIDE_AGENT_LABEL, GUIDE_HEAD_LABEL, type GuideAgentPort } from "./guide-agent/port.ts";
 import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
@@ -108,12 +108,15 @@ export class GuideGenerations {
     const { headSha } = record.header;
     const key = `${record.id}@${headSha}`;
     const generation: Generation = { agentId, done: Promise.resolve() };
+    const own = ownWorkOf(record);
+    const scope: ReviewScope = own === null ? "full" : "own";
     const save = (update: Pick<GuideRecord, "status" | "guide" | "message">) =>
       this.#store.saveGuide(record.id, {
         headSha,
         workspaceId: record.workspace.id,
         agentId: generation.agentId,
         ...update,
+        scope,
         updatedAt: this.#now().toISOString(),
       });
 
@@ -121,15 +124,20 @@ export class GuideGenerations {
       if (generation.agentId === null) await save({ status: "generating", guide: null, message: null });
       const changeRequest = await this.#store.snapshot(record.id, headSha);
       if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
-      // Lockfiles and generated files never reach the agent; they go straight into Supporting.
-      const files = setAside(changeRequest.files);
+      // Lockfiles and generated files never reach the agent, nor, for the own work, other change requests' files; they go straight into Supporting.
+      const classified = setAside(changeRequest.files);
+      const files = own === null ? classified : keepOwnWork(classified, own.ownPaths);
+      const foreignFiles = files.setAside.length - classified.setAside.length;
       if (generation.agentId === null) {
         const schema = jsonSchemaOf(GuideSchema);
         const agent = await this.#guideAgents.create({
           workspace: record.workspace,
           title: `Guide: ${record.header.title}`,
           labels: { [GUIDE_AGENT_LABEL]: record.id, [GUIDE_HEAD_LABEL]: headSha },
-          prompt: withOutputSchema(guidePrompt({ ...changeRequest, files: files.sent }, files.setAside.length), schema),
+          prompt: withOutputSchema(
+            guidePrompt({ ...changeRequest, files: files.sent }, classified.setAside.length, own === null ? null : { foreign: own, foreignFiles }),
+            schema,
+          ),
           outputSchema: schema,
         });
         generation.agentId = agent.id;
@@ -194,6 +202,11 @@ export class GuideGenerations {
       updatedAt: this.#now().toISOString(),
     });
   }
+}
+
+/** The foreign work a guide of the review's own work leaves out: null for a guide of the whole diff. */
+export function ownWorkOf(record: ReviewRecord): (ForeignWork & { ownPaths: string[] }) | null {
+  return record.scope === "own" && canNarrow(record.foreign) ? record.foreign : null;
 }
 
 /**

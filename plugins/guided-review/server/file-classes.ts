@@ -52,6 +52,22 @@ export function classifyPath(filePath: string): SetAsideCategory | null {
   return null;
 }
 
+/**
+ * Sets aside, as well, the files of `split.sent` the own work does not change, by either path, for
+ * a guide of the own work: only other change requests' commits change them.
+ */
+export function keepOwnWork<T extends { path: string; previousPath: string | null }>(
+  split: { sent: T[]; setAside: SupportingEntry[] },
+  ownPaths: readonly string[],
+): { sent: T[]; setAside: SupportingEntry[] } {
+  const own = new Set(ownPaths);
+  const isOwn = (file: T) => own.has(file.path) || (file.previousPath !== null && own.has(file.previousPath));
+  return {
+    sent: split.sent.filter(isOwn),
+    setAside: [...split.setAside, ...split.sent.filter((file) => !isOwn(file)).map((file) => ({ path: file.path, category: "foreign" as const }))],
+  };
+}
+
 /** Splits the changed files into those the agent reads and those set aside for Supporting. */
 export function setAside<T extends { path: string }>(files: readonly T[]): { sent: T[]; setAside: SupportingEntry[] } {
   const sent: T[] = [];

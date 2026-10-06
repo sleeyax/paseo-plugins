@@ -75,6 +75,7 @@ const NOTHING_UNDERSTOOD = {
   docs: { understood: 0, total: 0 },
   supporting: { understood: 0, total: 0 },
   unsorted: { understood: 0, total: 1 },
+  foreign: { understood: 0, total: 0 },
   overall: { understood: 0, total: 4 },
   nextLayer: 0,
 };
@@ -133,6 +134,7 @@ test("Supporting and Unsorted entries are marked by path, and every node underst
     docs: { understood: 0, total: 0 },
     supporting: { understood: 0, total: 0 },
     unsorted: { understood: 1, total: 1 },
+    foreign: { understood: 0, total: 0 },
     overall: { understood: 4, total: 4 },
     nextLayer: null,
   });

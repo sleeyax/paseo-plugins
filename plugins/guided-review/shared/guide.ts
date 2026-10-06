@@ -28,12 +28,18 @@ const DependencySchema = z.object({
     .describe("Why that node has to be understood before this one, in one sentence, only when the two titles do not make it obvious; otherwise null."),
 });
 
-export const SUPPORTING_CATEGORIES = ["test", "docs", "lockfile", "generated", "wiring"] as const;
+/** What the agent may file a supporting change as. */
+const AGENT_SUPPORTING_CATEGORIES = ["test", "docs", "lockfile", "generated", "wiring"] as const;
 
-export const SupportingEntrySchema = z.object({
+/** `foreign` is a file only other change requests' commits change, which the service sets aside from a guide of the own work. */
+export const SUPPORTING_CATEGORIES = [...AGENT_SUPPORTING_CATEGORIES, "foreign"] as const;
+
+const AgentSupportingEntrySchema = z.object({
   path: z.string().min(1).describe("The path of a changed file, exactly as the changed files list gives it."),
-  category: z.enum(SUPPORTING_CATEGORIES).describe("What kind of supporting change it is."),
+  category: z.enum(AGENT_SUPPORTING_CATEGORIES).describe("What kind of supporting change it is."),
 });
+
+export const SupportingEntrySchema = AgentSupportingEntrySchema.extend({ category: z.enum(SUPPORTING_CATEGORIES) });
 
 export const GuideOverviewSchema = z.object({
   idea: z
@@ -109,7 +115,7 @@ export const GuideSchema = z.object({
     .min(1)
     .describe("The change split into concepts, each a named group of changes that does one thing, foundations first."),
   supporting: z
-    .array(SupportingEntrySchema)
+    .array(AgentSupportingEntrySchema)
     .describe("Changed files that support the change rather than make it: tests, docs and pure wiring."),
 });
 
@@ -130,7 +136,7 @@ export const LayeredNodeSchema = GuideNodeSchema.extend({
 export const LayeredGuideSchema = GuideSchema.extend({
   /** In the agent's order, which puts every node after the nodes it builds on. */
   nodes: z.array(LayeredNodeSchema),
-  /** The lockfiles and generated files the agent never saw, which no node covers, then the agent's own entries. */
+  /** The lockfiles, generated files and other change requests' files the agent never saw, which no node covers, then the agent's own entries. */
   supporting: z.array(SupportingEntrySchema),
   /** Changed files with changes no node covers that Supporting does not list, in the forge's order. */
   unsorted: z.array(z.string()),
@@ -159,14 +165,21 @@ export type LayeredGuide = z.output<typeof LayeredGuideSchema>;
 export type LayeredNode = z.output<typeof LayeredNodeSchema>;
 
 /**
- * Supporting's tests and docs apart from the rest of it, since the panel shows and tallies each as a group of its own.
+ * Supporting's tests, docs and other change requests' files apart from the rest of it, since the panel shows and tallies each as a group of its own.
  * The stored guide keeps them in Supporting, so guides and marks written before the split read the same.
  */
-export function splitSupporting(entries: readonly SupportingEntry[]): { tests: SupportingEntry[]; docs: SupportingEntry[]; supporting: SupportingEntry[] } {
+export function splitSupporting(entries: readonly SupportingEntry[]): {
+  tests: SupportingEntry[];
+  docs: SupportingEntry[];
+  supporting: SupportingEntry[];
+  foreign: SupportingEntry[];
+} {
+  const apart = new Set<SupportingCategory>(["test", "docs", "foreign"]);
   return {
     tests: entries.filter((entry) => entry.category === "test"),
     docs: entries.filter((entry) => entry.category === "docs"),
-    supporting: entries.filter((entry) => entry.category !== "test" && entry.category !== "docs"),
+    supporting: entries.filter((entry) => !apart.has(entry.category)),
+    foreign: entries.filter((entry) => entry.category === "foreign"),
   };
 }
 

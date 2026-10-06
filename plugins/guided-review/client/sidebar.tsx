@@ -35,7 +35,7 @@ export function Sidebar({ reviewId, header, note, foreign, drafts, regenerate, t
           <Note color={colors.statusWarning}>{note}</Note>
         </Section>
       ) : null}
-      <ProgressSummary colors={colors} layerTitle={layerTitle} />
+      <ProgressSummary colors={colors} layerTitle={layerTitle} forge={header.forge} />
       {drafts ? <DraftsSection control={drafts} colors={colors} /> : null}
     </>
   );

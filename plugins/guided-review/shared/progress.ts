@@ -27,9 +27,11 @@ export const GuideProgressSchema = z.object({
   layers: z.array(TallySchema),
   tests: TallySchema,
   docs: TallySchema,
-  /** Supporting without its tests and docs. */
+  /** Supporting without its tests, docs and other change requests' files. */
   supporting: TallySchema,
   unsorted: TallySchema,
+  /** The files only other change requests' commits change, set aside from a guide of the own work. */
+  foreign: TallySchema,
   /** Every node and every Supporting and Unsorted entry. */
   overall: TallySchema,
   /** The first layer, foundations first, with a node not yet understood; null once every node is. */
@@ -66,6 +68,7 @@ export function summariseProgress(guide: LayeredGuide, headSha: string, marks: U
   const docs = tallyOf(split.docs.map((entry) => entry.path));
   const supporting = tallyOf(split.supporting.map((entry) => entry.path));
   const unsorted = tallyOf(guide.unsorted);
+  const foreign = tallyOf(split.foreign.map((entry) => entry.path));
   const nextLayer = layers.findIndex((tally) => tally.understood < tally.total);
 
   return {
@@ -76,6 +79,7 @@ export function summariseProgress(guide: LayeredGuide, headSha: string, marks: U
     docs,
     supporting,
     unsorted,
+    foreign,
     overall: {
       understood: nodes.length + files.length,
       total: guide.nodes.length + outside.length,
