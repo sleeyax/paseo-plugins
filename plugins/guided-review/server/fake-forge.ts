@@ -54,6 +54,10 @@ export type FakeForge = Forge & {
   commitChangeRequestsAnswer: Map<string, CommitChangeRequest[]>;
   /** When set, the next `commitChangeRequests` fails with it. */
   failCommitChangeRequests: Error | null;
+  /** What `changedPaths` answers by `from..to`; a range with none listed fails. */
+  changedPathsAnswer: Map<string, string[] | null>;
+  /** Every range `changedPaths` was asked about, as `from..to`. */
+  comparisons: string[];
   /** Every comment posted outside a review, by change request URL, in order. */
   comments: { url: string; body: string }[];
   /** When set, the comment post after this many more fails with it. */
@@ -105,6 +109,8 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     failCommitsSince: null,
     commitChangeRequestsAnswer: new Map(),
     failCommitChangeRequests: null,
+    changedPathsAnswer: new Map(),
+    comparisons: [],
     comments: [],
     failComment: null,
     discussions: [],
@@ -169,6 +175,13 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
         throw error;
       }
       return new Map(shas.map((sha) => [sha, structuredClone(forge.commitChangeRequestsAnswer.get(sha) ?? [])]));
+    },
+    async changedPaths(_ref, from, to) {
+      const range = `${from}..${to}`;
+      forge.comparisons.push(range);
+      const answer = forge.changedPathsAnswer.get(range);
+      if (answer === undefined) throw new ForgeError(`gh failed: No common ancestor between ${from} and ${to}.`);
+      return structuredClone(answer);
     },
     async currentUser() {
       return forge.viewer;

@@ -10,7 +10,10 @@ import type { ChangeRequest, CommitChangeRequest } from "./forge/port.ts";
  * and comes from another branch: one from the same branch is this one's own earlier attempt, whose
  * commits are this one's work. A closed one's commits were never reviewed, so they are this one's too.
  */
-export function foreignWorkOf(changeRequest: ChangeRequest, belongsTo: ReadonlyMap<string, readonly CommitChangeRequest[]>): ForeignWork | null {
+export function foreignWorkOf(
+  changeRequest: ChangeRequest,
+  belongsTo: ReadonlyMap<string, readonly CommitChangeRequest[]>,
+): Omit<ForeignWork, "ownPaths"> | null {
   const byNumber = new Map<number, ForeignChangeRequest>();
   for (const commit of changeRequest.commits) {
     for (const other of belongsTo.get(commit.sha) ?? []) {

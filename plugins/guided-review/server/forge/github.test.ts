@@ -7,6 +7,7 @@ import {
   ADD_THREAD_MUTATION,
   COMMIT_PULL_REQUESTS_QUERY,
   createGitHubForge,
+  MAX_COMPARE_FILES,
   isAttachmentUrl,
   DELETE_COMMENT_MUTATION,
   DELETE_REVIEW_MUTATION,
@@ -694,6 +695,17 @@ test("a comment on the pull request as a whole is posted to its conversation, th
       },
     ],
   );
+});
+
+test("lists the files changed between two commits, and none once GitHub's comparison stops listing them", async () => {
+  const from = "93757ac9e0893b2d338a0c727f2e183c5defb6db";
+  const to = "a711a639b04f3bd2bfe514157e0c19880fe33028";
+  const full = JSON.stringify({ files: Array.from({ length: MAX_COMPARE_FILES }, (_, index) => ({ filename: `f${index}` })) });
+  const { forge, run } = forgeReplaying([{ stdout: fixture("compare.json") }, { stdout: full }]);
+
+  assert.deepEqual(await forge.changedPaths(PR_105, from, to), ["apps/claude-tty-acp/src/claude-runtime.test.ts", "plugins/claude-tty/CLAUDE.md"]);
+  assert.equal(await forge.changedPaths(PR_105, from, to), null);
+  assert.deepEqual(run.calls[0]?.args, ["api", "--hostname", "github.com", `repos/sleeyax/paseo-plugins/compare/${from}...${to}`]);
 });
 
 test("a discussion on the pull request is a comment on its conversation, as GitHub has no thread on a PR as a whole", async () => {

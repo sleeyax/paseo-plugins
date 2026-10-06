@@ -81,6 +81,12 @@ const CommitsResponse = z.array(
   }),
 );
 
+/** `compare_timeout` is GitLab giving up on the diff part-way, which leaves `diffs` short. */
+const CompareResponse = z.object({
+  compare_timeout: z.boolean(),
+  diffs: z.array(z.object({ old_path: z.string(), new_path: z.string() })),
+});
+
 const CommitMergeRequestsResponse = z.array(
   z.object({
     iid: z.number(),
@@ -655,6 +661,13 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
         return [sha, mergeRequests.map(commitMergeRequest)] as const;
       });
       return new Map(listed);
+    },
+
+    async changedPaths(ref, from, to) {
+      const query = new URLSearchParams({ from, to, straight: "true" });
+      const compare = await api(ref, CompareResponse, `projects/${await projectId(ref)}/repository/compare?${query}`);
+      if (compare.compare_timeout) return null;
+      return [...new Set(compare.diffs.flatMap((diff) => [diff.old_path, diff.new_path]))];
     },
 
     async currentUser(ref): Promise<ForgeUser> {

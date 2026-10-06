@@ -810,6 +810,28 @@ test("a request for changes GitLab recorded with the publish is not sent again",
   });
 });
 
+test("lists the files changed between two commits, a renamed file's both paths, and none when GitLab timed out", async () => {
+  const from = "942ec00911f34e52b2834c0a1bfea1b509574b15";
+  const to = "8e1ef79fe55aae06f0c7246e550f8c30075b7564";
+  const renamed = JSON.stringify({ compare_timeout: false, diffs: [{ old_path: "a.go", new_path: "b.go" }] });
+  const { forge, run } = forgeReplaying([
+    LOGGED_IN,
+    { stdout: fixture("project.json") },
+    { stdout: fixture("compare.json") },
+    { stdout: renamed },
+    { stdout: JSON.stringify({ compare_timeout: true, diffs: [] }) },
+  ]);
+
+  assert.deepEqual(await forge.changedPaths(MR_3931, from, to), [
+    "docs/source/mr/note/create.md",
+    "internal/commands/mr/note/mr_note_create.go",
+    "internal/commands/mr/note/mr_note_create_test.go",
+  ]);
+  assert.deepEqual(await forge.changedPaths(MR_3931, from, to), ["a.go", "b.go"]);
+  assert.equal(await forge.changedPaths(MR_3931, from, to), null);
+  assert.deepEqual(run.calls[2]?.args, ["api", "--hostname", "gitlab.com", `projects/34675721/repository/compare?from=${from}&to=${to}&straight=true`]);
+});
+
 test("a discussion on the merge request as a whole is a thread of its own, the text sent as JSON", async () => {
   const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, { stdout: JSON.stringify({ id: "abc", notes: [] }) }]);
 

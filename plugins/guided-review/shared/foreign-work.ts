@@ -33,6 +33,11 @@ export const ForeignWorkSchema = z.object({
    * null when the two are interleaved, or the commits are `truncated`.
    */
   ownFrom: z.string().nullable(),
+  /**
+   * The files the own work changes, which a guide of the own work alone is written from: null when
+   * `ownFrom` is, or the forge could not list them all.
+   */
+  ownPaths: z.array(z.string()).nullable(),
 });
 
 export type ForeignChangeRequest = z.output<typeof ForeignChangeRequestSchema>;

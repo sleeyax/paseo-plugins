@@ -278,9 +278,41 @@ test("the panel says which of the PR's commits belong to another PR, and whether
       totalCommits: 1,
       truncated: false,
       ownFrom: null,
+      ownPaths: null,
     },
     viewerIsAuthor: false,
   });
+});
+
+test("own work after another PR's lists the files it changes since the commit it was written on", async (t) => {
+  const { service, forge } = await withHost(t);
+  const [foreign, own] = ["e".repeat(40), "f".repeat(40)];
+  forge.changeRequests.set(
+    URL,
+    sampleChangeRequest(URL, {
+      headSha: own,
+      commits: [
+        { sha: foreign, headline: "Back off", body: "", author: "other", authoredAt: "2026-09-01T10:00:00Z", parents: ["a".repeat(40)] },
+        { sha: own, headline: "Retry uploads", body: "", author: "author", authoredAt: "2026-09-02T10:00:00Z", parents: [foreign] },
+      ],
+    }),
+  );
+  forge.commitChangeRequestsAnswer.set(foreign, [
+    { number: 5, url: "https://github.com/acme/uploader/pull/5", title: "Back off", state: "open", sourceBranch: "backoff", targetBranch: "main" },
+  ]);
+  forge.changedPathsAnswer.set(`${foreign}..${own}`, ["src/upload.ts"]);
+
+  const progress = await startAndSettle(service, URL);
+
+  const panel = await service.panel({ workspaceId: progress.workspaceId! });
+  const work = panel.status === "ready" ? panel.foreign?.work : null;
+  assert.deepEqual({ ownFrom: work?.ownFrom, ownPaths: work?.ownPaths }, { ownFrom: own, ownPaths: ["src/upload.ts"] });
+
+  forge.changedPathsAnswer.clear();
+  await service.regenerate({ reviewId: "github/github.com/acme/uploader/7" });
+  await service.settled();
+  const unlisted = await service.panel({ workspaceId: progress.workspaceId! });
+  assert.equal(unlisted.status === "ready" ? unlisted.foreign?.work.ownPaths : undefined, null, "a forge that cannot list them leaves none");
 });
 
 test("a forge that cannot say which PRs the commits belong to leaves the start to go ahead with none", async (t) => {

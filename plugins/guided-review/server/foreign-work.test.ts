@@ -151,6 +151,7 @@ const NOTE_WORK: ForeignWork = {
   totalCommits: 9,
   truncated: false,
   ownFrom: "9b3dac0caaaa",
+  ownPaths: null,
 };
 
 test("the heads-up names each foreign MR, what to do about it and where the own work starts", () => {

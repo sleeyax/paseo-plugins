@@ -160,6 +160,13 @@ const CommitPullRequestsResponse = z.object({
   }),
 });
 
+/** GitHub lists at most this many of a comparison's files, and no more on any page. */
+export const MAX_COMPARE_FILES = 300;
+
+const CompareResponse = z.object({
+  files: z.array(z.object({ filename: z.string(), previous_filename: z.string().nullish() })),
+});
+
 const PullRequestHeadResponse = z.object({
   data: z.object({
     repository: z
@@ -648,6 +655,12 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
         ]),
       );
       return new Map(shas.map((sha) => [sha, listed.get(sha) ?? []]));
+    },
+
+    async changedPaths(ref, from, to) {
+      const compare = await gh.json(CompareResponse, ["api", "--hostname", ref.host, `repos/${ref.project}/compare/${from}...${to}`]);
+      if (compare.files.length >= MAX_COMPARE_FILES) return null;
+      return [...new Set(compare.files.flatMap((file) => [file.filename, ...(file.previous_filename ? [file.previous_filename] : [])]))];
     },
 
     async currentUser(ref): Promise<ForgeUser> {

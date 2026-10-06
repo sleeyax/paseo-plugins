@@ -155,9 +155,25 @@ export class ReviewPreparation {
   async #foreignWork(forge: Forge, changeRequest: ChangeRequest): Promise<ForeignWork | null> {
     try {
       const belongsTo = await forge.commitChangeRequests(changeRequest.ref, changeRequest.commits.map((commit) => commit.sha));
-      return foreignWorkOf(changeRequest, belongsTo);
+      const work = foreignWorkOf(changeRequest, belongsTo);
+      return work === null ? null : { ...work, ownPaths: await this.#ownPaths(forge, changeRequest, work.ownFrom) };
     } catch (error) {
       this.#log(`Could not read which change requests the commits of ${changeRequest.ref.url} belong to: ${errorMessage(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * The files the own work from `ownFrom` changes, compared from the commit it was written on, its
+   * first parent. Null when there is no own work to tell apart, or the forge cannot list it.
+   */
+  async #ownPaths(forge: Forge, changeRequest: ChangeRequest, ownFrom: string | null): Promise<string[] | null> {
+    const after = changeRequest.commits.find((commit) => commit.sha === ownFrom)?.parents[0];
+    if (after === undefined) return null;
+    try {
+      return await forge.changedPaths(changeRequest.ref, after, changeRequest.headSha);
+    } catch (error) {
+      this.#log(`Could not list the files ${changeRequest.ref.url} changes since ${after}: ${errorMessage(error)}`);
       return null;
     }
   }

@@ -48,6 +48,11 @@ export interface Forge {
    * included, as the forge links them: by SHA, so a commit rebased onto another branch is a new one.
    */
   commitChangeRequests(ref: ChangeRequestRef, shas: readonly string[]): Promise<Map<string, CommitChangeRequest[]>>;
+  /**
+   * The paths of the files `to` changes since `from`, an ancestor of it in `ref`'s repository, a
+   * renamed file's both; null when the forge would list only some of them.
+   */
+  changedPaths(ref: ChangeRequestRef, from: string, to: string): Promise<string[] | null>;
   /** Who the CLI is logged in as on the change request's host. */
   currentUser(ref: ChangeRequestRef): Promise<ForgeUser>;
   /** Clones the change request's repository into `directory`, which must not exist yet. */
