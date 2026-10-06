@@ -103,7 +103,9 @@ function describeFile(file: ChangedFile): string {
  */
 function fileDiff(file: ChangedFile): string {
   const heading = `### ${file.path}`;
-  if (file.patch === null) return `${heading}\n\n(No diff: the file is binary, or too large for the forge to show. Read it in the repository.)`;
+  if (file.patch === null) {
+    return `${heading}\n\n(No diff: the file is binary, or too large for the forge to show. Read it in the repository, and cover it whole: leave \`hunks\` and \`lines\` empty, since there are none to name.)`;
+  }
   const hunks = splitHunks(file.patch);
   if (file.patch.length > MAX_PATCH_CHARS) {
     const headers = hunks.map((hunk, index) => `- Hunk ${index + 1}: ${hunk.split("\n", 1)[0]}`);

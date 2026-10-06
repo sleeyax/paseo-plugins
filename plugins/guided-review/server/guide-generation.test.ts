@@ -197,6 +197,23 @@ test("a node that names only a file's path covers all of it", async (t) => {
   assert.deepEqual(await guideOf(service), { status: "ready", agentId: "agent-1", guide: expected });
 });
 
+test("a file whose diff the forge withheld is covered whole, whatever lines the agent read in the checkout", async (t) => {
+  const { service, forge, agents } = await withHost(t);
+  const files = sampleChangeRequest(URL).files.map((file) => (file.path === "src/retry.ts" ? { ...file, additions: 0, patch: null } : file));
+  forge.changeRequests.set(URL, sampleChangeRequest(URL, { files }));
+  const guide = sampleGuide();
+  guide.nodes[0]!.covers = [{ path: "src/retry.ts", hunks: [3], lines: [{ start: 233, end: 257 }] }];
+  agents.answer = () => sampleGuideReply(guide);
+
+  await service.start({ url: URL });
+  await service.settled();
+
+  assert.match(agents.created[0]!.prompt, /### src\/retry\.ts\n\n\(No diff: .* cover it whole: leave `hunks` and `lines` empty/);
+  const shown = await guideOf(service);
+  assert.equal(shown?.status, "ready");
+  assert.deepEqual(shown?.status === "ready" ? shown.guide.nodes[0]!.covers : null, [{ path: "src/retry.ts", hunks: [], lines: [] }]);
+});
+
 test("a diff too large for the prompt is still listed by its numbered hunks, for nodes to name", async (t) => {
   const { service, forge, agents } = await withHost(t);
   const long = Array.from({ length: 5_000 }, (_, index) => `+line ${index}`).join("\n");

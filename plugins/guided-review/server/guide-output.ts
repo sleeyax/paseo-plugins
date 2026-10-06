@@ -19,18 +19,24 @@ export const MAX_LAYERS = 3;
  * `sent`, the changed files the agent was shown. Paths are normalised first, so a `./` the agent
  * adds is not an error. A cover naming one of the `setAside` paths, which the agent never saw, is
  * dropped rather than checked: those files are Supporting's whatever a node says, and a node left
- * covering nothing else is an error.
+ * covering nothing else is an error. A cover of a file whose diff the forge withheld covers all of
+ * it, whatever hunks or lines it names: the agent read that file in the checkout, and the diff has
+ * no lines to check them against.
  */
 export function parseGuide(reply: string, sent: readonly ChangedFile[], setAside: readonly string[]): GuideParse {
   const parsed = parseReply(reply, GuideSchema);
   if (!parsed.ok) return { ok: false, message: describeInvalid(parsed.errors) };
 
   const aside = new Set(setAside);
+  const withheld = new Set(sent.filter((file) => file.patch === null).map((file) => file.path));
   const errors: string[] = [];
   const guide = {
     ...parsed.value,
     nodes: parsed.value.nodes.map((node, index) => {
-      const covers = node.covers.map((cover) => ({ ...cover, path: normalise(cover.path) })).filter((cover) => !aside.has(cover.path));
+      const covers = node.covers
+        .map((cover) => ({ ...cover, path: normalise(cover.path) }))
+        .filter((cover) => !aside.has(cover.path))
+        .map((cover) => (withheld.has(cover.path) ? { ...cover, hunks: [], lines: [] } : cover));
       if (covers.length === 0) errors.push(`nodes.${index}.covers: it names only lockfiles or generated files, which are placed already`);
       return { ...node, covers };
     }),
