@@ -91,6 +91,13 @@ The SDK gives a plugin no data directory. `server/paths.ts` derives one in the P
 
 `server/command-runner.ts` keeps the whole of stdout, decoded once, because a truncated JSON document is worse than none; only a runaway command past 256 MiB is cut off, and that is a failure rather than a truncation.
 It takes stdin for `--input -`, which is how GraphQL and JSON bodies are sent: `gh api -F` turns a repository called `123` into a number.
+A call that prints a file, `Cli.bytes`, has stdout come back base64-encoded (`stdoutEncoding`), which a UTF-8 decode would corrupt, under a cap of its own (`maxStdoutBytes`), crossing which sets `outputExceeded` and fails as a sentence that names the cap.
+
+The description is `getDescription`, read from the snapshot at the review's head, and the head check carries the forge's own (`fetchHead` reads it in the same small read), which `shownDescription` in `client/shown-description.ts` shows instead once the author has edited it.
+`DESCRIPTION_KEY` in `client/guide-entries.ts` is a page no progress marks: first in `entryOrder`, where `startEntry` starts while nothing is marked, and skipped by `nextNotUnderstood`; the navigator lists it, and the overview, while the guide is still being written.
+Paseo gives plugins no Markdown renderer, so `client/markdown.ts` reads the description with markdown-it's standalone build (its import says why that build) into blocks of its own, and `client/markdown-view.tsx` draws them.
+An image goes through `getDescriptionImage`: `Forge.fetchAttachment` recognises only the forge's own attachment URLs (GitHub's `user-attachments`, a repository's `assets` and `user-images`; GitLab's `/uploads/` in either form it writes) and reads them with `gh api <url>` or GitLab's uploads API, which needs 17.4; any other URL is null and never fetched, so a description cannot send the daemon to a host of its choosing.
+`server/image-info.ts` reads the format and size from the image's header, since `gh api` gives no content type and GitLab's is `application/octet-stream`, and refuses what the panel's `Image` cannot draw, SVG among them.
 
 The review list is `getInbox`, listed per host by each forge's `listReviewRequests` (`shared/inbox.ts`), so one host failing comes back as its `error` and leaves the rest listed.
 GitHub drops a review request once the viewer reviews, so the GitHub adapter runs two searches, `REVIEW_SEARCHES`, the open requests and the open PRs the viewer reviewed and is not asked again on, kept only when a `ReviewRequestedEvent` in their timeline asked the viewer or any team, which together mean what GitLab's reviewer list does; it lists github.com only, as `parsePullRequestUrl` takes no other host. Its pages are 50, since a full page of that query timed out as a 502.
