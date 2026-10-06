@@ -43,6 +43,11 @@ export interface Forge {
    * list is cut off before `sha` turns up, so it cannot tell.
    */
   commitsSince(ref: ChangeRequestRef, sha: string): Promise<CommitsSince | null>;
+  /**
+   * Every change request each of `shas`, commits of the change request `ref`, belongs to, `ref`'s own
+   * included, as the forge links them: by SHA, so a commit rebased onto another branch is a new one.
+   */
+  commitChangeRequests(ref: ChangeRequestRef, shas: readonly string[]): Promise<Map<string, CommitChangeRequest[]>>;
   /** Who the CLI is logged in as on the change request's host. */
   currentUser(ref: ChangeRequestRef): Promise<ForgeUser>;
   /** Clones the change request's repository into `directory`, which must not exist yet. */
@@ -211,6 +216,18 @@ export type ChangeRequestCommit = {
   body: string;
   author: string;
   authoredAt: string;
+  /** The first parent first, as git orders them; a merge has more than one. */
+  parents: string[];
+};
+
+/** A change request a commit belongs to, as `commitChangeRequests` names it. */
+export type CommitChangeRequest = {
+  number: number;
+  url: string;
+  title: string;
+  state: ChangeRequestState;
+  sourceBranch: string;
+  targetBranch: string;
 };
 
 export type LinkedIssue = {

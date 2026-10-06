@@ -39,7 +39,7 @@ export const PULL_REQUEST_QUERY = `query GuidedReviewPullRequest($owner: String!
       author { login ... on User { name } }
       baseRefName baseRefOid headRefName headRefOid
       additions deletions changedFiles
-      commits(first: ${MAX_COMMITS}) { totalCount nodes { commit { oid messageHeadline messageBody authoredDate author { name user { login } } } } }
+      commits(first: ${MAX_COMMITS}) { totalCount nodes { commit { oid messageHeadline messageBody authoredDate author { name user { login } } parents(first: 2) { nodes { oid } } } } }
       closingIssuesReferences(first: ${MAX_LINKED_ISSUES}) { nodes { number url title body state } }
     }
   }
@@ -71,6 +71,7 @@ const PullRequestResponse = z.object({
                     messageBody: z.string(),
                     authoredDate: z.string(),
                     author: z.object({ name: z.string().nullish(), user: z.object({ login: z.string() }).nullish() }).nullish(),
+                    parents: z.object({ nodes: z.array(z.object({ oid: z.string() })) }),
                   }),
                 }),
               ),
@@ -107,6 +108,52 @@ const PullRequestCommitsResponse = z.object({
       .object({
         pullRequest: z
           .object({ commits: z.object({ totalCount: z.number(), nodes: z.array(z.object({ commit: z.object({ oid: z.string() }) })) }) })
+          .nullable(),
+      })
+      .nullable(),
+  }),
+});
+
+/**
+ * The pull requests each of the PR's commits belongs to. GitHub links a commit on the default branch
+ * only to the merged PR that brought it there, and any other to every open or merged PR that has it.
+ */
+export const COMMIT_PULL_REQUESTS_QUERY = `query GuidedReviewCommitPullRequests($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      commits(first: ${MAX_COMMITS}) { nodes { commit { oid associatedPullRequests(first: 10) { nodes { number url title state headRefName baseRefName } } } } }
+    }
+  }
+}`;
+
+const CommitPullRequestsResponse = z.object({
+  data: z.object({
+    repository: z
+      .object({
+        pullRequest: z
+          .object({
+            commits: z.object({
+              nodes: z.array(
+                z.object({
+                  commit: z.object({
+                    oid: z.string(),
+                    associatedPullRequests: z.object({
+                      nodes: z.array(
+                        z.object({
+                          number: z.number(),
+                          url: z.string(),
+                          title: z.string(),
+                          state: z.enum(["OPEN", "CLOSED", "MERGED"]),
+                          headRefName: z.string(),
+                          baseRefName: z.string(),
+                        }),
+                      ),
+                    }),
+                  }),
+                }),
+              ),
+            }),
+          })
           .nullable(),
       })
       .nullable(),
@@ -538,6 +585,7 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
           body: commit.messageBody,
           author: commit.author?.user?.login ?? commit.author?.name ?? "unknown",
           authoredAt: commit.authoredDate,
+          parents: commit.parents.nodes.map((parent) => parent.oid),
         })),
         linkedIssues: pr.closingIssuesReferences.nodes.map((issue) => ({ ...issue })),
         files: files.map((file) => ({
@@ -572,6 +620,27 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
       if (!commits) throw new ForgeError(`${ref.project} has no pull request #${ref.number}.`);
       const newestFirst = commits.nodes.map((node) => node.commit.oid).reverse();
       return commitsSinceIn(newestFirst, sha, commits.totalCount <= newestFirst.length);
+    },
+
+    /** One query over the PR's own commits, which are the ones asked about. */
+    async commitChangeRequests(ref, shas) {
+      const response = await graphql(ref, CommitPullRequestsResponse, COMMIT_PULL_REQUESTS_QUERY, pullRequestVariables(ref));
+      const commits = response.data.repository?.pullRequest?.commits;
+      if (!commits) throw new ForgeError(`${ref.project} has no pull request #${ref.number}.`);
+      const listed = new Map(
+        commits.nodes.map(({ commit }) => [
+          commit.oid,
+          commit.associatedPullRequests.nodes.map((pr) => ({
+            number: pr.number,
+            url: pr.url,
+            title: pr.title,
+            state: STATES[pr.state],
+            sourceBranch: pr.headRefName,
+            targetBranch: pr.baseRefName,
+          })),
+        ]),
+      );
+      return new Map(shas.map((sha) => [sha, listed.get(sha) ?? []]));
     },
 
     async currentUser(ref): Promise<ForgeUser> {

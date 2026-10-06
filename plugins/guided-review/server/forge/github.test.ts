@@ -5,6 +5,7 @@ import test from "node:test";
 import { fakeCommandRunner, type FakeCommandRunner, type ScriptedResult } from "../fake-command-runner.ts";
 import {
   ADD_THREAD_MUTATION,
+  COMMIT_PULL_REQUESTS_QUERY,
   createGitHubForge,
   isAttachmentUrl,
   DELETE_COMMENT_MUTATION,
@@ -118,6 +119,7 @@ test("reads a pull request's metadata, commits, linked issues and files through 
   assert.equal(pr.commits.length, 3);
   assert.equal(pr.commits[0]?.author, "sleeyax");
   assert.match(pr.commits[0]?.sha ?? "", /^[0-9a-f]{40}$/);
+  assert.deepEqual(pr.commits[0]?.parents, [pr.baseSha]);
 
   assert.deepEqual(
     pr.linkedIssues.map(({ number, title, state }) => ({ number, title, state })),
@@ -199,6 +201,31 @@ test("reads only where a pull request's head is now, its state and its descripti
       },
     ],
   );
+});
+
+test("lists the pull requests each commit belongs to in one query", async () => {
+  const { forge, run } = forgeReplaying([{ stdout: fixture("commit-pull-requests.json") }]);
+  const first = "93757ac9e0893b2d338a0c727f2e183c5defb6db";
+
+  const listed = await forge.commitChangeRequests(PR_105, [first, "f".repeat(40)]);
+
+  assert.deepEqual(Object.fromEntries(listed), {
+    [first]: [
+      {
+        number: 105,
+        url: "https://github.com/sleeyax/paseo-plugins/pull/105",
+        title: "chore: build the plugins against Paseo SDK 0.9.2",
+        state: "merged",
+        sourceBranch: "chore/paseo-sdk-0.9.2",
+        targetBranch: "main",
+      },
+    ],
+    ["f".repeat(40)]: [],
+  });
+  assert.deepEqual(JSON.parse(run.calls[0]?.input ?? ""), {
+    query: COMMIT_PULL_REQUESTS_QUERY,
+    variables: { owner: "sleeyax", name: "paseo-plugins", number: 105 },
+  });
 });
 
 test("counts the commits since an earlier head from the pull request's latest, newest last", async () => {

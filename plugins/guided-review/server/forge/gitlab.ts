@@ -6,7 +6,7 @@ import type { Verdict } from "../../shared/submit.ts";
 import type { CiState, ReviewerState, ReviewRequest, ReviewRequestHost } from "../../shared/inbox.ts";
 import { createCli, type Cli } from "./cli.ts";
 import { GITHUB_HOST } from "./github.ts";
-import { CLONE_TIMEOUT_MS, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, userOf } from "./common.ts";
+import { CLONE_TIMEOUT_MS, COMMIT_READS_AT_ONCE, mapAtMost, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, userOf } from "./common.ts";
 import { SubmitSteps } from "./submit-steps.ts";
 import {
   commitsSinceIn,
@@ -18,6 +18,7 @@ import {
   type ChangeRequestHead,
   type ChangeRequestRef,
   type ChangeRequestState,
+  type CommitChangeRequest,
   type DraftAnchor,
   type DraftTarget,
   type Forge,
@@ -76,6 +77,18 @@ const CommitsResponse = z.array(
     message: z.string(),
     author_name: z.string(),
     authored_date: z.string(),
+    parent_ids: z.array(z.string()),
+  }),
+);
+
+const CommitMergeRequestsResponse = z.array(
+  z.object({
+    iid: z.number(),
+    web_url: z.string(),
+    title: z.string(),
+    state: z.enum(["opened", "closed", "locked", "merged"]),
+    source_branch: z.string(),
+    target_branch: z.string(),
   }),
 );
 
@@ -599,6 +612,7 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
           body: commit.message.replace(/\r\n/g, "\n").split("\n").slice(1).join("\n").trim(),
           author: commit.author_name,
           authoredAt: commit.authored_date,
+          parents: commit.parent_ids,
         })),
         linkedIssues: issues.flatMap((issue) =>
           issue.iid === undefined || issue.web_url === undefined
@@ -632,6 +646,15 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       // Newest first; a page shorter than asked for is all of them.
       const commits = await api(ref, CommitIdsResponse, `${await mergeRequest(ref)}/commits?per_page=${COMMITS_SINCE_PAGE}`);
       return commitsSinceIn(commits.map((commit) => commit.id), sha, commits.length < COMMITS_SINCE_PAGE);
+    },
+
+    async commitChangeRequests(ref, shas) {
+      const commits = `projects/${await projectId(ref)}/repository/commits`;
+      const listed = await mapAtMost(shas, COMMIT_READS_AT_ONCE, async (sha) => {
+        const mergeRequests = await api(ref, CommitMergeRequestsResponse, `${commits}/${sha}/merge_requests`);
+        return [sha, mergeRequests.map(commitMergeRequest)] as const;
+      });
+      return new Map(listed);
     },
 
     async currentUser(ref): Promise<ForgeUser> {
@@ -929,6 +952,10 @@ function remember<T>(cache: Map<string, Promise<T>>, key: string, create: () => 
     if (cache.get(key) === created) cache.delete(key);
   });
   return created;
+}
+
+function commitMergeRequest(mr: z.output<typeof CommitMergeRequestsResponse>[number]): CommitChangeRequest {
+  return { number: mr.iid, url: mr.web_url, title: mr.title, state: STATES[mr.state], sourceBranch: mr.source_branch, targetBranch: mr.target_branch };
 }
 
 function changedFile(entry: z.output<typeof DiffEntry>): ChangedFile {

@@ -9,6 +9,7 @@ import {
   type BranchChangeRequest,
   type ChangeRequest,
   type ChangeRequestRef,
+  type CommitChangeRequest,
   type CommitsSince,
   type DraftAnchor,
   type DraftTarget,
@@ -49,6 +50,10 @@ export type FakeForge = Forge & {
   commitsSinceAnswer: CommitsSince | null;
   /** When set, the next `commitsSince` fails with it. */
   failCommitsSince: Error | null;
+  /** The change requests each commit belongs to, by SHA; a commit with none listed belongs to none. */
+  commitChangeRequestsAnswer: Map<string, CommitChangeRequest[]>;
+  /** When set, the next `commitChangeRequests` fails with it. */
+  failCommitChangeRequests: Error | null;
   /** Every comment posted outside a review, by change request URL, in order. */
   comments: { url: string; body: string }[];
   /** When set, the comment post after this many more fails with it. */
@@ -94,6 +99,8 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     headReads: 0,
     commitsSinceAnswer: { kind: "after", count: 1 },
     failCommitsSince: null,
+    commitChangeRequestsAnswer: new Map(),
+    failCommitChangeRequests: null,
     comments: [],
     failComment: null,
     submissions: [],
@@ -148,6 +155,14 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
         throw error;
       }
       return structuredClone(forge.commitsSinceAnswer);
+    },
+    async commitChangeRequests(_ref, shas) {
+      if (forge.failCommitChangeRequests) {
+        const error = forge.failCommitChangeRequests;
+        forge.failCommitChangeRequests = null;
+        throw error;
+      }
+      return new Map(shas.map((sha) => [sha, structuredClone(forge.commitChangeRequestsAnswer.get(sha) ?? [])]));
     },
     async currentUser() {
       return forge.viewer;
@@ -248,7 +263,7 @@ export function sampleChangeRequest(url: string, overrides: Partial<Omit<ChangeR
     additions: 42,
     deletions: 7,
     commits: [
-      { sha: "c".repeat(40), headline: "Retry uploads", body: "Full jitter, since a fixed delay would make clients retry in lockstep.", author: "author", authoredAt: "2026-09-01T10:00:00Z" },
+      { sha: "c".repeat(40), headline: "Retry uploads", body: "Full jitter, since a fixed delay would make clients retry in lockstep.", author: "author", authoredAt: "2026-09-01T10:00:00Z", parents: ["a".repeat(40)] },
     ],
     linkedIssues: [{ number: 12, url: `https://github.com/${ref.project}/issues/12`, title: "Uploads fail", body: "", state: "OPEN" }],
     files: [

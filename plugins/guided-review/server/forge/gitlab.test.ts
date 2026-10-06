@@ -176,6 +176,7 @@ test("reads a merge request's metadata, diff refs, files, commits and linked iss
     ],
   );
   assert.equal(mr.commits[0]?.authoredAt, "2026-09-17T13:23:29.000+03:00");
+  assert.deepEqual(mr.commits.at(-1)?.parents, ["164269665533d8211f3d30effa7b28e317ed8b1d"]);
 
   assert.deepEqual(
     mr.linkedIssues.map(({ number, url, title, state }) => ({ number, url, title, state })),
@@ -325,6 +326,32 @@ test("counts the commits since an earlier head from the merge request's latest, 
   assert.deepEqual(await forge.commitsSince(MR_3931, "b"), { kind: "rewritten" });
   assert.equal(await forge.commitsSince(MR_3931, "b"), null);
   assert.deepEqual(run.calls.at(-1)?.args, ["api", "--hostname", "gitlab.com", "projects/34675721/merge_requests/3931/commits?per_page=100"]);
+});
+
+test("lists the merge requests each commit belongs to, one read per commit", async () => {
+  const head = "8e1ef79fe55aae06f0c7246e550f8c30075b7564";
+  const parent = "164269665533d8211f3d30effa7b28e317ed8b1d";
+  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, { stdout: fixture("commit-merge-requests.json") }, { stdout: "[]" }]);
+
+  const listed = await forge.commitChangeRequests(MR_3931, [head, parent]);
+
+  assert.deepEqual(Object.fromEntries(listed), {
+    [head]: [
+      {
+        number: 3931,
+        url: "https://gitlab.com/gitlab-org/cli/-/merge_requests/3931",
+        title: "feat: mr note create support for internal notes/threads",
+        state: "merged",
+        sourceBranch: "8557-mr-internal-notes",
+        targetBranch: "main",
+      },
+    ],
+    [parent]: [],
+  });
+  assert.deepEqual(
+    run.calls.slice(2).map((call) => call.args.at(-1)),
+    [`projects/34675721/repository/commits/${head}/merge_requests`, `projects/34675721/repository/commits/${parent}/merge_requests`],
+  );
 });
 
 test("a merge request whose diff GitLab has not worked out yet has its source branch's head", async () => {
