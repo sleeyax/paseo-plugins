@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { appendFile, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import type { AgentSideConnection, SessionNotification } from "@agentclientprotocol/sdk";
 import { type ModelFallback, TOOL_CALL_MIRROR_METHOD, TranscriptTranslator } from "./transcript-translator.ts";
@@ -686,11 +689,9 @@ test("lets go of a background command whose report was queued because Claude was
     { type: "attachment", uuid: "queued", attachment: { type: "queued_command", commandMode: "task-notification", prompt: report } },
   ]);
   assert.equal(translator.runningBackgroundShells, 0);
-  // A command has no card, so nothing about it is drawn.
-  assert.deepEqual(
-    notifications.filter((notification) => notification.update.sessionUpdate === "tool_call_update"),
-    [],
-  );
+  const closed = notifications.filter((notification) => notification.update.sessionUpdate === "tool_call_update");
+  assert.equal(closed.length, 1);
+  assert.equal((closed[0]!.update as { status: string }).status, "completed");
 });
 
 test("does not read a report for a background command a turn gave up on as an agent's", async () => {
@@ -735,12 +736,167 @@ test("does not read a report for a background command a turn gave up on as an ag
   ]);
   assert.equal(translator.runningBackgroundShells, 0);
   assert.equal(translator.backgroundShellActivityAt, abandonedAt);
-  // The id is a command's, so nothing looks for an agent by it.
+  // The id is a command's, so nothing looks for an agent by it, and the card it closes is the command's own.
   assert.equal(translator.runningSubagents, 0);
+  const closed = notifications.filter((notification) => notification.update.sessionUpdate === "tool_call_update");
   assert.deepEqual(
-    notifications.filter((notification) => notification.update.sessionUpdate === "tool_call_update"),
-    [],
+    closed.map((notification) => notification.update as { toolCallId: string; status: string }).map(({ toolCallId, status }) => ({ toolCallId, status })),
+    [{ toolCallId: "bash-tool", status: "completed" }],
   );
+});
+
+/** The launch of a command Claude backgrounded, with the sentence Claude answers it with, copied from a real one. */
+function backgroundLaunch(toolCallId: string, taskId: string, outputFile: string): Record<string, unknown>[] {
+  return [
+    {
+      type: "assistant",
+      uuid: `launcher-${toolCallId}`,
+      message: { content: [{ type: "tool_use", id: toolCallId, name: "Bash", input: { command: "npm test", description: "Run the tests" } }] },
+    },
+    {
+      type: "user",
+      uuid: `launched-${toolCallId}`,
+      toolUseResult: { stdout: "", stderr: "", backgroundTaskId: taskId, timedOutAfterMs: 120000 },
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: toolCallId,
+            content: `Command did not complete within its 120s timeout and was moved to the background (ID: ${taskId}). Output is being written to: ${outputFile}. You will be notified when it completes. To check interim output, use Read on that file path.`,
+            is_error: false,
+          },
+        ],
+      },
+    },
+  ];
+}
+
+function cardUpdates(notifications: SessionNotification[], toolCallId: string): { status: string; text: string | null; rawOutput: unknown }[] {
+  return notifications.flatMap(({ update }) => {
+    if (update.sessionUpdate !== "tool_call_update" || update.toolCallId !== toolCallId) return [];
+    const block = update.content?.[0];
+    const text = block?.type === "content" && block.content.type === "text" ? block.content.text : null;
+    return [{ status: update.status ?? "", text, rawOutput: update.rawOutput }];
+  });
+}
+
+test("keeps a backgrounded command's card open with what it prints, until its report closes it", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "claude-tty-background-"));
+  const outputFile = path.join(directory, "b1.output");
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+    extNotification: async () => undefined,
+  } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  translator.trackBackgroundWork();
+
+  await translator.translate(backgroundLaunch("bash-tool", "b1", outputFile));
+  // The launch result says only that the command started, so the card goes on running.
+  assert.deepEqual(cardUpdates(notifications, "bash-tool"), [
+    { status: "in_progress", text: "Running in the background; no output yet.", rawOutput: undefined },
+  ]);
+
+  await writeFile(outputFile, "\x1b[32mpass\x1b[0m one\nprogress 10%\rprogress 100%\n");
+  const activityBefore = translator.activityAt;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await translator.refreshBackgroundShells(true);
+  assert.equal(cardUpdates(notifications, "bash-tool").at(-1)?.text, "pass one\nprogress 100%");
+  // A command printing is not Claude doing anything, and a prompt is judged delivered by activity.
+  assert.equal(translator.activityAt, activityBefore);
+  // Nothing new printed is nothing to send.
+  const sent = notifications.length;
+  await translator.refreshBackgroundShells(true);
+  assert.equal(notifications.length, sent);
+
+  await appendFile(outputFile, "pass two\n");
+  await translator.translate([
+    {
+      type: "user",
+      uuid: "notified",
+      message: {
+        content: `<task-notification><task-id>b1</task-id><tool-use-id>bash-tool</tool-use-id><status>completed</status><summary>Background command "Run the tests" completed (exit code 0)</summary></task-notification>`,
+      },
+    },
+  ]);
+  // The report reads what was printed last, so the card ends on the whole of it.
+  assert.deepEqual(cardUpdates(notifications, "bash-tool").at(-1), {
+    status: "completed",
+    text: 'pass one\nprogress 100%\npass two\n\nBackground command "Run the tests" completed (exit code 0)',
+    rawOutput: undefined,
+  });
+
+  // A compaction replays the launch, which neither reopens the card nor closes it as the launch's own result.
+  const closedAt = notifications.length;
+  await translator.translate(backgroundLaunch("bash-tool", "b1", outputFile));
+  await translator.refreshBackgroundShells(true);
+  assert.equal(notifications.length, closedAt);
+});
+
+test("fails a backgrounded command's card when Claude stops the command or the session stops", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+    extNotification: async () => undefined,
+  } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  translator.trackBackgroundWork();
+
+  await translator.translate([
+    ...backgroundLaunch("server-tool", "b1", "/nonexistent/b1.output"),
+    ...backgroundLaunch("suite-tool", "b2", "/nonexistent/b2.output"),
+    {
+      type: "assistant",
+      uuid: "stopper",
+      message: { content: [{ type: "tool_use", id: "stop-tool", name: "TaskStop", input: { task_id: "b1" } }] },
+    },
+    {
+      type: "user",
+      uuid: "stopped",
+      message: { content: [{ type: "tool_result", tool_use_id: "stop-tool", content: [{ type: "text", text: '{"task_id":"b1"}' }] }] },
+    },
+  ]);
+  // A failed card has to carry an error, or the daemon refuses the agent's whole history.
+  assert.deepEqual(cardUpdates(notifications, "server-tool").at(-1), {
+    status: "failed",
+    text: "Claude stopped this command.",
+    rawOutput: { error: "Claude stopped this command." },
+  });
+
+  // Abandoning the wait leaves the card saying the command runs, which is still true.
+  translator.abandonBackgroundWork();
+  assert.equal(cardUpdates(notifications, "suite-tool").at(-1)?.status, "in_progress");
+
+  await translator.settleOpenToolCalls();
+  assert.deepEqual(cardUpdates(notifications, "suite-tool").slice(1), [
+    {
+      status: "failed",
+      text: "The session stopped before this command reported.",
+      rawOutput: { error: "The session stopped before this command reported." },
+    },
+  ]);
+});
+
+test("closes a backgrounded command read out of history as the plain result it was", async () => {
+  const notifications: SessionNotification[] = [];
+  const connection = {
+    sessionUpdate: async (notification: SessionNotification) => {
+      notifications.push(notification);
+    },
+    extNotification: async () => undefined,
+  } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+
+  // A session being loaded replays commands that stopped with the process that ran them.
+  await translator.translate(backgroundLaunch("history-tool", "b1", "/nonexistent/b1.output"));
+  const updates = cardUpdates(notifications, "history-tool");
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0]!.status, "completed");
+  assert.match(updates[0]!.text ?? "", /moved to the background/);
 });
 
 test("lets go of an agent whose report was queued because Claude was busy when it finished", async () => {

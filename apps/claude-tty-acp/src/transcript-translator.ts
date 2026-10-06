@@ -9,10 +9,12 @@ import type {
   ToolCallLocation,
   ToolKind,
 } from "@agentclientprotocol/sdk";
+import { readOutputTail } from "./background-output.ts";
 import { writeLog } from "./log.ts";
 import { questionText } from "./question-text.ts";
 import { MODELS } from "./session-options.ts";
 import {
+  backgroundOutputFile,
   launchedAgent,
   launchedBackgroundShell,
   messagedAgent,
@@ -86,6 +88,13 @@ const UNREPORTED_AGENT = "Claude stopped before this agent reported back.";
 /** The last step on the card of a subagent the session it runs in stopped on purpose. */
 const STOPPED_AGENT = "Claude stopped this agent.";
 
+/** The last line on the card of a background command Claude stopped, which reports nothing of its own. */
+const STOPPED_COMMAND = "Claude stopped this command.";
+const UNREPORTED_COMMAND = "The session stopped before this command reported.";
+
+/** A command's output is a file it appends to, and a card that follows it closely is a read on every transcript poll. */
+const BACKGROUND_OUTPUT_POLL_MS = 1_000;
+
 /**
  * A copy of every tool-call update, sent beside the update itself as a vendor notification.
  *
@@ -133,9 +142,18 @@ type SubagentCard = {
   abandoned: boolean;
 };
 
-/** A command Claude started in the background, which has no card of its own: its tool call is closed by the result that reports the launch. */
+/** A command Claude started in the background. */
 type BackgroundShell = {
   outstanding: boolean;
+  /** The launch's own tool call, kept open while the command runs; null where this session shows no card for it. */
+  card: BackgroundShellCard | null;
+};
+
+type BackgroundShellCard = {
+  toolCallId: string;
+  outputFile: string | null;
+  status: "in_progress" | "completed" | "failed";
+  output: string;
 };
 
 export class TranscriptTranslator {
@@ -161,6 +179,7 @@ export class TranscriptTranslator {
   private readonly notedNestedReports = new Set<string>();
   private lastSubagentActivity = 0;
   private lastBackgroundShellActivity = 0;
+  private lastBackgroundOutputRead = 0;
   private lastAssistantActivity = 0;
   private lastActivity = 0;
   private trackingBackgroundWork = false;
@@ -418,8 +437,17 @@ export class TranscriptTranslator {
       this.settleSubagentCard(launch.agentId, block.is_error === true);
     }
     // A background command answers with the id its report will name, and goes on running after it.
+    // Its card is closed by that report rather than by this result, which says only that it started.
     const shell = launchedBackgroundShell(record.toolUseResult);
-    if (shell !== null) this.trackBackgroundShell(shell.taskId, toolCallId);
+    if (shell !== null) {
+      const outputFile = backgroundOutputFile([...contentTexts(block.content), stringValue(objectValue(record.toolUseResult)?.stdout) ?? ""].join("\n"));
+      const opened = this.trackBackgroundShell(shell.taskId, toolCallId, outputFile);
+      if (opened !== null) await this.publishBackgroundShell(opened);
+      if (this.backgroundShells.get(shell.taskId)?.card) {
+        this.lastAssistantActivity = Date.now();
+        return;
+      }
+    }
     // Messaging an agent is the only record that puts one back to work after its own report closed it.
     const messaged = messagedAgent(record.toolUseResult);
     if (messaged !== null) await this.resumeSubagentCard(messaged.agentId);
@@ -428,7 +456,7 @@ export class TranscriptTranslator {
     const stopped = this.stoppedTasksByToolCall.get(toolCallId);
     if (stopped !== undefined && block.is_error !== true) {
       await this.stopSubagentCard(stopped);
-      this.stopBackgroundShell(stopped);
+      await this.stopBackgroundShell(stopped);
     }
     const resultKey = `${toolCallId}:result:${createHash("sha256").update(JSON.stringify(block)).digest("hex")}`;
     if (this.emitted.has(resultKey)) return;
@@ -478,14 +506,14 @@ export class TranscriptTranslator {
   }
 
   /**
-   * A notification names an agent or a background command; a command has no card, so all there is to do for one is stop waiting on it.
+   * A notification names an agent or a background command.
    * One for an agent whose launch is no longer in the transcript has no tool call to close, but still says the agent has stopped, which is what lets its transcript stop being followed.
    *
    * Only an open card is closed, because one notification is written many times over: queued while Claude is busy and again as the turn that delivers it, and the queue is rewritten at every turn boundary it survives.
    * Reading each of those as news would stack the same line onto the card.
    */
   private async applyNotification(notification: TaskNotification): Promise<void> {
-    if (this.settleBackgroundShell(notification)) return;
+    if (await this.settleBackgroundShell(notification)) return;
     const agentId =
       notification.taskId ??
       (notification.toolCallId === null ? null : this.subagentsByToolCall.get(notification.toolCallId) ?? null);
@@ -530,19 +558,22 @@ export class TranscriptTranslator {
 
   /**
    * A replayed launch does not start a background command over: one that has already reported, or that a turn gave up waiting on, is recorded here as settled and is not waited on again.
-   * Nor is one whose launch is only history — a session being loaded replays commands that stopped with the process that ran them.
+   * Nor is one whose launch is only history — a session being loaded replays commands that stopped with the process that ran them, and their launches close as the plain results they are.
    */
-  private trackBackgroundShell(taskId: string, toolCallId: string | null): void {
-    if (this.backgroundShells.has(taskId)) return;
-    this.backgroundShells.set(taskId, { outstanding: this.trackingBackgroundWork });
+  private trackBackgroundShell(taskId: string, toolCallId: string | null, outputFile: string | null = null): BackgroundShellCard | null {
+    if (this.backgroundShells.has(taskId)) return null;
     // Null for a command an agent backgrounded: the tool call that launched it is in that agent's own
     // transcript, not this session's, and its notification names it by task id rather than by call.
+    const card: BackgroundShellCard | null =
+      toolCallId !== null && this.trackingBackgroundWork ? { toolCallId, outputFile, status: "in_progress", output: "" } : null;
+    this.backgroundShells.set(taskId, { outstanding: this.trackingBackgroundWork, card });
     if (toolCallId !== null) this.backgroundShellsByToolCall.set(toolCallId, taskId);
     this.lastBackgroundShellActivity = Date.now();
+    return card;
   }
 
-  /** Whether this report was a background command's, which is the whole of what one asks for. */
-  private settleBackgroundShell(notification: TaskNotification): boolean {
+  /** Whether this report was a background command's. */
+  private async settleBackgroundShell(notification: TaskNotification): Promise<boolean> {
     const taskId =
       notification.taskId ??
       (notification.toolCallId === null ? null : this.backgroundShellsByToolCall.get(notification.toolCallId) ?? null);
@@ -550,6 +581,8 @@ export class TranscriptTranslator {
     if (shell === undefined) return false;
     if (shell.outstanding) this.lastBackgroundShellActivity = Date.now();
     shell.outstanding = false;
+    const summary = notification.summary ?? `Background command ${notification.status ?? "finished"}`;
+    await this.closeBackgroundShellCard(shell, notificationFailed(notification.status) ? "failed" : "completed", summary);
     return true;
   }
 
@@ -638,12 +671,62 @@ export class TranscriptTranslator {
     await this.publishSubagent(card);
   }
 
-  /** A background command has no card, so ending the wait for one is the whole of ending it. */
-  private stopBackgroundShell(taskId: string): void {
+  private async stopBackgroundShell(taskId: string): Promise<void> {
     const shell = this.backgroundShells.get(taskId);
-    if (shell === undefined || !shell.outstanding) return;
+    if (shell === undefined) return;
+    if (shell.outstanding) this.lastBackgroundShellActivity = Date.now();
     shell.outstanding = false;
-    this.lastBackgroundShellActivity = Date.now();
+    await this.closeBackgroundShellCard(shell, "failed", STOPPED_COMMAND);
+  }
+
+  /** Only an open card is closed, because one notification is written many times over. */
+  private async closeBackgroundShellCard(shell: BackgroundShell, status: "completed" | "failed", ending: string): Promise<void> {
+    const card = shell.card;
+    if (card === null || card.status !== "in_progress") return;
+    card.status = status;
+    card.output = (await this.readBackgroundOutput(card)) ?? card.output;
+    await this.publishBackgroundShell(card, ending);
+  }
+
+  /**
+   * Puts what each running background command has printed since the last look onto its card.
+   * Throttled, because it is asked on every transcript poll; `force` is for the end of a turn.
+   */
+  async refreshBackgroundShells(force = false): Promise<void> {
+    const now = Date.now();
+    if (!force && now - this.lastBackgroundOutputRead < BACKGROUND_OUTPUT_POLL_MS) return;
+    this.lastBackgroundOutputRead = now;
+    for (const { card } of this.backgroundShells.values()) {
+      if (card === null || card.status !== "in_progress") continue;
+      const output = await this.readBackgroundOutput(card);
+      if (output === null || output === card.output || card.status !== "in_progress") continue;
+      card.output = output;
+      // Not activity: a command printing is not Claude doing anything, and a prompt is judged delivered by activity.
+      await this.publishBackgroundShell(card, undefined, { quiet: true });
+    }
+  }
+
+  private async readBackgroundOutput(card: BackgroundShellCard): Promise<string | null> {
+    if (card.outputFile === null) return null;
+    return readOutputTail(card.outputFile).catch((error: unknown) => {
+      writeLog({ level: "warn", message: "Could not read background command output", sessionId: this.sessionId, file: card.outputFile, error: String(error) });
+      return null;
+    });
+  }
+
+  private async publishBackgroundShell(card: BackgroundShellCard, ending?: string, { quiet = false } = {}): Promise<void> {
+    if (card.status !== "in_progress") this.openToolCalls.delete(card.toolCallId);
+    const waiting = card.status === "in_progress" && card.output === "" ? "Running in the background; no output yet." : "";
+    const text = [card.output || waiting, ending ?? ""].filter((part) => part !== "").join("\n\n");
+    const update: SessionUpdate = {
+      sessionUpdate: "tool_call_update",
+      toolCallId: card.toolCallId,
+      status: card.status,
+      content: text === "" ? [] : [{ type: "content", content: { type: "text", text } }],
+      ...(card.status === "failed" ? { rawOutput: { error: text } } : {}),
+    };
+    if (quiet) await this.deliver(update);
+    else await this.send(update);
   }
 
   private letGoOfBackgroundShells(): void {
@@ -703,6 +786,7 @@ export class TranscriptTranslator {
   async settleOpenToolCalls(): Promise<void> {
     // A background command is a child of the process that has stopped, so its report is not coming either.
     this.letGoOfBackgroundShells();
+    for (const shell of this.backgroundShells.values()) await this.closeBackgroundShellCard(shell, "failed", UNREPORTED_COMMAND);
     for (const card of new Set(this.subagents.values())) {
       if (card.status !== "in_progress") continue;
       card.status = "failed";
@@ -864,6 +948,10 @@ export class TranscriptTranslator {
 
   private async send(update: SessionUpdate): Promise<void> {
     this.lastActivity = Date.now();
+    await this.deliver(update);
+  }
+
+  private async deliver(update: SessionUpdate): Promise<void> {
     // Ahead of the update it copies, not behind it. The plugin bridge handles a vendor notification
     // where it sits in the stream and an update on a lane of its own, so a copy sent afterwards
     // still arrives first — but only by the depth of that lane, which is whatever a single read off
