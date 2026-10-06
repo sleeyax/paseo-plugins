@@ -5,6 +5,7 @@ import type {
   BranchStart,
   CommentSubject,
   Description,
+  DescriptionImage,
   FinishView,
   GuideSubject,
   HeadCheck,
@@ -28,6 +29,7 @@ import { commentSubjectContext, type CommentSubjectContext } from "./comment-sub
 import { DiffHighlighter, syntaxColors, syntaxThemes } from "./diff-highlight.ts";
 import { entryCode, resolveCode } from "./diff.ts";
 import { errorMessage } from "./error-message.ts";
+import { imageInfo } from "./image-info.ts";
 import { ForgeError, type BranchChangeRequest, type ChangeRequestHead, type ChangeRequestRef, type CommitsSince, type Forge } from "./forge/port.ts";
 import { GuideAgentError, type GuideAgentPort } from "./guide-agent/port.ts";
 import { runStructured } from "./guide-agent/structured.ts";
@@ -273,6 +275,22 @@ export class ReviewService {
     const changeRequest = await this.#store.snapshot(reviewId, headSha);
     if (changeRequest === null) throw new Error(`The review has no copy of ${record.ref.url} at ${headSha}. Regenerate the guide.`);
     return { headSha, description: changeRequest.description, projectUrl: `https://${record.ref.host}/${record.ref.project}` };
+  }
+
+  async descriptionImage({ reviewId, url }: { reviewId: string; url: string }): Promise<DescriptionImage> {
+    const record = await this.#record(reviewId);
+    let base64: string | null;
+    try {
+      base64 = await this.#forgeFor(record.ref).fetchAttachment(record.ref, url, MAX_IMAGE_BYTES);
+    } catch (error) {
+      if (!(error instanceof ForgeError)) throw error;
+      this.#log(`Could not fetch the image ${url} in ${record.ref.url}: ${error.message}`);
+      return { status: "unavailable", message: error.message };
+    }
+    if (base64 === null) return { status: "unavailable", message: "It is hosted elsewhere, so it opens in the browser." };
+    const image = imageInfo(Buffer.from(base64, "base64"));
+    if (image === null) return { status: "unavailable", message: "It is not a PNG, JPEG, GIF or WebP image, which is all the panel draws." };
+    return { status: "image", ...image, base64 };
   }
 
   /** A count the forge cannot give is left out of the head check rather than failing it. */
@@ -804,6 +822,9 @@ function verdictsFor(record: ReviewRecord, head: HeadCheck): VerdictOption[] {
     head,
   });
 }
+
+/** A screenshot is well within it, and every image is one RPC message, base64 and all. */
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 const BUSY = "The guide agent is busy with another answer.";
 

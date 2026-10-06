@@ -318,6 +318,24 @@ export const getDescription = defineRpc({
   output: DescriptionSchema,
 });
 
+export const DescriptionImageSchema = z.discriminatedUnion("status", [
+  /** The image's bytes, base64-encoded for a `data:` URI, and its size in pixels as its header gives it. */
+  z.object({ status: z.literal("image"), mimeType: z.string(), base64: z.string(), width: z.number(), height: z.number() }),
+  /** Not drawn, so the panel links it instead; `message` says why, as a sentence. */
+  z.object({ status: z.literal("unavailable"), message: z.string() }),
+]);
+
+/**
+ * An image in the description, read on the daemon with the forge CLI's login, since a private
+ * repository's attachments need one. `url` is absolute; one that is no attachment of the PR/MR is
+ * `unavailable`, never fetched.
+ */
+export const getDescriptionImage = defineRpc({
+  name: "guided-review.review.description-image",
+  input: z.object({ reviewId: z.string(), url: z.string() }),
+  output: DescriptionImageSchema,
+});
+
 /**
  * "Regenerate": reads the PR/MR at its current head, brings the guide's workspace to that head, and
  * generates a guide for it, carrying the reviewer's marks over to nodes whose code did not change.
@@ -377,6 +395,7 @@ export type FinishView = z.output<typeof FinishViewSchema>;
 
 export type HeadCheck = z.output<typeof HeadCheckSchema>;
 export type Description = z.output<typeof DescriptionSchema>;
+export type DescriptionImage = z.output<typeof DescriptionImageSchema>;
 
 /**
  * What a comment box is for, as "Suggest wording" and "Ask agent" name it: a comment on code at a draft location, or a general one, on the change as a whole, about a node or the overview, either of which can come from a passage of it the reviewer highlighted.

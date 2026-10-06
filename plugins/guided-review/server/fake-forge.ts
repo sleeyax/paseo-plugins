@@ -43,6 +43,8 @@ export type FakeForge = Forge & {
   failFetchHead: Error | null;
   /** How many times the head alone was read. */
   headReads: number;
+  /** The files `fetchAttachment` serves by URL, or the error it fails with; any other URL is no attachment. */
+  attachments: Map<string, Buffer | Error>;
   /** What `commitsSince` answers, whatever it is asked about. */
   commitsSinceAnswer: CommitsSince | null;
   /** When set, the next `commitsSince` fails with it. */
@@ -88,6 +90,7 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     drafts: new Map(),
     created: [],
     failFetchHead: null,
+    attachments: new Map(),
     headReads: 0,
     commitsSinceAnswer: { kind: "after", count: 1 },
     failCommitsSince: null,
@@ -119,6 +122,13 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
       const changeRequest = forge.changeRequests.get(ref.url);
       if (!changeRequest) throw new ForgeError(`gh failed: Could not resolve to a PullRequest with the number of ${ref.number}.`);
       return structuredClone(changeRequest);
+    },
+    async fetchAttachment(_ref, url, maxBytes) {
+      const file = forge.attachments.get(url);
+      if (file === undefined) return null;
+      if (file instanceof Error) throw file;
+      if (file.length > maxBytes) throw new ForgeError("The file is larger than the limit.");
+      return file.toString("base64");
     },
     async fetchHead(ref) {
       forge.headReads += 1;

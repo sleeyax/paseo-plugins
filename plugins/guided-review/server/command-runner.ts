@@ -12,6 +12,10 @@ export type CommandRequest = {
   /** Taken out of the daemon's environment, for a variable whose mere presence changes what a tool does. */
   unsetEnv?: readonly string[];
   timeoutMs: number;
+  /** `base64` for a file the command prints, whose bytes a UTF-8 decode would corrupt. */
+  stdoutEncoding?: "utf8" | "base64";
+  /** A smaller cap than `MAX_STDOUT_BYTES`, for a call whose answer has a size limit of its own. */
+  maxStdoutBytes?: number;
 };
 
 export type CommandResult = {
@@ -22,6 +26,8 @@ export type CommandResult = {
   stderr: string;
   /** Set when the command did not run to an exit code: it could not start, timed out, or said too much. */
   spawnError: string | null;
+  /** Set when it said too much: printed more than its cap. */
+  outputExceeded?: true;
 };
 
 /**
@@ -59,24 +65,25 @@ export const runCommand: CommandRunner = (request) =>
       return;
     }
 
+    const maxStdoutBytes = request.maxStdoutBytes ?? MAX_STDOUT_BYTES;
     // Decoded once at the end, so a multi-byte character split across two chunks survives.
-    const collected = () => Buffer.concat(stdout).toString("utf8");
+    const collected = () => Buffer.concat(stdout).toString(request.stdoutEncoding ?? "utf8");
     const settle = (result: CommandResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       resolve(result);
     };
-    const fail = (spawnError: string) => {
+    const fail = (spawnError: string, outputExceeded = false) => {
       child.kill("SIGKILL");
-      settle({ exitCode: null, stdout: collected(), stderr, spawnError });
+      settle({ exitCode: null, stdout: collected(), stderr, spawnError, ...(outputExceeded ? { outputExceeded: true } : {}) });
     };
     const timer = setTimeout(() => fail(`Timed out after ${request.timeoutMs}ms`), request.timeoutMs);
 
     child.stdout!.on("data", (chunk: Buffer) => {
       stdoutBytes += chunk.length;
-      if (stdoutBytes > MAX_STDOUT_BYTES) {
-        fail(`Output exceeded ${MAX_STDOUT_BYTES} bytes`);
+      if (stdoutBytes > maxStdoutBytes) {
+        fail(`Output exceeded ${maxStdoutBytes} bytes`, true);
         return;
       }
       stdout.push(chunk);

@@ -32,6 +32,12 @@ export interface Forge {
    */
   fetchHead(ref: ChangeRequestRef): Promise<ChangeRequestHead>;
   /**
+   * The file at `url`, an absolute URL from the change request's description, base64-encoded: read
+   * with the CLI's login, since a private repository's attachments need one. Null when `url` is not
+   * where this forge keeps attachments, which the plugin then leaves for the browser to open.
+   */
+  fetchAttachment(ref: ChangeRequestRef, url: string, maxBytes: number): Promise<string | null>;
+  /**
    * How the change request's commits now stand against `sha`, an earlier head: read from its latest
    * commits, so `sha` gone from a list that is complete means the branch was rewritten. Null when the
    * list is cut off before `sha` turns up, so it cannot tell.

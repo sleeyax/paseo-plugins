@@ -323,3 +323,31 @@ test("a start while one is running follows the running one", async (t) => {
   assert.deepEqual(second, first);
   assert.equal(workspaces.created.length, 1);
 });
+
+test("a description image comes back with its format and size, and one the forge cannot give or the panel cannot draw says why", async (t) => {
+  const { service, forge } = await withHost(t);
+  await startAndSettle(service, URL);
+  const reviewId = "github/github.com/acme/uploader/7";
+  const png = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png);
+  png.writeUInt32BE(594, 16);
+  png.writeUInt32BE(890, 20);
+  forge.attachments.set("https://github.com/user-attachments/assets/shot", png);
+  forge.attachments.set("https://github.com/user-attachments/assets/vector", Buffer.from("<svg></svg>"));
+  forge.attachments.set("https://github.com/user-attachments/assets/gone", new ForgeError("gh failed: Not Found (HTTP 404)"));
+
+  const image = (url: string) => service.descriptionImage({ reviewId, url });
+  assert.deepEqual(await image("https://github.com/user-attachments/assets/shot"), {
+    status: "image",
+    mimeType: "image/png",
+    width: 594,
+    height: 890,
+    base64: png.toString("base64"),
+  });
+  assert.deepEqual(await image("https://github.com/user-attachments/assets/vector"), {
+    status: "unavailable",
+    message: "It is not a PNG, JPEG, GIF or WebP image, which is all the panel draws.",
+  });
+  assert.deepEqual(await image("https://github.com/user-attachments/assets/gone"), { status: "unavailable", message: "gh failed: Not Found (HTTP 404)" });
+  assert.deepEqual(await image("https://img.shields.io/badge/ci.svg"), { status: "unavailable", message: "It is hosted elsewhere, so it opens in the browser." });
+});

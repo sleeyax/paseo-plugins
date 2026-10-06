@@ -67,3 +67,25 @@ test("kills a command that outlives its timeout", async () => {
   assert.equal(result.exitCode, null);
   assert.equal(result.spawnError, "Timed out after 200ms");
 });
+
+test("hands back a file the command prints byte for byte, base64-encoded", async () => {
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00, 0xc3]);
+  const result = await runCommand({
+    file: node,
+    args: ["-e", `process.stdout.write(Buffer.from(${JSON.stringify([...bytes])}))`],
+    stdoutEncoding: "base64",
+    timeoutMs: 10_000,
+  });
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(Buffer.from(result.stdout, "base64"), bytes);
+});
+
+test("stops a command that prints more than the call's own cap, and says so", async () => {
+  const result = await runCommand({
+    file: node,
+    args: ["-e", "process.stdout.write(Buffer.alloc(4096)); setTimeout(() => {}, 5000)"],
+    maxStdoutBytes: 1024,
+    timeoutMs: 10_000,
+  });
+  assert.deepEqual([result.exitCode, result.spawnError, result.outputExceeded], [null, "Output exceeded 1024 bytes", true]);
+});

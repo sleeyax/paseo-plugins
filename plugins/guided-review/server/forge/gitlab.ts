@@ -167,6 +167,9 @@ const BULK_PUBLISH_BODY_VERSION = [19, 2] as const;
 /** The first GitLab whose reviewer records say when they last changed, which tells a push after a review apart. */
 const REVIEW_LIST_VERSION = [19, 2] as const;
 
+/** The first GitLab with an API to download a project's uploads; before it they are only on the web, behind a browser login. */
+const UPLOAD_DOWNLOAD_VERSION = [17, 4] as const;
+
 /** Whether a version GitLab gives as `19.5.0-pre` is `need` or newer; one that cannot be read is not. */
 function isAtLeast(version: string, [needMajor, needMinor]: readonly [number, number]): boolean {
   const match = /^(\d+)\.(\d+)/.exec(version);
@@ -369,6 +372,7 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
   const glab = createCli({ run: options.run, binary: options.glab, name: "glab", env: GLAB_ENV, unsetEnv: GLAB_UNSET_ENV });
   const hosts = new Map<string, Promise<void>>();
   const projectIds = new Map<string, Promise<number>>();
+  const versions = new Map<string, Promise<string>>();
 
   /** Resolves once `glab` is known to be logged in to `host`; a failed check is asked again next time. */
   const loggedIn = (host: string) => remember(hosts, host, () => checkLogin(glab, host));
@@ -611,6 +615,17 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       const headSha = mr.diff_refs?.head_sha ?? mr.sha;
       if (headSha === null) throw new ForgeError(`GitLab has not worked out the diff of ${ref.url} yet. Try again in a moment.`);
       return { headSha, state: STATES[mr.state], description: mr.description ?? "" };
+    },
+
+    async fetchAttachment(ref, url, maxBytes) {
+      const upload = uploadOf(ref, url);
+      if (upload === null) return null;
+      const version = await remember(versions, ref.host, async () => (await api(ref, VersionResponse, "version")).version);
+      if (!isAtLeast(version, UPLOAD_DOWNLOAD_VERSION)) {
+        throw new ForgeError(`${ref.host} runs GitLab ${version}; showing an uploaded image here needs ${UPLOAD_DOWNLOAD_VERSION.join(".")} or newer.`);
+      }
+      const project = upload.projectId ?? (await projectId(ref));
+      return glab.bytes(["api", "--hostname", ref.host, `projects/${project}/uploads/${upload.secret}/${encodeURIComponent(upload.filename)}`], { maxBytes });
     },
 
     async commitsSince(ref, sha) {
@@ -955,6 +970,29 @@ const SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
  * or anchor it was copied from; anything else is null. The project path is everything before the
  * `/-/`, subgroups included. Whether `glab` can reach the host is a separate question.
  */
+/**
+ * The upload a description's link names: `/<project>/uploads/<secret>/<file>` as the Markdown has it,
+ * or `/-/project/<id>/uploads/…` as newer GitLab renders it. Null for any other URL.
+ */
+export function uploadOf(ref: ChangeRequestRef, url: string): { projectId: number | null; secret: string; filename: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" || parsed.hostname !== ref.host) return null;
+  const match = /^\/(?:-\/project\/(\d+)|(.+))\/uploads\/([0-9a-f]+)\/([^/]+)$/.exec(parsed.pathname);
+  if (match === null) return null;
+  const [, id, project, secret, filename] = match;
+  if (project !== undefined && project.toLowerCase() !== ref.project.toLowerCase()) return null;
+  try {
+    return { projectId: id === undefined ? null : Number(id), secret: secret!, filename: decodeURIComponent(filename!) };
+  } catch {
+    return null;
+  }
+}
+
 export function parseMergeRequestUrl(text: string): ChangeRequestRef | null {
   const trimmed = text.trim();
   let url: URL;

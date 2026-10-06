@@ -560,6 +560,12 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
       return { headSha: pr.headRefOid, state: STATES[pr.state], description: pr.body };
     },
 
+    async fetchAttachment(ref, url, maxBytes) {
+      if (!isAttachmentUrl(ref, url)) return null;
+      // A full URL: gh sends its token to that host and follows the redirect to the signed file.
+      return gh.bytes(["api", url], { maxBytes });
+    },
+
     async commitsSince(ref, sha) {
       const response = await graphql(ref, PullRequestCommitsResponse, PULL_REQUEST_COMMITS_QUERY, pullRequestVariables(ref));
       const commits = response.data.repository?.pullRequest?.commits;
@@ -725,6 +731,22 @@ const NAME = /^[A-Za-z0-9_.-]+$/;
  * A pull request URL on github.com, with or without its scheme and with whatever tab or anchor it
  * was copied from; anything else is null.
  */
+/**
+ * Where GitHub keeps what is pasted into a description: `user-attachments` now, a repository's
+ * `assets` before that, and `user-images` before either.
+ */
+export function isAttachmentUrl(ref: ChangeRequestRef, url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  if (parsed.hostname === "user-images.githubusercontent.com") return true;
+  return parsed.hostname === ref.host && /^\/(user-attachments\/assets|[^/]+\/[^/]+\/assets\/\d+)\/[\w-]+$/.test(parsed.pathname);
+}
+
 export function parsePullRequestUrl(text: string): ChangeRequestRef | null {
   const trimmed = text.trim();
   let url: URL;

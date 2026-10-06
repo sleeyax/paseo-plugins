@@ -5,7 +5,7 @@ import test from "node:test";
 import type { LineRef } from "../../shared/drafts.ts";
 import { anchorAt } from "../anchors.ts";
 import { fakeCommandRunner, type ScriptedResult } from "../fake-command-runner.ts";
-import { createGitLabForge, parseAuthStatus, parseMergeRequestUrl, REQUEST_CHANGES_MUTATION, REVIEW_LIST_QUERY } from "./gitlab.ts";
+import { createGitLabForge, parseAuthStatus, parseMergeRequestUrl, REQUEST_CHANGES_MUTATION, REVIEW_LIST_QUERY, uploadOf } from "./gitlab.ts";
 import { ForgeError, type AnchorLine, type ChangeRequestRef, type DraftAnchor, type DraftTarget } from "./port.ts";
 
 /**
@@ -1225,4 +1225,54 @@ test("a host listed as logged in is not checked again before reading an MR on it
 
   assert.deepEqual(await forge.fetchHead(MR_3931), { headSha: "a".repeat(40), state: "open", description: "" });
   assert.ok(!run.calls.some((call) => call.args[0] === "auth"), "no auth status check");
+});
+
+const SECRET = "0bca9218f6458ccdc8d28121fbe99769";
+
+test("an upload is named by its secret and file, in either form GitLab writes it, and only on the MR's project", () => {
+  assert.deepEqual(uploadOf(MR_3931, `https://gitlab.com/gitlab-org/cli/uploads/${SECRET}/my%20shot.png`), {
+    projectId: null,
+    secret: SECRET,
+    filename: "my shot.png",
+  });
+  assert.deepEqual(uploadOf(MR_3931, `https://gitlab.com/-/project/34675721/uploads/${SECRET}/shot.png`), {
+    projectId: 34675721,
+    secret: SECRET,
+    filename: "shot.png",
+  });
+  for (const url of [
+    `https://gitlab.com/gitlab-org/other/uploads/${SECRET}/shot.png`,
+    `https://example.com/gitlab-org/cli/uploads/${SECRET}/shot.png`,
+    "https://gitlab.com/gitlab-org/cli/-/raw/main/shot.png",
+    "not a url",
+  ]) {
+    assert.equal(uploadOf(MR_3931, url), null, url);
+  }
+});
+
+test("fetches an upload through the API by the project's numeric ID, once GitLab is new enough, and asks the version once", async () => {
+  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: JSON.stringify({ version: "17.4.0-ee" }) }, { stdout: fixture("project.json") }, { stdout: "R0lGODlh" }, { stdout: "UklGRg==" }]);
+  const url = `https://gitlab.com/gitlab-org/cli/uploads/${SECRET}/my%20shot.png`;
+
+  assert.equal(await forge.fetchAttachment(MR_3931, url, 1024), "R0lGODlh");
+  assert.equal(await forge.fetchAttachment(MR_3931, `https://gitlab.com/-/project/34675721/uploads/${SECRET}/b.png`, 1024), "UklGRg==");
+  assert.equal(await forge.fetchAttachment(MR_3931, "https://img.shields.io/badge/ci.svg", 1024), null);
+  assert.deepEqual(
+    run.calls.slice(-2).map((call) => ({ args: call.args, stdoutEncoding: call.stdoutEncoding, maxStdoutBytes: call.maxStdoutBytes })),
+    [
+      { args: ["api", "--hostname", "gitlab.com", `projects/34675721/uploads/${SECRET}/my%20shot.png`], stdoutEncoding: "base64", maxStdoutBytes: 1024 },
+      { args: ["api", "--hostname", "gitlab.com", `projects/34675721/uploads/${SECRET}/b.png`], stdoutEncoding: "base64", maxStdoutBytes: 1024 },
+    ],
+  );
+  assert.equal(run.calls.filter((call) => call.args.at(-1) === "version").length, 1);
+});
+
+test("a GitLab too old to download uploads says so instead of fetching", async () => {
+  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: JSON.stringify({ version: "17.3.2-ee" }) }]);
+
+  await assert.rejects(
+    forge.fetchAttachment(MR_3931, `https://gitlab.com/gitlab-org/cli/uploads/${SECRET}/shot.png`, 1024),
+    new ForgeError("gitlab.com runs GitLab 17.3.2-ee; showing an uploaded image here needs 17.4 or newer."),
+  );
+  assert.equal(run.calls.length, 2);
 });

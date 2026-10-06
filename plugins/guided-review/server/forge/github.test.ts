@@ -6,6 +6,7 @@ import { fakeCommandRunner, type FakeCommandRunner, type ScriptedResult } from "
 import {
   ADD_THREAD_MUTATION,
   createGitHubForge,
+  isAttachmentUrl,
   DELETE_COMMENT_MUTATION,
   DELETE_REVIEW_MUTATION,
   DRAFTS_QUERY,
@@ -776,4 +777,42 @@ test("a search gh cannot run comes back as the host's error rather than a throw"
   assert.deepEqual(hosts, [
     { forge: "github", host: "github.com", requests: [], truncated: false, error: "gh failed: To get started with GitHub CLI, please run:  gh auth login" },
   ]);
+});
+
+test("only GitHub's own attachment URLs are attachments", () => {
+  const attachments = [
+    "https://github.com/user-attachments/assets/0d4e6a3c-1b2f-4c5d-9e8f-123456789abc",
+    "https://github.com/sleeyax/paseo-plugins/assets/1234567/0d4e6a3c-1b2f-4c5d-9e8f-123456789abc",
+    "https://user-images.githubusercontent.com/1234567/123456789-abcdef.png",
+  ];
+  const others = [
+    "https://example.com/user-attachments/assets/0d4e6a3c",
+    "https://img.shields.io/badge/ci-passing-green.svg",
+    "http://github.com/user-attachments/assets/0d4e6a3c",
+    "https://github.com/sleeyax/paseo-plugins/blob/main/screenshot.png",
+    "not a url",
+  ];
+  assert.deepEqual(attachments.map((url) => isAttachmentUrl(PR_105, url)), [true, true, true]);
+  assert.deepEqual(others.map((url) => isAttachmentUrl(PR_105, url)), [false, false, false, false, false]);
+});
+
+test("fetches an attachment with gh's login, as bytes under the cap, and leaves any other URL alone", async () => {
+  const url = "https://github.com/user-attachments/assets/0d4e6a3c-1b2f-4c5d-9e8f-123456789abc";
+  const { forge, run } = forgeReplaying([{ stdout: "iVBORw0KGgo=" }]);
+
+  assert.equal(await forge.fetchAttachment(PR_105, url, 1024), "iVBORw0KGgo=");
+  assert.equal(await forge.fetchAttachment(PR_105, "https://img.shields.io/badge/ci.svg", 1024), null);
+  assert.deepEqual(
+    run.calls.map((call) => ({ args: call.args, stdoutEncoding: call.stdoutEncoding, maxStdoutBytes: call.maxStdoutBytes })),
+    [{ args: ["api", url], stdoutEncoding: "base64", maxStdoutBytes: 1024 }],
+  );
+});
+
+test("an attachment over the cap fails with a sentence", async () => {
+  const { forge } = forgeReplaying([{ exitCode: null, spawnError: "Output exceeded 5242880 bytes", outputExceeded: true }]);
+
+  await assert.rejects(
+    forge.fetchAttachment(PR_105, "https://github.com/user-attachments/assets/0d4e6a3c", 5 * 1024 * 1024),
+    new ForgeError("The file is larger than 5 MB."),
+  );
 });

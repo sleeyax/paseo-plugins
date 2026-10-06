@@ -20,6 +20,9 @@ export type CallOptions = {
   timeoutMs?: number;
 };
 
+/** A call that prints a file, whose stdout comes back base64-encoded rather than decoded as text. */
+type FileCall = CallOptions & { maxBytes: number };
+
 /** Long enough for a paginated file list on a large PR, short enough that a hung call ends. */
 export const DEFAULT_CLI_TIMEOUT_MS = 120_000;
 
@@ -36,11 +39,13 @@ export type Cli = {
    * when it reports on several things at once, some of which may have failed.
    */
   report(args: readonly string[], options?: CallOptions): Promise<string>;
+  /** A file the call prints, base64-encoded, refused once it passes `maxBytes`. */
+  bytes(args: readonly string[], options: FileCall): Promise<string>;
 };
 
 export function createCli(options: CliOptions): Cli {
   /** Runs the call, and fails only when it did not run to an exit code. */
-  const run = async (args: readonly string[], call: CallOptions = {}): Promise<CommandResult> => {
+  const run = async (args: readonly string[], call: CallOptions & Partial<FileCall> = {}): Promise<CommandResult> => {
     const binary = await options.binary();
     const result = await options.run({
       file: binary,
@@ -49,7 +54,11 @@ export function createCli(options: CliOptions): Cli {
       ...(options.unsetEnv === undefined ? {} : { unsetEnv: options.unsetEnv }),
       timeoutMs: call.timeoutMs ?? DEFAULT_CLI_TIMEOUT_MS,
       ...(call.input === undefined ? {} : { input: call.input }),
+      ...(call.maxBytes === undefined ? {} : { stdoutEncoding: "base64", maxStdoutBytes: call.maxBytes }),
     });
+    if (result.outputExceeded && call.maxBytes !== undefined) {
+      throw new ForgeError(`The file is larger than ${megabytes(call.maxBytes)}.`);
+    }
     if (result.spawnError !== null) {
       if (/ENOENT|EACCES/.test(result.spawnError)) {
         throw new ForgeError(
@@ -61,7 +70,7 @@ export function createCli(options: CliOptions): Cli {
     return result;
   };
 
-  const text = async (args: readonly string[], call?: CallOptions) => {
+  const text = async (args: readonly string[], call?: CallOptions & Partial<FileCall>) => {
     const result = await run(args, call);
     if (result.exitCode !== 0) {
       throw new ForgeError(`${options.name} failed: ${reason(result.stderr, options.name) ?? `exit code ${result.exitCode}`}`);
@@ -102,7 +111,12 @@ export function createCli(options: CliOptions): Cli {
       const result = await run(args, call);
       return `${result.stdout}${result.stderr}`;
     },
+    bytes: text,
   };
+}
+
+function megabytes(bytes: number): string {
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`;
 }
 
 /**
