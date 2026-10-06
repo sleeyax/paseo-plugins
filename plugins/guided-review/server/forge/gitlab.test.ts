@@ -810,6 +810,14 @@ test("a request for changes GitLab recorded with the publish is not sent again",
   });
 });
 
+test("a discussion on the merge request as a whole is a thread of its own, the text sent as JSON", async () => {
+  const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, { stdout: JSON.stringify({ id: "abc", notes: [] }) }]);
+
+  await forge.startDiscussion(MR_3931, BODY);
+
+  assert.deepEqual(sent(run).at(-1), ["api", "--hostname", "gitlab.com", "--method", "POST", ...JSON_BODY, `${MERGE_REQUEST}/discussions`, { body: BODY }]);
+});
+
 test("a GitLab older than 19.2, which drops the body and the state on publish, gets the body as an MR note and the state through GraphQL", async () => {
   const { forge, run } = forgeReplaying([
     LOGGED_IN,

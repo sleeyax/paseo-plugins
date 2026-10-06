@@ -8,8 +8,8 @@ import type { HeadCheck, ReviewHeader } from "../shared/contracts.ts";
 import { describeHeadChange, shortSha } from "../shared/head-change.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { describeProgress, isFinished } from "./start-progress.ts";
-import { Section, useFlat } from "./section.tsx";
-import { fontSize, leading, spacing, type Colors } from "./theme.ts";
+import { Line, Section, useFlat } from "./section.tsx";
+import { spacing } from "./theme.ts";
 import { Button } from "./button.tsx";
 
 /** How often an open panel asks the forge whether the head has moved. */
@@ -175,18 +175,3 @@ export function StaleGuideBanner({ reviewId, header, theme, regenerate }: StaleG
     </Section>
   );
 }
-
-function Line({ colors, muted, color, children }: { colors: Colors; muted?: boolean; color?: string; children: React.ReactNode }) {
-  return (
-    <Text
-      style={{
-        color: color ?? (muted ? colors.foregroundMuted : colors.foreground),
-        fontSize: fontSize.base,
-        lineHeight: leading(fontSize.base),
-      }}
-    >
-      {children}
-    </Text>
-  );
-}
-

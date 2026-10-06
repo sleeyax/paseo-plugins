@@ -736,6 +736,10 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       await post(ref, `${await mergeRequest(ref)}/notes`, { body });
     },
 
+    async startDiscussion(ref, body) {
+      await post(ref, `${await mergeRequest(ref)}/discussions`, { body });
+    },
+
     /**
      * Publishes every draft note at once with `bulk_publish`, the body as its `note` and the verdict
      * as its `reviewer_state` (`requested_changes`, else `reviewed`). A GitLab older than 19.2 drops

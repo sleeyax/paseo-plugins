@@ -77,3 +77,18 @@ export function Strip({ colors, title, action, tone }: { colors: Colors; title: 
 export function useFlat(): boolean {
   return useContext(FlatContext);
 }
+
+/** A line of a section's prose, muted for what explains rather than tells, or in `color` for one that warns. */
+export function Line({ colors, muted, color, children }: { colors: Colors; muted?: boolean; color?: string; children: React.ReactNode }) {
+  return (
+    <Text
+      style={{
+        color: color ?? (muted ? colors.foregroundMuted : colors.foreground),
+        fontSize: fontSize.base,
+        lineHeight: leading(fontSize.base),
+      }}
+    >
+      {children}
+    </Text>
+  );
+}

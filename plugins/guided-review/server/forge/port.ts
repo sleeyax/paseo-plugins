@@ -75,6 +75,12 @@ export interface Forge {
   /** Publishes a comment on the change request as a whole at once, outside any review. */
   postComment(ref: ChangeRequestRef, body: string): Promise<void>;
   /**
+   * Publishes a comment on the change request as a whole that asks the author to act: a thread on
+   * GitLab, which the author resolves and which can hold merging back until they do. GitHub has no
+   * thread on a PR as a whole, so there it is a comment like `postComment`'s.
+   */
+  startDiscussion(ref: ChangeRequestRef, body: string): Promise<void>;
+  /**
    * Publishes the reviewer's drafts and `body` with the verdict, in as many calls as the forge takes,
    * and says how each went rather than throwing at the first to fail, so the panel can say what
    * landed. A review with nothing pending yet is started on `target`'s head first.

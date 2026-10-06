@@ -696,6 +696,14 @@ test("a comment on the pull request as a whole is posted to its conversation, th
   );
 });
 
+test("a discussion on the pull request is a comment on its conversation, as GitHub has no thread on a PR as a whole", async () => {
+  const { forge, run } = forgeReplaying([{ stdout: JSON.stringify({ id: 1, body: "42" }) }]);
+
+  await forge.startDiscussion(PR_105, "42");
+
+  assert.deepEqual(run.calls[0]?.args, ["api", "--hostname", "github.com", "--method", "POST", "repos/sleeyax/paseo-plugins/issues/105/comments", "--input", "-"]);
+});
+
 test("lists what the viewer is asked to review and what they reviewed, as two searches on github.com", async () => {
   const { forge, run } = forgeReplaying([{ stdout: fixture("review-search-requested.json") }, { stdout: fixture("review-search-reviewed.json") }]);
 

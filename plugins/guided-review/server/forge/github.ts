@@ -490,6 +490,13 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
     return { owner, name, number: ref.number };
   };
 
+  /** A pull request's conversation is its issue's, so a comment on it as a whole is an issue comment. */
+  const postIssueComment = async (ref: ChangeRequestRef, body: string) => {
+    await gh.text(["api", "--hostname", ref.host, "--method", "POST", `repos/${ref.project}/issues/${ref.number}/comments`, "--input", "-"], {
+      input: JSON.stringify({ body }),
+    });
+  };
+
   /**
    * The viewer's pending review, started on `target`'s head when there is none. Two drafts saved at
    * once would otherwise both find none and start two, and GitHub turns the second down. A submit
@@ -702,10 +709,11 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
     takesGeneralDrafts: false,
 
     async postComment(ref, body) {
-      // A pull request's conversation is its issue's, so a comment on it as a whole is an issue comment.
-      await gh.text(["api", "--hostname", ref.host, "--method", "POST", `repos/${ref.project}/issues/${ref.number}/comments`, "--input", "-"], {
-        input: JSON.stringify({ body }),
-      });
+      await postIssueComment(ref, body);
+    },
+
+    async startDiscussion(ref, body) {
+      await postIssueComment(ref, body);
     },
 
     async submitReview(target, { verdict, body }) {

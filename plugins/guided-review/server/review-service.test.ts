@@ -312,6 +312,26 @@ test("a start after a push keeps the foreign work read at the guide's head, and 
   assert.equal(regenerated.status === "ready" && "foreign" in regenerated, false);
 });
 
+test("the heads-up goes to the PR as a discussion, never on the reviewer's own PR nor on one with no foreign work", async (t) => {
+  const { service, forge } = await withHost(t);
+  const reviewId = "github/github.com/acme/uploader/7";
+  await startAndSettle(service, URL);
+  await assert.rejects(service.postHeadsUp({ reviewId, body: "Retarget, please." }), /carries no other PR's commits/);
+
+  carryForeignCommit(forge);
+  await service.regenerate({ reviewId });
+  await service.settled();
+  await assert.rejects(service.postHeadsUp({ reviewId, body: "  " }), /empty/);
+  await service.postHeadsUp({ reviewId, body: " Retarget, please.\n" });
+  assert.deepEqual(forge.discussions, [{ url: URL, body: "Retarget, please." }]);
+
+  forge.viewer = { login: "Author", name: null };
+  await service.start({ url: URL });
+  await service.settled();
+  await assert.rejects(service.postHeadsUp({ reviewId, body: "Retarget, please." }), /your own PR/);
+  assert.equal(forge.discussions.length, 1);
+});
+
 test("a review survives a plugin restart, and keeps what the forge said at its head SHA", async (t) => {
   const { service, restart, data } = await withHost(t);
 

@@ -58,6 +58,10 @@ export type FakeForge = Forge & {
   comments: { url: string; body: string }[];
   /** When set, the comment post after this many more fails with it. */
   failComment: { after: number; error: Error } | null;
+  /** Every discussion started, by change request URL, in order. */
+  discussions: { url: string; body: string }[];
+  /** When set, the next discussion fails with it. */
+  failDiscussion: Error | null;
   /** Every submit, with what it was sent. */
   submissions: { target: DraftTarget; submission: ReviewSubmission }[];
   /** When set, the next submit answers with it; otherwise a submit lands whole, in one step. */
@@ -103,6 +107,8 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
     failCommitChangeRequests: null,
     comments: [],
     failComment: null,
+    discussions: [],
+    failDiscussion: null,
     submissions: [],
     submitOutcome: null,
     discarded: [],
@@ -206,6 +212,14 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
         forge.failComment.after -= 1;
       }
       forge.comments.push({ url: ref.url, body });
+    },
+    async startDiscussion(ref, body) {
+      if (forge.failDiscussion) {
+        const error = forge.failDiscussion;
+        forge.failDiscussion = null;
+        throw error;
+      }
+      forge.discussions.push({ url: ref.url, body });
     },
     async submitReview(target, submission) {
       forge.submissions.push(structuredClone({ target, submission }));

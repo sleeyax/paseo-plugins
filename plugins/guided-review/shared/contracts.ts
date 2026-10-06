@@ -55,6 +55,9 @@ export const BranchStartSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("started"), reviewId: z.string(), progress: StartProgressSchema, note: z.string().nullable() }),
 ]);
 
+/** The other change requests' commits the diff shows as the review's, and whether the reviewer wrote it, so has no one to ask about them. */
+export const ForeignWorkViewSchema = z.object({ work: ForeignWorkSchema, viewerIsAuthor: z.boolean() });
+
 export const PanelViewSchema = z.discriminatedUnion("status", [
   /** `branch` is set while this workspace's branch is being guided, or once that ended without a guide here. */
   z.object({ status: z.literal("none"), branch: BranchStartSchema.optional() }),
@@ -65,8 +68,7 @@ export const PanelViewSchema = z.discriminatedUnion("status", [
     guide: GuideStateSchema,
     /** Why the reviewer's own branch was left alone and the guide lives in this PR workspace instead. */
     note: z.string().optional(),
-    /** The other change requests' commits the diff shows as this one's, and whether the reviewer wrote it. */
-    foreign: z.object({ work: ForeignWorkSchema, viewerIsAuthor: z.boolean() }).optional(),
+    foreign: ForeignWorkViewSchema.optional(),
   }),
 ]);
 
@@ -301,6 +303,17 @@ export const HeadCheckSchema = z.object({
  * Asks the forge where the review's head is now. Nothing changes on its own when it has moved: the
  * panel shows a banner and `regenerateGuide` is the only way to a guide at the new head.
  */
+/**
+ * Posts the reviewer's comment asking the author to take other change requests' commits out of the
+ * diff, as a thread the author resolves where the forge has one. Refused on the reviewer's own change
+ * request and on one that carries none.
+ */
+export const postHeadsUp = defineRpc({
+  name: "guided-review.review.heads-up",
+  input: z.object({ reviewId: z.string(), body: z.string() }),
+  output: z.null(),
+});
+
 export const checkHead = defineRpc({
   name: "guided-review.review.head",
   input: z.object({ reviewId: z.string() }),
@@ -463,6 +476,7 @@ export type LocalReviews = z.output<typeof LocalReviewsSchema>;
 export type ReviewWorkspaces = z.output<typeof ReviewWorkspacesSchema>;
 export type StartProgress = z.output<typeof StartProgressSchema>;
 export type PanelView = z.output<typeof PanelViewSchema>;
+export type ForeignWorkView = z.output<typeof ForeignWorkViewSchema>;
 export type GuideSubject = z.output<typeof GuideSubjectSchema>;
 export type AskResult = z.output<typeof AskResultSchema>;
 export type CommentSubject = z.output<typeof CommentSubjectSchema>;

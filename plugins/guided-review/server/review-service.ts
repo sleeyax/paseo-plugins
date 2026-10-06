@@ -23,6 +23,7 @@ import type { CheckOff, Inbox } from "../shared/inbox.ts";
 import type { InboxPreferences } from "../shared/inbox-preferences.ts";
 import type { CommentOrigin, DraftList, DraftLocation, LinkedDraft } from "../shared/drafts.ts";
 import type { CoveredCode, GuideState, LayeredGuide } from "../shared/guide.ts";
+import { changeRequestKind } from "../shared/foreign-work.ts";
 import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
 import type { SubmitResult, Verdict, VerdictOption } from "../shared/submit.ts";
 import { commentSubjectContext, type CommentSubjectContext } from "./comment-subject.ts";
@@ -267,6 +268,16 @@ export class ReviewService {
       description: head.description,
       message: null,
     };
+  }
+
+  async postHeadsUp({ reviewId, body }: { reviewId: string; body: string }): Promise<null> {
+    const record = await this.#record(reviewId);
+    const kind = changeRequestKind(record.ref.forge);
+    if (viewerIsAuthor(record)) throw new Error(`This is your own ${kind}, so there is no author to ask.`);
+    if (record.foreign === undefined) throw new Error(`This ${kind} carries no other ${kind}'s commits.`);
+    if (body.trim() === "") throw new Error("The comment is empty.");
+    await this.#forgeFor(record.ref).startDiscussion(record.ref, body.trim());
+    return null;
   }
 
   /** The description as it was read at the review's head, which is the head of the guide the panel shows. */
