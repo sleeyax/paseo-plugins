@@ -1,7 +1,7 @@
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation } from "@tanstack/react-query";
 import React, { useState } from "react";
-import { Linking, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import type { ForeignWorkView, ReviewHeader } from "../shared/contracts.ts";
 import { changeRequestKind, describeForeignCount, headsUpNote, type ForeignChangeRequest, type ReviewScope } from "../shared/foreign-work.ts";
@@ -9,6 +9,7 @@ import { shortSha } from "../shared/head-change.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { Button } from "./button.tsx";
 import { CommentBox } from "./comment-box.tsx";
+import { openLink } from "./open-link.ts";
 import { Line, Section, useFlat } from "./section.tsx";
 import { spacing, tint, type Colors } from "./theme.ts";
 
@@ -62,7 +63,7 @@ export function ForeignWorkBanner({ reviewId, header, foreign, colors, choosing,
         <View key={other.number} style={{ paddingLeft: spacing[3] }}>
           <Line colors={colors}>
             • {other.commits.length} {other.commits.length === 1 ? "commit" : "commits"} from{" "}
-            <Text accessibilityRole="link" onPress={() => void Linking.openURL(other.url)} style={{ color: colors.accent, textDecorationLine: "underline" }}>
+            <Text accessibilityRole="link" onPress={() => void openLink(other.url)} style={{ color: colors.accent, textDecorationLine: "underline" }}>
               {numberLabel(header.forge, other.number)} {other.title}
             </Text>{" "}
             ({whereItIs(other)})

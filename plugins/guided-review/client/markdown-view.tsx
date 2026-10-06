@@ -1,11 +1,12 @@
 import { useRpc } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
 import React, { useState } from "react";
-import { Image, Linking, Pressable, ScrollView, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { MONO_FONT } from "./diff-view.tsx";
 import { linkTarget, type Align, type Block, type ImageBlock, type ListItem, type Span } from "./markdown.ts";
+import { openLink } from "./open-link.ts";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
 
 /** What every block needs: links and images resolve against `projectUrl`, and images are fetched for `reviewId`. */
@@ -92,7 +93,7 @@ function Spans({ spans, context }: { spans: readonly Span[]; context: Context })
         return (
           <Text
             key={index}
-            {...(target === null ? {} : { accessibilityRole: "link" as const, onPress: () => void Linking.openURL(target) })}
+            {...(target === null ? {} : { accessibilityRole: "link" as const, onPress: () => void openLink(target) })}
             style={{
               ...(span.strong ? { fontWeight: "600" as const } : {}),
               ...(span.emphasis ? { fontStyle: "italic" as const } : {}),
@@ -229,7 +230,7 @@ function DescriptionImage({ block, context }: { block: ImageBlock; context: Cont
       {url === null ? (
         label
       ) : (
-        <Text accessibilityRole="link" onPress={() => void Linking.openURL(url)} style={{ color: colors.accent }}>
+        <Text accessibilityRole="link" onPress={() => void openLink(url)} style={{ color: colors.accent }}>
           {label}
         </Text>
       )}
