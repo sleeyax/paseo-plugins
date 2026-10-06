@@ -1,8 +1,17 @@
 import { z } from "zod";
 import { describeLocation } from "../shared/drafts.ts";
 import type { Guide, GuideNode } from "../shared/guide.ts";
-import { nodeContext, type CodeReference } from "./ask-prompt.ts";
-import { diffOf, fenced, nodesContext, overviewLines, placementSentences, type CodeSubjectContext, type CommentSubjectContext } from "./comment-subject.ts";
+import {
+  diffOf,
+  fenced,
+  nodeContext,
+  nodesContext,
+  overviewLines,
+  placementSentences,
+  type CodeReference,
+  type CodeSubjectContext,
+  type CommentSubjectContext,
+} from "./comment-subject.ts";
 import type { ChangeRequestRef } from "./forge/port.ts";
 
 /** What "Suggest wording" asks the guide agent for: the comment's text, which the panel puts in the box. */

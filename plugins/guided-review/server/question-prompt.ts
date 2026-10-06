@@ -1,6 +1,15 @@
 import { describeLocation } from "../shared/drafts.ts";
-import { answerRules, nodeContext } from "./ask-prompt.ts";
-import { diffOf, fenced, nodesContext, overviewLines, placementSentences, type CodeSubjectContext, type CommentSubjectContext } from "./comment-subject.ts";
+import {
+  answerRules,
+  diffOf,
+  fenced,
+  nodeContext,
+  nodesContext,
+  overviewLines,
+  placementSentences,
+  type CodeSubjectContext,
+  type CommentSubjectContext,
+} from "./comment-subject.ts";
 import type { ChangeRequestRef } from "./forge/port.ts";
 
 /**

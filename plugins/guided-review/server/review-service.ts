@@ -19,10 +19,9 @@ import type { FileDiff } from "../shared/diff.ts";
 import type { CheckOff, Inbox } from "../shared/inbox.ts";
 import type { InboxPreferences } from "../shared/inbox-preferences.ts";
 import type { CommentOrigin, DraftList, DraftLocation, LinkedDraft } from "../shared/drafts.ts";
-import { coveredPaths, type CoveredCode, type GuideState, type LayeredGuide } from "../shared/guide.ts";
+import type { CoveredCode, GuideState, LayeredGuide } from "../shared/guide.ts";
 import { summariseProgress, type GuideProgress } from "../shared/progress.ts";
 import type { SubmitResult, Verdict, VerdictOption } from "../shared/submit.ts";
-import { askPrompt, codeReferencesOf, type AskSubjectContext } from "./ask-prompt.ts";
 import { commentSubjectContext, type CommentSubjectContext } from "./comment-subject.ts";
 import { DiffHighlighter, syntaxColors, syntaxThemes } from "./diff-highlight.ts";
 import { entryCode, resolveCode } from "./diff.ts";
@@ -262,17 +261,6 @@ export class ReviewService {
   }
 
   /**
-   * "Ask about this": sends the guide agent a prompt naming the subject, with what the guide says
-   * about it, for the reviewer to follow up in the agent's chat.
-   */
-  async ask({ reviewId, subject }: { reviewId: string; subject: GuideSubject }): Promise<AskResult> {
-    return this.#sendToGuideAgent(reviewId, null, async (record, guide) => {
-      const context = await this.#askContext(record, guide, subject);
-      return typeof context === "string" ? { refused: context } : { prompt: askPrompt(record.ref, record.header.headSha, context) };
-    });
-  }
-
-  /**
    * "Ask agent": sends the guide agent the reviewer's `question` about what their comment box is on,
    * for them to follow up in the agent's chat. As for `suggestWording`, the subject's lines are those
    * of the guide the panel drew at `headSha`, and one from a guide Regenerate has replaced is refused.
@@ -304,12 +292,12 @@ export class ReviewService {
   /**
    * Sends the prompt `promptFor` writes for the guide the panel shows, or keeps the reason it gives
    * not to. Sends only to an idle agent of a finished guide, since a prompt to a busy one would
-   * interrupt it; otherwise says why not. `drawnAt`, when set, is the head of the guide the panel drew,
-   * refused once Regenerate has moved the review off it.
+   * interrupt it; otherwise says why not. `drawnAt` is the head of the guide the panel drew, refused
+   * once Regenerate has moved the review off it.
    */
   async #sendToGuideAgent(
     reviewId: string,
-    drawnAt: string | null,
+    drawnAt: string,
     promptFor: (record: ReviewRecord, guide: LayeredGuide) => Promise<{ prompt: string } | { refused: string }>,
   ): Promise<AskResult> {
     let record: ReviewRecord;
@@ -319,7 +307,7 @@ export class ReviewService {
       return notSent(null, unknownReview(error));
     }
     const { headSha } = record.header;
-    if (drawnAt !== null && drawnAt !== headSha) return notSent(null, regeneratedAway(drawnAt, headSha, "This question is about", "Ask from"));
+    if (drawnAt !== headSha) return notSent(null, regeneratedAway(drawnAt, headSha, "This question is about", "Ask from"));
     const running = this.#guides.running(record);
     if (running) return notSent(running.agentId, "The guide agent is still writing the guide. Ask once the guide is ready.");
     const shown = await this.#guides.shown(record);
@@ -343,32 +331,6 @@ export class ReviewService {
       throw error;
     }
     return { status: "sent", agentId };
-  }
-
-  /** What the prompt says about `subject`, from the stored guide and snapshot, or why it cannot be asked about. */
-  async #askContext(record: ReviewRecord, guide: LayeredGuide, subject: GuideSubject): Promise<AskSubjectContext | string> {
-    const changeRequest = await this.#store.snapshot(record.id, record.header.headSha);
-    if (subject.kind === "node") {
-      const node = guide.nodes.find((candidate) => candidate.id === subject.nodeId);
-      if (node === undefined) return "That concept is not in the guide any more.";
-      if (changeRequest === null) return "What the forge said at this head is missing. Start the review again.";
-      return { kind: "node", node, code: codeReferencesOf(resolveCode(changeRequest.files, node.covers).files) };
-    }
-    const file = changeRequest?.files.find((candidate) => candidate.path === subject.path);
-    if (changeRequest == null || file === undefined) return `${subject.path} is not one of the change's files.`;
-    const nodes = guide.nodes.filter((candidate) => coveredPaths(candidate).includes(file.path));
-    const supporting = guide.supporting.find((entry) => entry.path === file.path);
-    const category = supporting !== undefined ? supporting.category : guide.unsorted.includes(file.path) ? null : undefined;
-    if (category !== undefined) {
-      // The entry of a file some nodes cover part of holds the rest of it, which the prompt names.
-      const rest = entryCode(changeRequest.files, guide.nodes, file.path)!;
-      return { kind: "file", file, category, rest: nodes.length === 0 ? null : { ranges: codeReferencesOf([rest])[0]!.ranges, nodes } };
-    }
-    if (nodes.length === 0) return `${file.path} is not in the guide any more.`;
-    const titles = nodes.map((node) => `"${node.title}"`).join(", ");
-    return nodes.length === 1
-      ? `${file.path} belongs to the concept ${titles}. Ask about that concept instead.`
-      : `${file.path} belongs to the concepts ${titles}. Ask about one of those instead.`;
   }
 
   /**

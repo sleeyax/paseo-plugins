@@ -159,16 +159,6 @@ export const AskResultSchema = z.discriminatedUnion("status", [
 ]);
 
 /**
- * Sends the guide agent a prompt about the subject, for the reviewer to follow up in its chat. Only
- * an idle agent is sent to, because a prompt to a busy one would interrupt its turn.
- */
-export const askAbout = defineRpc({
-  name: "guided-review.guide.ask",
-  input: z.object({ reviewId: z.string(), subject: GuideSubjectSchema }),
-  output: AskResultSchema,
-});
-
-/**
  * The code a subject covers, ready to draw: a node's files in reading order, each cut down to the
  * node's hunks, or what no node covers of a changed file, its whole diff or the rest of it, as a
  * Supporting or Unsorted entry shows it.
@@ -358,7 +348,7 @@ export type HeadCheck = z.output<typeof HeadCheckSchema>;
 
 /**
  * What a comment box is for, as "Suggest wording" and "Ask agent" name it: a comment on code at a draft location, or a general one, on the change as a whole, about a node or the overview, either of which can come from a passage of it the reviewer highlighted.
- * The server looks the lines and the guide's nodes up itself, as for "Ask about this".
+ * The server looks the lines and the guide's nodes up itself, as for a `GuideSubject`.
  */
 export const CommentSubjectSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("code"), location: DraftLocationSchema }),
@@ -398,9 +388,10 @@ export const getSuggestion = defineRpc({
 
 /**
  * "Ask agent": sends the guide agent the reviewer's `question` about what a comment box is on, instead
- * of saving it as a draft, for the reviewer to follow up in its chat, as `askAbout` does. As for
- * `suggestWording`, `headSha` is the head of the guide the panel drew, and one the review has been
- * regenerated away from is refused.
+ * of saving it as a draft, for the reviewer to follow up in its chat. "Ask about this" sends through
+ * it too, about a node or a Supporting or Unsorted file as a whole. Only an idle agent is sent to,
+ * because a prompt to a busy one would interrupt its turn. As for `suggestWording`, `headSha` is the
+ * head of the guide the panel drew, and one the review has been regenerated away from is refused.
  */
 export const askQuestion = defineRpc({
   name: "guided-review.guide.question",

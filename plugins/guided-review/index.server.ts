@@ -65,7 +65,6 @@ export default function contribute(server: PluginServerContext) {
   serve(contracts.generateGuide, (input) => service.generateGuide(input));
   serve(contracts.checkHead, (input) => service.checkHead(input));
   serve(contracts.regenerateGuide, (input) => service.regenerate(input));
-  serve(contracts.askAbout, (input) => service.ask(input));
   serve(contracts.askQuestion, (input) => service.askQuestion(input));
   serve(contracts.getNodeDiff, (input) => service.nodeDiff(input));
   serve(contracts.getSyntaxColors, (input) => service.syntaxColors(input));

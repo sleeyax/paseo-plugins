@@ -1,9 +1,8 @@
 import type { CommentSubject } from "../shared/contracts.ts";
-import type { DiffLine } from "../shared/diff.ts";
+import type { DiffHunk, DiffLine, FileDiff } from "../shared/diff.ts";
 import type { DraftLocation } from "../shared/drafts.ts";
-import { coveredPaths, type Guide, type GuideNode, type LayeredGuide } from "../shared/guide.ts";
+import { coveredPaths, type Guide, type GuideDecision, type GuideNode, type LayeredGuide } from "../shared/guide.ts";
 import { anchorAt } from "./anchors.ts";
-import { codeReferencesOf, decisionLine, rangesOf, type CodeReference, type LineRange } from "./ask-prompt.ts";
 import { entryCode, parsePatch, resolveCode } from "./diff.ts";
 import type { ChangedFile } from "./forge/port.ts";
 
@@ -147,4 +146,71 @@ export function fenced(text: string, language = ""): string {
   const longest = Math.max(2, ...[...text.matchAll(/`+/g)].map((run) => run[0].length));
   const fence = "`".repeat(longest + 1);
   return `${fence}${language}\n${text}\n${fence}`;
+}
+
+/** Lines of a file on the change's head side (the old side for a removed file), first and last inclusive. */
+export type LineRange = { start: number; end: number };
+
+/** A file a node covers, and the parts of it; no ranges means the whole of its change. */
+export type CodeReference = { path: string; ranges: readonly LineRange[] };
+
+/**
+ * The code references of a node's resolved `covers`: each file, with the head-side lines of the
+ * hunks or runs it covers, or no ranges when it covers the whole of the file's change. A hunk that
+ * only removes lines is named by the line after them, where the removal sits in the head.
+ */
+export function codeReferencesOf(files: readonly FileDiff[]): CodeReference[] {
+  return files.map((file) => {
+    const whole = file.hunks.length === file.hunkCount && file.hunks.every((hunk) => hunk.complete);
+    if (whole) return { path: file.path, ranges: [] };
+    const ranges = file.hunks.map((hunk) => headRange(hunk, file.status === "removed")).sort((a, b) => a.start - b.start);
+    const merged: LineRange[] = [];
+    for (const range of ranges) {
+      const last = merged.at(-1);
+      if (last !== undefined && range.start <= last.end + 1) last.end = Math.max(last.end, range.end);
+      else merged.push({ ...range });
+    }
+    return { path: file.path, ranges: merged };
+  });
+}
+
+function headRange(hunk: DiffHunk, removed: boolean): LineRange {
+  const start = removed ? hunk.oldStart : hunk.newStart;
+  const count = removed ? hunk.oldLines : hunk.newLines;
+  return count === 0 ? { start: start + 1, end: start + 1 } : { start, end: start + count - 1 };
+}
+
+/** The rules for an answer the reviewer reads in the agent's chat, with `scope` saying what it may cover. */
+export function answerRules(scope: string): string {
+  return `Answer as a normal message; the reviewer reads it in this chat and will ask follow-up questions here.
+- ${scope}
+- Do not change anything. Read files in your working directory, the repository at the change's head commit, where the diff alone does not explain something.
+- Do not answer with JSON.`;
+}
+
+/** What the guide says about `node`, and the code it covers, for a prompt that names the node. */
+export function nodeContext(node: GuideNode, code: readonly CodeReference[]): string {
+  const lines = [`What the guide says about it:`, `- Summary: ${node.summary}`, `- Why: ${oneParagraph(node.why)}`];
+  for (const fact of node.behaviour) lines.push(`- What it does: ${oneParagraph(fact)}`);
+  for (const decision of node.decisions) lines.push(decisionLine(decision));
+  if (code.length > 0) {
+    lines.push("", "The code it covers:");
+    for (const reference of code) lines.push(`- ${reference.path}${rangesOf(reference.ranges)}`);
+  }
+  return lines.join("\n");
+}
+
+function rangesOf(ranges: readonly LineRange[]): string {
+  if (ranges.length === 0) return "";
+  const listed = ranges.map((range) => (range.start === range.end ? `${range.start}` : `${range.start}-${range.end}`));
+  return `, ${ranges.length === 1 && ranges[0]!.start === ranges[0]!.end ? "line" : "lines"} ${listed.join(", ")}`;
+}
+
+function oneParagraph(text: string): string {
+  return text.trim().replace(/\s*\n\s*/g, " ");
+}
+
+/** A decision as a prompt lists it, with the alternative only where the author's words back one; a guide from before alternatives needed a quote has none. */
+export function decisionLine(decision: GuideDecision): string {
+  return decision.alternative ? `- Decision: ${decision.choice} Rather than: ${decision.alternative.text}` : `- Decision: ${decision.choice}`;
 }
