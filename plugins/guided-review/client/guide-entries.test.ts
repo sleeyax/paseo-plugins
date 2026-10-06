@@ -64,7 +64,7 @@ test("orders the groups trunk first, with Tests and Documentation split from Sup
       ["Unsorted", ["file:src/stray.ts"]],
     ],
   );
-  assert.equal(entryOrder(groups)[0], "overview");
+  assert.deepEqual(entryOrder(groups).slice(0, 3), ["description", "overview", "node:store"]);
 });
 
 test("leaves out an empty group", () => {
@@ -72,9 +72,10 @@ test("leaves out an empty group", () => {
   assert.deepEqual(titles, ["Layer 1", "Layer 2"]);
 });
 
-test("starts on the overview while nothing is marked, else on the first entry not yet understood", () => {
-  assert.equal(startEntry(groups, null), "overview");
-  assert.equal(startEntry(groups, progress({})), "overview");
+test("starts on the description while nothing is marked, else on the first entry not yet understood", () => {
+  assert.equal(startEntry(groups, null), "description");
+  assert.equal(startEntry(groups, progress({})), "description");
+  assert.equal(startEntry([], null), "description");
   assert.equal(startEntry(groups, progress({ nodes: ["store", "api"] })), "node:cache");
   const everything = progress({ nodes: ["store", "api", "cache"], files: ["pnpm-lock.yaml", "src/store.test.ts", "README.md", "src/stray.ts"] });
   assert.equal(startEntry(groups, everything), "overview");
@@ -89,7 +90,8 @@ test("keeps a selection the guide still has, and falls back for one it lost", ()
 });
 
 test("steps through the entries in navigator order", () => {
-  assert.equal(stepEntry(groups, "overview", -1), null);
+  assert.equal(stepEntry(groups, "description", -1), null);
+  assert.equal(stepEntry(groups, "overview", -1), "description");
   assert.equal(stepEntry(groups, "overview", 1), "node:store");
   assert.equal(stepEntry(groups, "node:cache", 1), "file:src/store.test.ts");
   assert.equal(stepEntry(groups, "file:src/stray.ts", 1), null);
@@ -102,6 +104,7 @@ test("finds the next entry not yet understood, wrapping round", () => {
   assert.equal(nextNotUnderstood(groups, "node:cache", marked), "file:README.md");
   assert.equal(nextNotUnderstood(groups, "file:src/stray.ts", marked), "node:store");
   assert.equal(nextNotUnderstood(groups, "overview", marked), "node:store");
+  assert.equal(nextNotUnderstood(groups, "description", marked), "node:store");
   const allButStray = progress({ nodes: ["store", "api", "cache"], files: ["pnpm-lock.yaml", "src/store.test.ts", "README.md"] });
   assert.equal(nextNotUnderstood(groups, "file:src/stray.ts", allButStray), null);
 });

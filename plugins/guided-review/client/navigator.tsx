@@ -3,7 +3,7 @@ import { Pressable, Text, View } from "react-native";
 import { subjectKey, type GuideSubject } from "../shared/contracts.ts";
 import type { LinkedDraft } from "../shared/drafts.ts";
 import { isUnderstood, type GuideProgress } from "../shared/progress.ts";
-import { draftCounts, FINISH_KEY, OVERVIEW_KEY, resolveSelection, type Entry, type EntryGroup } from "./guide-entries.ts";
+import { DESCRIPTION_KEY, draftCounts, FINISH_KEY, OVERVIEW_KEY, resolveSelection, type Entry, type EntryGroup } from "./guide-entries.ts";
 import { plainText } from "./inline-markdown.ts";
 import { ProgressContext } from "./progress.tsx";
 import { fontSize, leading, radius, spacing, type Colors } from "./theme.ts";
@@ -25,11 +25,13 @@ export type NavigatorProps = {
   selected: string;
   select: (key: string) => void;
   drafts: readonly LinkedDraft[];
+  /** The forge has the description edited since the guide was read. */
+  descriptionEdited: boolean;
   colors: Colors;
 };
 
-/** The guide as a tree: the overview, then each group with its entries, each with its understood tick and its number of drafts. */
-export function Navigator({ groups, selected, select, drafts, colors }: NavigatorProps) {
+/** The guide as a tree: the description and the overview, then each group with its entries, each with its understood tick and its number of drafts. */
+export function Navigator({ groups, selected, select, drafts, descriptionEdited, colors }: NavigatorProps) {
   const progress = useContext(ProgressContext)?.progress ?? null;
   const counts = draftCounts(groups, drafts);
   /** The groups the reviewer folded or unfolded themselves; any other folds once every entry in it is understood. */
@@ -39,6 +41,12 @@ export function Navigator({ groups, selected, select, drafts, colors }: Navigato
 
   return (
     <View accessibilityRole="list" style={{ paddingBottom: spacing[2] }}>
+      <Row colors={colors} selected={selected === DESCRIPTION_KEY} onPress={() => select(DESCRIPTION_KEY)} depth={0}>
+        <Title colors={colors} strong>
+          Description
+        </Title>
+        {descriptionEdited ? <Text style={{ color: colors.statusWarning, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>edited</Text> : null}
+      </Row>
       <Row colors={colors} selected={selected === OVERVIEW_KEY} onPress={() => select(OVERVIEW_KEY)} depth={0}>
         <Title colors={colors} strong>
           Overview

@@ -6,7 +6,7 @@ import type { LayeredGuide } from "../shared/guide.ts";
 import { isUnderstood } from "../shared/progress.ts";
 import { Button } from "./button.tsx";
 import { NodeCode } from "./diff-view.tsx";
-import { FINISH_KEY, nextNotUnderstood, OVERVIEW_KEY, stepEntry, type Entry, type EntryGroup } from "./guide-entries.ts";
+import { DESCRIPTION_KEY, FINISH_KEY, nextNotUnderstood, OVERVIEW_KEY, stepEntry, type Entry, type EntryGroup } from "./guide-entries.ts";
 import { Card, FileEntry, Link, NodeCard, Overview, UnsortedNote } from "./guide-view.tsx";
 import { ProgressContext } from "./progress.tsx";
 import { fontSize, leading, spacing, type Colors } from "./theme.ts";
@@ -22,6 +22,8 @@ export type DetailProps = {
   openAgent?: (agentId: string) => void;
   /** The Finish review page, shown for `FINISH_KEY`. */
   finish: React.ReactNode;
+  /** The description's page, shown for `DESCRIPTION_KEY`. */
+  description: React.ReactNode;
 };
 
 /**
@@ -29,7 +31,7 @@ export type DetailProps = {
  * An entry is drawn the first time it is selected and kept, hidden, after, so a comment half written
  * in it and where it was scrolled to are still there when the reviewer comes back.
  */
-export function Detail({ reviewId, agentId, guide, groups, selected, select, theme, openAgent, finish }: DetailProps) {
+export function Detail({ reviewId, agentId, guide, groups, selected, select, theme, openAgent, finish, description }: DetailProps) {
   const colors = theme.colors;
   const titles = new Map(guide.nodes.map((node) => [node.id, node.title]));
   const visited = useRef(new Set<string>());
@@ -38,6 +40,7 @@ export function Detail({ reviewId, agentId, guide, groups, selected, select, the
 
   const page = (key: string): React.ReactNode => {
     if (key === FINISH_KEY) return finish;
+    if (key === DESCRIPTION_KEY) return description;
     if (key === OVERVIEW_KEY) {
       return (
         <>

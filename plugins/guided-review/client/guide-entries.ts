@@ -16,6 +16,8 @@ export type EntryGroup = {
   entries: Entry[];
 };
 
+/** The PR/MR description, a page before the overview that no guide is needed for and nothing marks. */
+export const DESCRIPTION_KEY = "description";
 export const OVERVIEW_KEY = "overview";
 /** Finish review, which the detail pane shows like an entry though the navigator does not list it. */
 export const FINISH_KEY = "finish";
@@ -51,9 +53,14 @@ function fileEntry(path: string, category: SupportingCategory | null): Entry {
   return { kind: "file", key: subjectKey(subject), subject, path, category };
 }
 
-/** Every entry's key in navigator order, the overview first. */
+/** Every entry's key in navigator order, the description and the overview first. */
 export function entryOrder(groups: readonly EntryGroup[]): string[] {
-  return [OVERVIEW_KEY, ...groups.flatMap((group) => group.entries.map((entry) => entry.key))];
+  return [DESCRIPTION_KEY, OVERVIEW_KEY, ...groups.flatMap((group) => group.entries.map((entry) => entry.key))];
+}
+
+/** The pages no reviewer marks understood, which reading on skips. */
+function isUnmarked(key: string): boolean {
+  return key === DESCRIPTION_KEY || key === OVERVIEW_KEY;
 }
 
 function entryOf(groups: readonly EntryGroup[], key: string): Entry | undefined {
@@ -69,10 +76,10 @@ function understoodKey(groups: readonly EntryGroup[], progress: GuideProgress | 
   return progress !== null && entry !== undefined && isUnderstood(progress, entry.subject);
 }
 
-/** The overview while nothing is marked or everything is, else the first entry not yet understood. */
+/** The description while nothing is marked, the overview once everything is, else the first entry not yet understood. */
 export function startEntry(groups: readonly EntryGroup[], progress: GuideProgress | null): string {
-  if (progress === null || progress.overall.understood === 0) return OVERVIEW_KEY;
-  return entryOrder(groups).find((key) => key !== OVERVIEW_KEY && !understoodKey(groups, progress, key)) ?? OVERVIEW_KEY;
+  if (progress === null || progress.overall.understood === 0) return DESCRIPTION_KEY;
+  return entryOrder(groups).find((key) => !isUnmarked(key) && !understoodKey(groups, progress, key)) ?? OVERVIEW_KEY;
 }
 
 /** `selected` while the guide still has it, or is one of `extra` (keys of pages that are no entry), else where the panel starts. */
@@ -96,7 +103,7 @@ export function stepEntry(groups: readonly EntryGroup[], key: string, step: -1 |
 
 /** The next entry after `key` not yet understood, wrapping round to the top; null once every other one is. */
 export function nextNotUnderstood(groups: readonly EntryGroup[], key: string, progress: GuideProgress | null): string | null {
-  const order = entryOrder(groups).filter((candidate) => candidate !== OVERVIEW_KEY);
+  const order = entryOrder(groups).filter((candidate) => !isUnmarked(candidate));
   const index = order.indexOf(key);
   const rotated = [...order.slice(index + 1), ...order.slice(0, Math.max(index, 0))];
   return rotated.find((candidate) => !understoodKey(groups, progress, candidate)) ?? null;

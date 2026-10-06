@@ -8,13 +8,14 @@ import type { GuideState } from "../shared/guide.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { BranchStartView, isBranchRunning } from "./branch-start.tsx";
 import { ResizeHandle, useColumnWidths } from "./column-resize.tsx";
+import { DescriptionCard, useDescriptionEdited } from "./description.tsx";
 import { DraftsContext, DraftsSection, useDrafts } from "./drafts.tsx";
 import { GuideView } from "./guide-view.tsx";
 import { FinishBar, FinishReview, InlineFinishReview } from "./finish-review.tsx";
 import { StaleGuideBanner, useRegenerate } from "./head-check.tsx";
 import { Detail } from "./detail.tsx";
 import { EntryLinksContext } from "./entry-links.ts";
-import { FINISH_KEY, guideGroups, layoutFor, OVERVIEW_KEY } from "./guide-entries.ts";
+import { DESCRIPTION_KEY, FINISH_KEY, guideGroups, layoutFor, OVERVIEW_KEY } from "./guide-entries.ts";
 import { Navigator, useSelection } from "./navigator.tsx";
 import { ProgressContext, useProgress } from "./progress.tsx";
 import { FlatContext, Strip } from "./section.tsx";
@@ -57,6 +58,10 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
       ? { agentId: panel.data.guide.agentId, nodes: panel.data.guide.guide.nodes }
       : null,
     openAgent,
+  );
+  const descriptionEdited = useDescriptionEdited(
+    panel.data?.status === "ready" ? panel.data.reviewId : null,
+    panel.data?.status === "ready" ? panel.data.header.headSha : null,
   );
   const regenerate = useRegenerate({
     reviewId: panel.data?.status === "ready" ? panel.data.reviewId : null,
@@ -108,6 +113,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
           {panel.data.note ? <Note color={colors.statusWarning}>{panel.data.note}</Note> : null}
           {drafts ? <DraftsSection control={drafts} colors={colors} /> : null}
           {drafts ? <InlineFinishReview reviewId={reviewId} header={panel.data.header} drafts={drafts} colors={colors} regenerate={regenerate} /> : null}
+          <DescriptionCard reviewId={reviewId} headSha={panel.data.header.headSha} colors={colors} />
           {guideView(reviewId, panel.data.guide, true)}
         </View>
       );
@@ -136,9 +142,8 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
   const navigator = (
     <View style={{ borderBottomWidth: shape === "two" ? 1 : 0, borderColor: colors.border }}>
       <Strip colors={colors} title="Guide" />
-      {guide.status === "ready" ? (
-        <Navigator groups={groups} selected={selected} select={select} drafts={drafts?.drafts ?? []} colors={colors} />
-      ) : (
+      <Navigator groups={groups} selected={selected} select={select} drafts={drafts?.drafts ?? []} descriptionEdited={descriptionEdited} colors={colors} />
+      {guide.status === "ready" ? null : (
         <Text style={{ paddingHorizontal: spacing[3], paddingBottom: spacing[3], color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>
           {guide.status === "generating" ? "Its entries appear once the guide is written." : "No guide to list."}
         </Text>
@@ -147,6 +152,7 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
   );
   // Above the detail pane, so the half of a handle that overhangs it takes the pointer.
   const divider = { borderColor: colors.border, flexGrow: 0, flexShrink: 0, zIndex: 1 } as const;
+  const descriptionCard = <DescriptionCard reviewId={reviewId} headSha={header.headSha} colors={colors} />;
   const finishReview = drafts ? (
     <FinishReview reviewId={reviewId} header={header} drafts={drafts} colors={colors} regenerate={regenerate} onClose={() => select(lastEntry.current)} />
   ) : null;
@@ -194,10 +200,11 @@ export function GuidePanel({ workspaceId, theme, layout, navigation, openPanel }
                   theme={theme}
                   {...(openAgent ? { openAgent } : {})}
                   finish={finishReview}
+                  description={descriptionCard}
                 />
               ) : (
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: spacing[3], padding: spacing[4] }}>
-                  {selected === FINISH_KEY ? finishReview : guideView(reviewId, guide, false)}
+                  {selected === FINISH_KEY ? finishReview : selected === DESCRIPTION_KEY ? descriptionCard : guideView(reviewId, guide, false)}
                 </ScrollView>
               )}
               {shape === "three" ? (

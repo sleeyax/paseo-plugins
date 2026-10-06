@@ -427,7 +427,7 @@ function Heading({ colors, subjects, children }: { colors: Colors; subjects: rea
   );
 }
 
-function Label({ colors, children }: { colors: Colors; children: React.ReactNode }) {
+export function Label({ colors, children }: { colors: Colors; children: React.ReactNode }) {
   return (
     <Text
       selectable={HIGHLIGHTS_TEXT}
