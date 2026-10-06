@@ -139,7 +139,7 @@ test("a head moved since the guide leaves every verdict on offer, warning of the
     regenerate: true,
   });
   assert.deepEqual(finish.verdicts[2], { verdict: "comment", allowed: true, reason: null, warning: null, regenerate: false });
-  assert.deepEqual(finish.head, { guideHeadSha: HEAD, forgeHeadSha: PUSHED, moved: true, newCommits: 3, rewritten: false, state: "open", message: null });
+  assert.deepEqual(finish.head, { guideHeadSha: HEAD, forgeHeadSha: PUSHED, moved: true, newCommits: 3, rewritten: false, state: "open", description: changeRequest.description, message: null });
 
   const approved = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: PUSHED, verdict: "approve", body: "LGTM" });
   assert.equal(approved.status, "submitted");

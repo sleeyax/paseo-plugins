@@ -305,10 +305,14 @@ test("glab runs without an agent's identity and without prompts", async () => {
   }
 });
 
-test("reads where a merge request's diff head is now and its state, by the project's numeric ID", async () => {
+test("reads where a merge request's diff head is now, its state and its description, by the project's numeric ID", async () => {
   const { forge, run } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, { stdout: fixture("merge-request.json") }]);
 
-  assert.deepEqual(await forge.fetchHead(MR_3931), { headSha: "8e1ef79fe55aae06f0c7246e550f8c30075b7564", state: "merged" });
+  assert.deepEqual(await forge.fetchHead(MR_3931), {
+    headSha: "8e1ef79fe55aae06f0c7246e550f8c30075b7564",
+    state: "merged",
+    description: JSON.parse(fixture("merge-request.json")).description,
+  });
   assert.deepEqual(run.calls.at(-1)?.args, ["api", "--hostname", "gitlab.com", "projects/34675721/merge_requests/3931"]);
 });
 
@@ -327,7 +331,7 @@ test("a merge request whose diff GitLab has not worked out yet has its source br
   const mr = { ...JSON.parse(fixture("merge-request.json")), state: "opened", diff_refs: null, sha: "d".repeat(40) };
   const { forge } = forgeReplaying([LOGGED_IN, { stdout: fixture("project.json") }, { stdout: JSON.stringify(mr) }]);
 
-  assert.deepEqual(await forge.fetchHead(MR_3931), { headSha: "d".repeat(40), state: "open" });
+  assert.deepEqual(await forge.fetchHead(MR_3931), { headSha: "d".repeat(40), state: "open", description: JSON.parse(fixture("merge-request.json")).description });
 });
 
 test("identifies the current user on the merge request's host", async () => {
@@ -1213,12 +1217,12 @@ test("a GraphQL answer with errors and no user is the host's error, and more MRs
 });
 
 test("a host listed as logged in is not checked again before reading an MR on it", async () => {
-  const head = { stdout: JSON.stringify({ state: "opened", sha: "a".repeat(40), diff_refs: { head_sha: "a".repeat(40) } }) };
+  const head = { stdout: JSON.stringify({ state: "opened", description: null, sha: "a".repeat(40), diff_refs: { head_sha: "a".repeat(40) } }) };
   const { forge, run } = forgeReplaying([...LIST_REVIEWS, { stdout: fixture("project.json") }, head]);
 
   await forge.listReviewRequests();
   run.calls.length = 0;
 
-  assert.deepEqual(await forge.fetchHead(MR_3931), { headSha: "a".repeat(40), state: "open" });
+  assert.deepEqual(await forge.fetchHead(MR_3931), { headSha: "a".repeat(40), state: "open", description: "" });
   assert.ok(!run.calls.some((call) => call.args[0] === "auth"), "no auth status check");
 });

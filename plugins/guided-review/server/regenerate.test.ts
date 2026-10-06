@@ -21,6 +21,7 @@ const URL = "https://github.com/acme/uploader/pull/7";
 const REVIEW_ID = "github/github.com/acme/uploader/7";
 const OLD = "b".repeat(40);
 const NEW = "d".repeat(40);
+const DESCRIPTION = sampleChangeRequest(URL).description;
 const PR_WORKSPACE = "wks_0000000000000001";
 
 const RETRY_TEST: ChangedFile = { path: "src/retry.test.ts", previousPath: null, status: "added", additions: 1, deletions: 0, patch: "@@ -0,0 +1,1 @@\n+t" };
@@ -119,6 +120,7 @@ test("a guide at the forge's head has not moved", async (t) => {
     newCommits: null,
     rewritten: false,
     state: "open",
+    description: DESCRIPTION,
     message: null,
   });
 });
@@ -135,6 +137,7 @@ test("a push shows as moved, and nothing is regenerated or moved until Regenerat
     newCommits: 3,
     rewritten: false,
     state: "closed",
+    description: DESCRIPTION,
     message: null,
   });
   // Checked on open and again while open: the panel still shows the guide it had.
@@ -146,6 +149,19 @@ test("a push shows as moved, and nothing is regenerated or moved until Regenerat
   assert.equal(agents.created.length, 1);
   assert.deepEqual(workspaces.fastForwards, []);
   assert.equal(forge.headReads, 2, "only the head is read, not the whole PR");
+});
+
+test("an edited description shows in the head check, while the panel's copy stays the guide head's until Regenerate", async (t) => {
+  const { service, forge } = await withGuide(t);
+  const projectUrl = "https://github.com/acme/uploader";
+  forge.changeRequests.set(URL, { ...atOldHead(), description: "Edited: test with RETRY=0 first." });
+
+  assert.equal((await service.checkHead({ reviewId: REVIEW_ID })).description, "Edited: test with RETRY=0 first.");
+  assert.deepEqual(await service.description({ reviewId: REVIEW_ID }), { headSha: OLD, description: DESCRIPTION, projectUrl });
+
+  forge.changeRequests.set(URL, { ...atNewHead(), description: "Edited: test with RETRY=0 first." });
+  await regenerate(service);
+  assert.deepEqual(await service.description({ reviewId: REVIEW_ID }), { headSha: NEW, description: "Edited: test with RETRY=0 first.", projectUrl });
 });
 
 test("a head the guide's is no longer among the commits of reads as rewritten, and a count the forge cannot give is left out", async (t) => {
@@ -172,6 +188,7 @@ test("a forge that cannot be asked is reported and reads as not moved", async (t
     newCommits: null,
     rewritten: false,
     state: null,
+    description: null,
     message: `Could not check ${URL} for new commits: gh failed: HTTP 502`,
   });
   await assert.rejects(service.checkHead({ reviewId: "github/github.com/acme/uploader/8" }), {

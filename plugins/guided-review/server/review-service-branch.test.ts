@@ -19,6 +19,7 @@ const LOCAL = "wks_local0000000000";
 const LOCAL_DIRECTORY = "/home/r/src/uploader";
 const BRANCH = "retry-uploads";
 const HEAD = "b".repeat(40);
+const DESCRIPTION = sampleChangeRequest(URL).description;
 
 type Host = {
   forge: FakeForge;
@@ -232,6 +233,7 @@ test("after a push, guiding the branch again leaves it and its guide where they 
     newCommits: 1,
     rewritten: false,
     state: "open",
+    description: DESCRIPTION,
     message: null,
   });
 });

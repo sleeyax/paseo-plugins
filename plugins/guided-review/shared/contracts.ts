@@ -288,6 +288,8 @@ export const HeadCheckSchema = z.object({
   rewritten: z.boolean(),
   /** The state the forge has the PR/MR in now; null when it could not be asked. */
   state: z.enum(["open", "closed", "merged"]).nullable(),
+  /** The description as the forge has it now, which an edit changes without a push; null when it could not be asked. */
+  description: z.string().nullable(),
   /** Why the forge could not be asked, as a sentence. */
   message: z.string().nullable(),
 });
@@ -300,6 +302,20 @@ export const checkHead = defineRpc({
   name: "guided-review.review.head",
   input: z.object({ reviewId: z.string() }),
   output: HeadCheckSchema,
+});
+
+/** The PR/MR description, in the author's Markdown, as it was read at the head of the guide the panel shows. */
+export const DescriptionSchema = z.object({
+  headSha: z.string(),
+  description: z.string(),
+  /** The project's web URL, which a relative link or image in the description is relative to. */
+  projectUrl: z.string(),
+});
+
+export const getDescription = defineRpc({
+  name: "guided-review.review.description",
+  input: z.object({ reviewId: z.string() }),
+  output: DescriptionSchema,
 });
 
 /**
@@ -360,6 +376,7 @@ export const discardReview = defineRpc({
 export type FinishView = z.output<typeof FinishViewSchema>;
 
 export type HeadCheck = z.output<typeof HeadCheckSchema>;
+export type Description = z.output<typeof DescriptionSchema>;
 
 /**
  * What a comment box is for, as "Suggest wording" and "Ask agent" name it: a comment on code at a draft location, or a general one, on the change as a whole, about a node or the overview, either of which can come from a passage of it the reviewer highlighted.

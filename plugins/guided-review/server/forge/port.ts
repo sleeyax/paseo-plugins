@@ -165,6 +165,8 @@ export type ChangeRequestState = "open" | "closed" | "merged";
 export type ChangeRequestHead = {
   headSha: string;
   state: ChangeRequestState;
+  /** The description as it reads now, which the author can edit without pushing. */
+  description: string;
 };
 
 export type CommitsSince = { kind: "after"; count: number } | { kind: "rewritten" };

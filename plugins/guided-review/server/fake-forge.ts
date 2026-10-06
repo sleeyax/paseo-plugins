@@ -129,7 +129,7 @@ export function fakeForge(kind: ForgeKind = "github"): FakeForge {
       }
       const changeRequest = forge.changeRequests.get(ref.url);
       if (!changeRequest) throw new ForgeError(`gh failed: Could not resolve to a PullRequest with the number of ${ref.number}.`);
-      return { headSha: changeRequest.headSha, state: changeRequest.state };
+      return { headSha: changeRequest.headSha, state: changeRequest.state, description: changeRequest.description };
     },
     async commitsSince() {
       if (forge.failCommitsSince) {

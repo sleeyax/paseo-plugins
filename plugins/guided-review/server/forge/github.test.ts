@@ -183,12 +183,12 @@ test("a gh that cannot run points at the setting", async () => {
   );
 });
 
-test("reads only where a pull request's head is now and its state, for noticing a push", async () => {
-  // The recorded pull request's own head and state, as the smaller query returns them.
-  const { headRefOid, state } = JSON.parse(fixture("pull-request.json")).data.repository.pullRequest;
-  const { forge, run } = forgeReplaying([{ stdout: JSON.stringify({ data: { repository: { pullRequest: { headRefOid, state } } } }) }]);
+test("reads only where a pull request's head is now, its state and its description, for noticing a push or an edit", async () => {
+  // The recorded pull request's own head, state and description, as the smaller query returns them.
+  const { headRefOid, state, body } = JSON.parse(fixture("pull-request.json")).data.repository.pullRequest;
+  const { forge, run } = forgeReplaying([{ stdout: JSON.stringify({ data: { repository: { pullRequest: { headRefOid, state, body } } } }) }]);
 
-  assert.deepEqual(await forge.fetchHead(PR_105), { headSha: "a711a639b04f3bd2bfe514157e0c19880fe33028", state: "merged" });
+  assert.deepEqual(await forge.fetchHead(PR_105), { headSha: "a711a639b04f3bd2bfe514157e0c19880fe33028", state: "merged", description: body });
   assert.deepEqual(
     run.calls.map((call) => ({ args: call.args, input: call.input && JSON.parse(call.input) })),
     [

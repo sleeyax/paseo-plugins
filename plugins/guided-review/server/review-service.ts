@@ -4,6 +4,7 @@ import type {
   AskResult,
   BranchStart,
   CommentSubject,
+  Description,
   FinishView,
   GuideSubject,
   HeadCheck,
@@ -249,7 +250,7 @@ export class ReviewService {
       if (!(error instanceof ForgeError)) throw error;
       const message = `Could not check ${record.ref.url} for new commits: ${error.message}`;
       this.#log(message);
-      return { guideHeadSha, forgeHeadSha: null, moved: false, newCommits: null, rewritten: false, state: null, message };
+      return { guideHeadSha, forgeHeadSha: null, moved: false, newCommits: null, rewritten: false, state: null, description: null, message };
     }
     const moved = head.headSha !== guideHeadSha;
     const since = moved ? await this.#commitsSince(forge, record.ref, guideHeadSha) : null;
@@ -260,8 +261,18 @@ export class ReviewService {
       newCommits: since?.kind === "after" ? since.count : null,
       rewritten: since?.kind === "rewritten",
       state: head.state,
+      description: head.description,
       message: null,
     };
+  }
+
+  /** The description as it was read at the review's head, which is the head of the guide the panel shows. */
+  async description({ reviewId }: { reviewId: string }): Promise<Description> {
+    const record = await this.#record(reviewId);
+    const { headSha } = record.header;
+    const changeRequest = await this.#store.snapshot(reviewId, headSha);
+    if (changeRequest === null) throw new Error(`The review has no copy of ${record.ref.url} at ${headSha}. Regenerate the guide.`);
+    return { headSha, description: changeRequest.description, projectUrl: `https://${record.ref.host}/${record.ref.project}` };
   }
 
   /** A count the forge cannot give is left out of the head check rather than failing it. */
