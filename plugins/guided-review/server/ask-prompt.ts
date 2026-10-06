@@ -109,7 +109,7 @@ function fileContext(file: ChangedFile, category: string | null, rest: FileRest 
   return sentences.join(" ");
 }
 
-function rangesOf(ranges: readonly LineRange[]): string {
+export function rangesOf(ranges: readonly LineRange[]): string {
   if (ranges.length === 0) return "";
   const listed = ranges.map((range) => (range.start === range.end ? `${range.start}` : `${range.start}-${range.end}`));
   return `, ${ranges.length === 1 && ranges[0]!.start === ranges[0]!.end ? "line" : "lines"} ${listed.join(", ")}`;

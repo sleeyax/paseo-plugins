@@ -282,6 +282,35 @@ test("a question on code sends the lines, the node they fall in and the question
   );
 });
 
+test("a question on a Supporting or Unsorted file as a whole names where the guide put it", async (t) => {
+  const { service, agents } = await withGuide(t);
+  const onFile = (path: string): CommentSubject => ({ kind: "code", location: { kind: "file", path } });
+
+  assert.equal((await question(service, onFile("src/retry.test.ts"), "What does it test?")).status, "sent");
+  assert.equal((await question(service, onFile("docs/retry.md"), "Who reads this?")).status, "sent");
+  assert.equal((await question(service, onFile("src/retry.ts"), "Why here?")).status, "sent");
+
+  const [supporting, unsorted, placed] = agents.created[0]!.sent;
+  assert.match(supporting!, /\n\nIt is about src\/retry\.test\.ts as a whole\. The file was added, \+20 −0\. Your guide lists it under Supporting, as test\.\n\n/);
+  assert.match(
+    unsorted!,
+    /\n\nIt is about docs\/retry\.md as a whole\. The file was added, \+12 −0\. Your guide did not place it in any node or in its Supporting group; it lists it as Unsorted\.\n\n/,
+  );
+  assert.match(placed!, /\n\nIt is about src\/retry\.ts as a whole\. The file was added, \+12 −0\.\n\n/);
+});
+
+test("a question on a file some nodes cover part of names the lines its entry holds", async (t) => {
+  const guide = sampleGuide();
+  guide.nodes[1]!.covers = [{ path: "src/upload.ts", hunks: [1], lines: [] }];
+  const { service, agents } = await withGuide(t, { guide, upload: UPLOAD_IN_TWO });
+
+  assert.equal((await question(service, { kind: "code", location: { kind: "file", path: "src/upload.ts" } }, "And the rest?")).status, "sent");
+
+  const prompt = agents.created[0]!.sent[0]!;
+  assert.match(prompt, /it lists it as Unsorted\. What it lists there is the part no node covers: src\/upload\.ts, lines 20-23\.\n\n/);
+  assert.match(prompt, /The node of your guide this code falls in:\n- "uploader", "Uploader uses the policy": /);
+});
+
 test("a question on highlighted text of a concept or the overview names it with the passage", async (t) => {
   const { service, agents } = await withGuide(t);
 

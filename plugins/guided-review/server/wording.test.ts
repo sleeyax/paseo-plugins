@@ -155,6 +155,17 @@ test("a comment on a whole file names the file and every node that covers part o
   assert.match(prompt, /```\nExplain the jitter\n```/);
 });
 
+test("a comment on a whole file some nodes cover part of names the lines its entry holds", async (t) => {
+  const { service, agents } = await withGuide(t);
+
+  assert.equal((await suggest(service, onCode({ kind: "file", path: "src/upload.ts" }), "")).status, "ready");
+
+  assert.match(
+    agents.created[0]!.sent[0]!,
+    /\n\nIt goes on src\/upload\.ts as a whole, not on any line of it\. The file was modified, \+3 −2\. Your guide did not place it in any node or in its Supporting group; it lists it as Unsorted\. What it lists there is the part no node covers: src\/upload\.ts, lines 41-43\.\n\n/,
+  );
+});
+
 test("what the reviewer typed is fenced so that backticks in it cannot close the fence", async (t) => {
   const { service, agents } = await withGuide(t);
 

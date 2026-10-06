@@ -2,7 +2,7 @@ import { z } from "zod";
 import { describeLocation } from "../shared/drafts.ts";
 import type { Guide, GuideNode } from "../shared/guide.ts";
 import { nodeContext, type CodeReference } from "./ask-prompt.ts";
-import { diffOf, fenced, nodesContext, overviewLines, type CodeSubjectContext, type CommentSubjectContext } from "./comment-subject.ts";
+import { diffOf, fenced, nodesContext, overviewLines, placementSentences, type CodeSubjectContext, type CommentSubjectContext } from "./comment-subject.ts";
 import type { ChangeRequestRef } from "./forge/port.ts";
 
 /** What "Suggest wording" asks the guide agent for: the comment's text, which the panel puts in the box. */
@@ -47,10 +47,10 @@ function subjectContext(ref: ChangeRequestRef, subject: CommentSubjectContext): 
   }
 }
 
-function codeContext({ location, file, lines }: CodeSubjectContext): string {
+function codeContext({ location, file, lines, placement }: CodeSubjectContext): string {
   const renamed = file.previousPath ? `, renamed from ${file.previousPath}` : "";
   if (location.kind === "file") {
-    return `It goes on ${file.path} as a whole, not on any line of it. The file was ${file.status}${renamed}, +${file.additions} −${file.deletions}.`;
+    return `It goes on ${file.path} as a whole, not on any line of it. The file was ${file.status}${renamed}, +${file.additions} −${file.deletions}.${placementSentences(file.path, placement)}`;
   }
   return [
     `It goes on ${describeLocation(location)} of ${file.path}${renamed}. The ${lines.length === 1 ? "line" : "lines"} as the diff shows ${lines.length === 1 ? "it" : "them"}:`,

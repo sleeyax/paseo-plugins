@@ -1,6 +1,6 @@
 import { describeLocation } from "../shared/drafts.ts";
 import { answerRules, nodeContext } from "./ask-prompt.ts";
-import { diffOf, fenced, nodesContext, overviewLines, type CodeSubjectContext, type CommentSubjectContext } from "./comment-subject.ts";
+import { diffOf, fenced, nodesContext, overviewLines, placementSentences, type CodeSubjectContext, type CommentSubjectContext } from "./comment-subject.ts";
 import type { ChangeRequestRef } from "./forge/port.ts";
 
 /**
@@ -31,10 +31,10 @@ function subjectContext(subject: CommentSubjectContext): string[] {
   }
 }
 
-function codeContext({ location, file, lines }: CodeSubjectContext): string {
+function codeContext({ location, file, lines, placement }: CodeSubjectContext): string {
   const renamed = file.previousPath ? `, renamed from ${file.previousPath}` : "";
   if (location.kind === "file") {
-    return `It is about ${file.path} as a whole. The file was ${file.status}${renamed}, +${file.additions} −${file.deletions}.`;
+    return `It is about ${file.path} as a whole. The file was ${file.status}${renamed}, +${file.additions} −${file.deletions}.${placementSentences(file.path, placement)}`;
   }
   return [
     `It is about ${describeLocation(location)} of ${file.path}${renamed}. The ${lines.length === 1 ? "line" : "lines"} as the diff shows ${lines.length === 1 ? "it" : "them"}:`,
