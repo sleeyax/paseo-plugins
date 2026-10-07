@@ -1,6 +1,7 @@
 ---
 name: adopt-paseo-release
-description: Review the Paseo releases since the last review against the plugins and apps in the sleeyax/paseo-plugins checkout, and file one GitHub issue an agent can implement, listing the breaking changes to absorb, the workarounds a release retires, and the new features worth adopting. Use when a new Paseo release is out, or the user asks what a Paseo release means for these plugins.
+description: Review the Paseo releases since the last review and file a GitHub issue with what these plugins should adopt.
+disable-model-invocation: true
 ---
 
 # Adopt a Paseo release
