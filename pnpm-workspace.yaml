@@ -8,3 +8,4 @@ minimumReleaseAgeExclude:
   - '@getpaseo/protocol@0.7.0 || 0.8.0 || 0.9.1 || 0.11.0'
   - '@getpaseo/relay@0.7.0 || 0.8.0 || 0.9.1 || 0.11.0'
   - '@getpaseo/plugin@0.8.0 || 0.9.1 || 0.11.0'
+  - '@getpaseo/highlight@0.11.0'
