@@ -4,12 +4,12 @@ import { numberLabel } from "../shared/reference.ts";
 
 export type Tone = "muted" | "danger";
 
-/** Whether the start surface can stop asking: nothing after these phases changes on its own. */
+/** Whether the start screen can stop asking: nothing after these phases changes on its own. */
 export function isFinished(phase: StartPhase): boolean {
   return phase === "ready" || phase === "failed" || phase === "unknown";
 }
 
-/** The line the start surface shows while a review is being prepared. */
+/** The line the start screen shows while a review is being prepared. */
 export function describeProgress(progress: StartProgress): { text: string; tone: Tone } {
   const header = progress.header;
   const name = header ? `${numberLabel(header.forge, header.number)} in ${header.project}` : "the PR or MR";

@@ -64,7 +64,7 @@ GitLab keeps no review body before a review is submitted, so on a merge request 
 
 The workspace is a worktree of a local clone. The plugin uses the Paseo project whose `origin` is the repository the pull request or merge request targets; when there is none, it clones the repository once with `gh repo clone` or `glab repo clone` into `$PASEO_HOME/plugin-data/guided-review/clones/` and reuses that clone for every later review of it.
 
-Requires Paseo 0.9 or newer.
+Requires Paseo 0.11 or newer.
 
 ## Settings
 

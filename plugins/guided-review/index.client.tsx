@@ -1,12 +1,23 @@
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
+import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import React from "react";
 import { openPanelWhenReady } from "./client/open-panel.ts";
 import { GuidePanel } from "./client/panel.tsx";
 import { keepReviewButtons } from "./client/review-buttons.ts";
 import { GuidedReviewSettings } from "./client/settings.tsx";
-import { createStartSurface } from "./client/start.tsx";
+import { createStartScreen } from "./client/start.tsx";
 import * as contracts from "./shared/contracts.ts";
-import { PANEL_ID, PLUGIN_ICON, PLUGIN_ID, PLUGIN_LABEL, SETTINGS_SCREEN_ID, START_SURFACE_ID } from "./shared/identity.ts";
+import { PANEL_ID, PLUGIN_ICON, PLUGIN_ID, PLUGIN_LABEL, SETTINGS_SCREEN_ID, START_SCREEN_ID } from "./shared/identity.ts";
+
+function StartSidebarItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
+  return (
+    <SidebarRow
+      icon={PLUGIN_ICON}
+      active={currentScreen?.screenId === START_SCREEN_ID}
+      onPress={() => openScreen({ screenId: START_SCREEN_ID })}
+    />
+  );
+}
 
 export default function contribute(client: PluginClientContext) {
   const openPanel = (workspaceId: string) => client.openPanel(PANEL_ID, { workspaceId });
@@ -19,14 +30,8 @@ export default function contribute(client: PluginClientContext) {
     Component: (props) => <GuidePanel {...props} openPanel={(workspaceId) => void openPanelWhenReady(() => openPanel(workspaceId))} />,
   });
 
-  client.addSurface(START_SURFACE_ID, createStartSurface(openPanel));
-
-  client.addSidebarItem({
-    id: START_SURFACE_ID,
-    title: PLUGIN_LABEL,
-    icon: PLUGIN_ICON,
-    surface: START_SURFACE_ID,
-  });
+  client.addScreen({ id: START_SCREEN_ID, title: PLUGIN_LABEL, Component: createStartScreen(openPanel) });
+  client.addSidebarHeaderItem({ id: START_SCREEN_ID, title: PLUGIN_LABEL, Component: StartSidebarItem });
 
   client.addSettingsScreen({
     id: SETTINGS_SCREEN_ID,

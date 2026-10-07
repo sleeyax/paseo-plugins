@@ -34,7 +34,7 @@ async function withHost(t: TestContext): Promise<Host> {
   return { data, forge, workspaces, guideAgents, service: create(), restart: create };
 }
 
-/** Starts a review and waits for its background job, the way the start surface polls it. */
+/** Starts a review and waits for its background job, the way the start screen polls it. */
 async function startAndSettle(service: ReviewService, url: string) {
   const started = await service.start({ url });
   await service.settled();
