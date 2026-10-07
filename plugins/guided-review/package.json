@@ -2,7 +2,7 @@
   "name": "@paseo-plugins/guided-review",
   "description": "A trunk-first guide to a pull request, with a draft review built alongside it.",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test \"{client,server,shared}/**/*.test.ts\""
