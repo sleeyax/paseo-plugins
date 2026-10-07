@@ -1,0 +1,6 @@
+          
+   ERROR  
+          
+  X gitlab.example.invalid has not been authenticated with glab; run `glab auth login --hostname                      
+  gitlab.example.invalid` to authenticate.                                                                            
+
