@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { runAcpProvider } from "@getpaseo/plugin/server/acp";
 import type { AcpStream, AcpStreamMessage } from "@getpaseo/plugin/server/acp";
 import type { ProviderEvent, ProviderToolCallDetail } from "@getpaseo/plugin/server/provider";
+import { BACKGROUND_COMMAND_META } from "./background-commands.ts";
 import { TOOL_CALL_MIRROR_METHOD, toolCallDetails } from "./tool-details.ts";
 
 const NATIVE_SESSION_ID = "native";
@@ -76,6 +77,14 @@ test("turns the adapter's mirrored tool calls into the cards the bridge cannot b
   });
   // And a call the adapter never mirrored is left exactly as the bridge made it.
   assert.deepEqual(lastDetail(events, "unmirrored-call"), { type: "unknown", input: { command: "ls" }, output: null });
+  // A command Claude backgrounded is told apart only by the mark the adapter puts on its card.
+  assert.deepEqual(details.backgroundCommand("session", "background-call"), {
+    taskId: "b1",
+    outputFile: "/tmp/tasks/b1.output",
+    command: "npm run dev",
+    description: "Start the dev server",
+  });
+  assert.equal(details.backgroundCommand("session", "shell-call"), null);
 });
 
 test("forgets a closed session's tool calls", async () => {
@@ -220,6 +229,22 @@ function fakeAgent(): AcpStream {
           status: "completed",
           content: [{ type: "content", content: { type: "text", text: "Read src/app.ts\nReported back" } }],
         });
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: "background-call",
+          title: "Bash: Start the dev server",
+          kind: "execute",
+          status: "in_progress",
+          rawInput: { command: "npm run dev", description: "Start the dev server" },
+        });
+        // The mark rides on the launch's update, and the updates after it need not repeat it.
+        update({
+          sessionUpdate: "tool_call_update",
+          toolCallId: "background-call",
+          status: "in_progress",
+          _meta: { [BACKGROUND_COMMAND_META]: { taskId: "b1", outputFile: "/tmp/tasks/b1.output" } },
+        });
+        update({ sessionUpdate: "tool_call_update", toolCallId: "background-call", status: "in_progress" });
         update(
           {
             sessionUpdate: "tool_call",

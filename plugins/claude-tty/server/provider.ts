@@ -92,7 +92,7 @@ export function claudeTtyProvider(settings: Settings, snapshot: SettingsMirror):
             details.wrap(notices.wrap(withSteerFallback(connection, request.capabilities))),
             cardAnswersDirectory(defaultStateDirectory()),
           ),
-          subagentSource(),
+          subagentSource(details.backgroundCommand),
           request.capabilities,
         ),
       );
