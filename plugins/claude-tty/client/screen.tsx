@@ -1,4 +1,4 @@
-import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
+import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { SettingsCard, SettingsRow, SettingsSection } from "@getpaseo/plugin/client/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,7 +18,7 @@ import { usePalette } from "./ui.tsx";
 export const STATUS_QUERY_KEY = [PLUGIN_ID, "status"];
 const REFETCH_MS = 5_000;
 
-export function ClaudeTtySurface({ theme, layout, navigation }: PluginSurfaceProps) {
+export function ClaudeTtyScreen({ theme, layout, navigation }: PluginScreenProps) {
   const palette = usePalette(theme);
   const queryClient = useQueryClient();
   const getStatus = useRpc(contracts.getStatus);

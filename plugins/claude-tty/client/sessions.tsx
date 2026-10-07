@@ -1,4 +1,4 @@
-import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
+import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { SettingsCard, SettingsRow, SettingsSection } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,7 +17,7 @@ export const SESSIONS_QUERY_KEY = [PLUGIN_ID, "sessions"];
 const REFETCH_MS = 10_000;
 
 type Session = SessionsPayload["sessions"][number];
-type Navigation = PluginSurfaceProps["navigation"];
+type Navigation = PluginScreenProps["navigation"];
 
 export function SessionsSection({ palette, navigation }: { palette: Palette; navigation: Navigation }) {
   const [showOlder, setShowOlder] = useState(false);

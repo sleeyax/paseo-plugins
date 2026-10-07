@@ -272,12 +272,12 @@ Mutations read the state directory through `readState`, which does not touch the
 It is also raced against a budget and paged explicitly, because the SDK waits a minute by default while the daemon kills a plugin RPC at 30 seconds, and one page is capped at 200 agents.
 A daemon that stalls or pages forever costs the titles and nothing else, which is the whole claim.
 
-## Opening an agent, and the one thing a surface still cannot reach
+## Opening an agent, and the one thing the screen still cannot reach
 
-`navigation.openAgent({ agentId })` is on `PluginSurfaceProps` and reveals an agent's terminal; the sessions rows use it.
+`navigation.openAgent({ agentId })` is on `PluginScreenProps` and reveals an agent's terminal; the sessions rows use it.
 It is optional in the type because a host older than 0.7 passes none, so the button is hidden rather than dead when it is absent — as it is for a session the daemon no longer lists an agent for.
 
-`openSurface` and `openSettings` are the other half and are **not** on a surface's props: they live on command contexts and on the client entry's context.
+`openScreen` and `openSettings` are the other half and are **not** on a screen's props: they live on command contexts and on the client entry's context.
 So the panel cannot send anyone to this plugin's own settings screen, and the Command Center item is what does.
 
 ## A subagent is a subsession, and the daemon is strict about how one is opened
