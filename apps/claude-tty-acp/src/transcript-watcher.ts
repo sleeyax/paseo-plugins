@@ -77,9 +77,10 @@ export class TranscriptWatcher {
     const result = await this.reader.read();
     await this.translator.translate(result.records);
     await this.subagents?.sync();
+    await this.translator.refreshBackgroundShells();
   }
 
-  private syncWithState(forceSubagents: boolean): Promise<{ size: number | null; complete: boolean }> {
+  private syncWithState(force: boolean): Promise<{ size: number | null; complete: boolean }> {
     let size: number | null = null;
     let complete = true;
     const read = async () => {
@@ -87,7 +88,8 @@ export class TranscriptWatcher {
       size = result.size;
       complete = result.complete;
       await this.translator.translate(result.records);
-      await this.subagents?.sync(forceSubagents);
+      await this.subagents?.sync(force);
+      await this.translator.refreshBackgroundShells(force);
     };
     const operation = this.queue.then(read, read);
     this.queue = operation.catch(() => undefined);

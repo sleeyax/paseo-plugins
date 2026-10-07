@@ -1,0 +1,155 @@
+[
+  {
+    "id": 533339747,
+    "iid": 3931,
+    "project_id": 34675721,
+    "title": "feat: mr note create support for internal notes/threads",
+    "description": "## Description\n\nAdds support for internal notes on `mr note create`, allowing the creation of internal notes as well as replying to them.\n\n## Related Issues\n\nResolves #8557\n\n## How has this been tested?\n\n- Expanded the `mr_note_create` test suite to support various combinations of flags working alongside `--internal`\n- Tested the flag itself in a GitLab project, see the video below\n\n## Screenshots\n\n![firefox_72lswLnXMj](/uploads/0bca9218f6458ccdc8d28121fbe99769/firefox_72lswLnXMj.mp4){width=900 height=485}",
+    "state": "merged",
+    "created_at": "2026-09-17T10:42:08.075Z",
+    "updated_at": "2026-09-24T11:29:15.494Z",
+    "merged_by": {
+      "id": 11334402,
+      "username": "ahmed.hemdan",
+      "name": "Ahmed Hemdan",
+      "state": "active",
+      "locked": false,
+      "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11334402/avatar.png?v=1791304651",
+      "web_url": "https://gitlab.com/ahmed.hemdan"
+    },
+    "merge_user": {
+      "id": 11334402,
+      "username": "ahmed.hemdan",
+      "name": "Ahmed Hemdan",
+      "state": "active",
+      "locked": false,
+      "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11334402/avatar.png?v=1791304651",
+      "web_url": "https://gitlab.com/ahmed.hemdan"
+    },
+    "merged_at": "2026-09-24T11:29:15.728Z",
+    "closed_by": null,
+    "closed_at": null,
+    "target_branch": "main",
+    "source_branch": "8557-mr-internal-notes",
+    "user_notes_count": 21,
+    "upvotes": 0,
+    "downvotes": 0,
+    "author": {
+      "id": 5958906,
+      "username": "gkepas",
+      "name": "Giannis Kepas",
+      "state": "active",
+      "locked": false,
+      "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/5958906/avatar.png?v=1791294303",
+      "web_url": "https://gitlab.com/gkepas",
+      "bot": false
+    },
+    "assignees": [
+      {
+        "id": 5958906,
+        "username": "gkepas",
+        "name": "Giannis Kepas",
+        "state": "active",
+        "locked": false,
+        "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/5958906/avatar.png?v=1791294303",
+        "web_url": "https://gitlab.com/gkepas"
+      }
+    ],
+    "assignee": {
+      "id": 5958906,
+      "username": "gkepas",
+      "name": "Giannis Kepas",
+      "state": "active",
+      "locked": false,
+      "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/5958906/avatar.png?v=1791294303",
+      "web_url": "https://gitlab.com/gkepas"
+    },
+    "reviewers": [
+      {
+        "id": 401232,
+        "username": "theoretick",
+        "name": "Lucas Charles",
+        "state": "active",
+        "locked": false,
+        "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/401232/squares-nail-wall-art.jpg?v=1791305637",
+        "web_url": "https://gitlab.com/theoretick"
+      },
+      {
+        "id": 11334402,
+        "username": "ahmed.hemdan",
+        "name": "Ahmed Hemdan",
+        "state": "active",
+        "locked": false,
+        "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/11334402/avatar.png?v=1791304651",
+        "web_url": "https://gitlab.com/ahmed.hemdan"
+      },
+      {
+        "id": 21826781,
+        "username": "GitLabDuo",
+        "name": "GitLab Duo",
+        "state": "active",
+        "locked": false,
+        "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/21826781/duo-bot.png?v=1781708173",
+        "web_url": "https://gitlab.com/GitLabDuo"
+      }
+    ],
+    "source_project_id": 45049979,
+    "target_project_id": 34675721,
+    "labels": [
+      "1st contribution",
+      "Community contribution",
+      "automation:ml",
+      "backend",
+      "category:gitlab cli",
+      "devops::ai coding",
+      "documentation",
+      "feature::addition",
+      "group::code review",
+      "linked-issue",
+      "section::ai",
+      "tw::triaged",
+      "type::feature",
+      "workflow::ready for review"
+    ],
+    "draft": false,
+    "imported": false,
+    "imported_from": "none",
+    "work_in_progress": false,
+    "milestone": null,
+    "merge_when_pipeline_succeeds": true,
+    "merge_status": "can_be_merged",
+    "detailed_merge_status": "not_open",
+    "merge_after": null,
+    "sha": "8e1ef79fe55aae06f0c7246e550f8c30075b7564",
+    "merge_commit_sha": "52f5335927b17e041e1613cbfc4de3be35ffa3c0",
+    "squash_commit_sha": "b20fb66dfd3e8ca3f07b640ca2a57efe15fc2d9a",
+    "discussion_locked": null,
+    "should_remove_source_branch": true,
+    "force_remove_source_branch": true,
+    "prepared_at": "2026-09-17T10:42:14.674Z",
+    "allow_collaboration": true,
+    "allow_maintainer_to_push": true,
+    "reference": "!3931",
+    "references": {
+      "short": "!3931",
+      "relative": "!3931",
+      "full": "gitlab-org/cli!3931"
+    },
+    "web_url": "https://gitlab.com/gitlab-org/cli/-/merge_requests/3931",
+    "time_stats": {
+      "time_estimate": 0,
+      "total_time_spent": 0,
+      "human_time_estimate": null,
+      "human_total_time_spent": null
+    },
+    "squash": true,
+    "squash_on_merge": true,
+    "task_completion_status": {
+      "count": 0,
+      "completed_count": 0
+    },
+    "has_conflicts": false,
+    "blocking_discussions_resolved": true,
+    "approvals_before_merge": null
+  }
+]

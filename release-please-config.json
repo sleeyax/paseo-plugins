@@ -14,6 +14,10 @@
       "release-type": "node",
       "component": "discord-rich-presence"
     },
+    "plugins/guided-review": {
+      "release-type": "node",
+      "component": "guided-review"
+    },
     "apps/claude-tty-acp": {
       "release-type": "node",
       "component": "claude-tty-acp",

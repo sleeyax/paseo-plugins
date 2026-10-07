@@ -1,0 +1,209 @@
+{
+  "data": {
+    "currentUser": {
+      "username": "reviewer",
+      "reviewRequestedMergeRequests": {
+        "pageInfo": {
+          "hasNextPage": false
+        },
+        "nodes": [
+          {
+            "webUrl": "https://gitlab.com/example-group/service/-/merge_requests/12",
+            "title": "Add rate limiting to the upload endpoint",
+            "draft": false,
+            "createdAt": "2026-09-28T09:00:00Z",
+            "updatedAt": "2026-10-04T16:20:00Z",
+            "diffHeadSha": "1111111111111111111111111111111111111111",
+            "author": {
+              "username": "author"
+            },
+            "diffStatsSummary": {
+              "additions": 120,
+              "deletions": 30,
+              "fileCount": 5
+            },
+            "headPipeline": {
+              "status": "FAILED"
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "sha": "1111111111111111111111111111111111111111",
+                  "committedDate": "2026-10-04T16:00:00+00:00"
+                }
+              ]
+            },
+            "reviewers": {
+              "nodes": [
+                {
+                  "username": "Reviewer",
+                  "mergeRequestInteraction": {
+                    "reviewState": "UNREVIEWED",
+                    "approved": false,
+                    "updatedAt": "2026-09-28T09:05:00Z"
+                  }
+                },
+                {
+                  "username": "colleague",
+                  "mergeRequestInteraction": {
+                    "reviewState": "APPROVED",
+                    "approved": true,
+                    "updatedAt": "2026-09-01T08:00:00Z"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "webUrl": "https://gitlab.com/example-group/sub/web/-/merge_requests/40",
+            "title": "Show upload progress",
+            "draft": false,
+            "createdAt": "2026-09-25T09:00:00Z",
+            "updatedAt": "2026-10-03T11:00:00Z",
+            "diffHeadSha": "2222222222222222222222222222222222222222",
+            "author": {
+              "username": "author"
+            },
+            "diffStatsSummary": {
+              "additions": 48,
+              "deletions": 12,
+              "fileCount": 3
+            },
+            "headPipeline": {
+              "status": "SUCCESS"
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "sha": "2222222222222222222222222222222222222222",
+                  "committedDate": "2026-10-01T15:00:00+00:00"
+                }
+              ]
+            },
+            "reviewers": {
+              "nodes": [
+                {
+                  "username": "Reviewer",
+                  "mergeRequestInteraction": {
+                    "reviewState": "APPROVED",
+                    "approved": true,
+                    "updatedAt": "2026-10-02T10:00:00Z"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "webUrl": "https://gitlab.com/example-group/sub/web/-/merge_requests/41",
+            "title": "Retry the upload on a flaky network",
+            "draft": false,
+            "createdAt": "2026-09-26T09:00:00Z",
+            "updatedAt": "2026-10-03T10:00:00Z",
+            "diffHeadSha": "3333333333333333333333333333333333333333",
+            "author": {
+              "username": "author"
+            },
+            "diffStatsSummary": {
+              "additions": 64,
+              "deletions": 8,
+              "fileCount": 2
+            },
+            "headPipeline": {
+              "status": "RUNNING"
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "sha": "3333333333333333333333333333333333333333",
+                  "committedDate": "2026-10-03T09:58:00+00:00"
+                }
+              ]
+            },
+            "reviewers": {
+              "nodes": [
+                {
+                  "username": "Reviewer",
+                  "mergeRequestInteraction": {
+                    "reviewState": "UNAPPROVED",
+                    "approved": false,
+                    "updatedAt": "2026-10-03T09:59:00Z"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "webUrl": "https://gitlab.com/example-group/service/-/merge_requests/7",
+            "title": "Draft: Move uploads to a queue",
+            "draft": true,
+            "createdAt": "2026-09-10T09:00:00Z",
+            "updatedAt": "2026-09-25T12:00:00Z",
+            "diffHeadSha": "4444444444444444444444444444444444444444",
+            "author": null,
+            "diffStatsSummary": null,
+            "headPipeline": null,
+            "commits": {
+              "nodes": [
+                {
+                  "sha": "4444444444444444444444444444444444444444",
+                  "committedDate": "2026-09-25T11:00:00+00:00"
+                }
+              ]
+            },
+            "reviewers": {
+              "nodes": [
+                {
+                  "username": "Reviewer",
+                  "mergeRequestInteraction": {
+                    "reviewState": "REQUESTED_CHANGES",
+                    "approved": false,
+                    "updatedAt": "2026-09-20T10:00:00Z"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "webUrl": "https://gitlab.com/example-group/service/-/merge_requests/8",
+            "title": "Log upload failures",
+            "draft": false,
+            "createdAt": "2026-09-11T09:00:00Z",
+            "updatedAt": "2026-09-21T12:00:00Z",
+            "diffHeadSha": "5555555555555555555555555555555555555555",
+            "author": {
+              "username": "author"
+            },
+            "diffStatsSummary": {
+              "additions": 5,
+              "deletions": 1,
+              "fileCount": 1
+            },
+            "headPipeline": {
+              "status": "CANCELED"
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "sha": "5555555555555555555555555555555555555555",
+                  "committedDate": "2026-09-21T11:00:00+00:00"
+                }
+              ]
+            },
+            "reviewers": {
+              "nodes": [
+                {
+                  "username": "Reviewer",
+                  "mergeRequestInteraction": {
+                    "reviewState": "REVIEWED",
+                    "approved": false,
+                    "updatedAt": null
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
