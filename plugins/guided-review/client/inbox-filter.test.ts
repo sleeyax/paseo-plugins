@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_INBOX_PREFERENCES, type InboxPreferences } from "../shared/inbox-preferences.ts";
 import type { InboxItem } from "../shared/inbox.ts";
-import { age, countLabel, hiddenCheckedOff, matchesSearch, needsAttention, statesLabel, visibleItems } from "./inbox-filter.ts";
+import { age, attentionCount, countLabel, hiddenCheckedOff, matchesSearch, needsAttention, statesLabel, visibleItems } from "./inbox-filter.ts";
 
 function item(number: number, overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -115,6 +115,21 @@ test("needs attention is what was never reviewed, asked again, unapproved or cha
   assert.equal(needsAttention(item(1, { state: "commented", changedSinceReview: true })), true);
   assert.equal(needsAttention(item(1, { state: "changes-requested", changedSinceReview: false })), false);
   assert.equal(needsAttention(item(1, { state: "approved", changedSinceReview: null })), false);
+});
+
+test("the attention count keeps what needs attention among what the default filters show, whatever the reviewer last set", () => {
+  const items = [
+    item(1, { state: "requested" }),
+    item(2, { state: "unapproved" }),
+    item(3, { state: "commented", changedSinceReview: true }),
+    item(4, { state: "commented", changedSinceReview: false }),
+    item(5, { state: "approved", changedSinceReview: true }),
+    item(6, { state: "requested", checkedOff: true }),
+    item(7, { forge: "gitlab", state: "requested", isDraft: true }),
+  ];
+
+  assert.equal(attentionCount(items), 4);
+  assert.equal(attentionCount([]), 0);
 });
 
 test("the search needs every word somewhere in the title, project, author or number as the forge writes it", () => {
