@@ -57,6 +57,12 @@ export function claudeTtyProvider(settings: Settings, snapshot: SettingsMirror):
         return `${adapter.buildWitness}:unbuilt`;
       }
     },
+    /** Without this the daemon decides availability by opening a connection, which spawns an adapter on every provider snapshot. */
+    async status() {
+      const adapter = await resolveAdapter(settings);
+      if (adapter.problem !== null) return { available: false, diagnostic: adapter.problem };
+      return { available: true, diagnostic: `Runs ${adapter.executable}` };
+    },
     /**
      * Which adapter runs depends on the settings and the install path, neither known at registration, so the ACP shim is built per connection.
      * The snapshot is rewritten first, in case its state directory was removed.
