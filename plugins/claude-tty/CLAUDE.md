@@ -5,7 +5,7 @@ Do this yourself; never leave it to the user.
 Where a reload is not available — another agent's sessions are on this provider, say — the daemon's own compiler answers the same question without touching it: import `compilePlugin` from `@getpaseo/server/dist/server/server/plugins/compiler.js` and run it over the two entries, then `readPluginProviderIcon` from `provider-icon.js` beside it for the icon.
 That log is the plugin's; the adapter's is `~/.local/state/claude-tty-acp/logs/claude-tty-acp.log`, because the daemon drops the adapter's stderr, and a running adapter process keeps the code it started with — a rebuilt `dist/` reaches the sessions started after it.
 
-`paseo plugin add <repo> --path plugins/claude-tty` is the supported install: the daemon clones into a staging directory, runs the manifest's `build` commands there with the plugin directory as the cwd, and only then places and starts it.
+`paseo plugin add github:sleeyax/paseo-plugins:plugins/claude-tty` is the supported install: the daemon clones into a staging directory, runs the manifest's `build` commands there with the plugin directory as the cwd, and only then places and starts it.
 `pnpm` walks up to the workspace root from that cwd, which is why `pnpm install --frozen-lockfile` and `pnpm --filter @paseo-plugins/claude-tty-acp build` are enough (verified by running both from `plugins/claude-tty`).
 A directory install runs no build at all, so a clone has to be built by hand before it is added.
 Which is also why the ID is stamped into the checkout by `pnpm identity <id>` (`scripts/set-identity.mjs`) rather than generated: there is no build step to generate it in on the path that matters, and a generated file would be missing exactly where it is needed.

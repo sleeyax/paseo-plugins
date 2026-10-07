@@ -11,12 +11,18 @@ _None yet._
 ## Installation
 
 ```sh
-paseo plugin add sleeyax/paseo-plugins --path plugins/catppuccin-theme
+paseo plugin add sleeyax/catppuccin-theme
+```
+
+That installs the release published to the [Paseo plugin registry](https://paseo.sh/plugins), which needs Paseo 0.11 or later. To install straight from this repository's default branch instead:
+
+```sh
+paseo plugin add github:sleeyax/paseo-plugins:plugins/catppuccin-theme
 ```
 
 Then pick your favorite theme in **Settings -> Appearance**.
 
-Paseo tracks the default branch from there, so `paseo plugin update catppuccin-theme` picks up new releases without a clone. `paseo plugin status` says what is installed against what is available.
+Either way, `paseo plugin update catppuccin-theme` picks up new releases without a clone, and `paseo plugin update catppuccin-theme --check` says what is installed against what is available.
 
 ## Settings
 

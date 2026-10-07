@@ -19,10 +19,10 @@ _None yet._
 ## Installation
 
 ```sh
-paseo plugin add sleeyax/paseo-plugins --path plugins/claude-tty
+paseo plugin add github:sleeyax/paseo-plugins:plugins/claude-tty
 ```
 
-Paseo tracks the default branch from there, so `paseo plugin update claude-tty` picks up new releases without a clone. `paseo plugin status` says what is installed against what is available.
+Paseo tracks the default branch from there, so `paseo plugin update claude-tty` picks up new releases without a clone, and `paseo plugin update claude-tty --check` says what is installed against what is available.
 
 Install and update both build the adapter first, from the manifest's `build` commands, which is why this plugin needs `pnpm` on the daemon's `PATH` where the others need nothing. A failing build is reported and the installed version is left running.
 
