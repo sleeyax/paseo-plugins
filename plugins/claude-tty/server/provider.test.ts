@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fakeSettings } from "./fake-settings.ts";
 import { mirrorSettings } from "./settings-snapshot.ts";
+import { adapterBinaryPath, adapterBuildWitness } from "./paths.ts";
 import { claudeTtyProvider } from "./provider.ts";
 
 /**
@@ -45,4 +46,38 @@ test("shares one catalogue across workspaces and gives a rebuilt adapter a key o
 
   await writeFile(entry, "// built again, and longer than before");
   assert.notEqual(await key("/work/one"), built);
+});
+
+test("reports the adapter's problem as the provider being unavailable until it is built", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "claude-tty-status-"));
+  t.after(() => rm(home, { force: true, recursive: true }));
+  const checkout = path.join(home, "checkout");
+  await mkdir(path.join(home, "paseo"), { recursive: true });
+  await writeFile(
+    path.join(home, "paseo", "config.json"),
+    JSON.stringify({ plugins: { "claude-tty": { path: path.join(checkout, "plugins", "claude-tty") } } }),
+  );
+  process.env.PASEO_HOME = path.join(home, "paseo");
+  const settings = fakeSettings();
+  const mirror = mirrorSettings(settings, path.join(home, "state", "settings.json"));
+  t.after(() => mirror.stop());
+  const provider = claudeTtyProvider(settings, mirror);
+  const status = () => provider.status!({});
+
+  const missing = await status();
+  assert.equal(missing.available, false);
+  assert.match(String(missing.diagnostic), /does not exist/);
+
+  const binary = adapterBinaryPath(checkout);
+  await mkdir(path.dirname(binary), { recursive: true });
+  await writeFile(path.join(path.dirname(path.dirname(binary)), "package.json"), "{}");
+  await writeFile(binary, "#!/bin/sh\n", { mode: 0o755 });
+  const unbuilt = await status();
+  assert.equal(unbuilt.available, false);
+  assert.match(String(unbuilt.diagnostic), /is not built/);
+
+  const witness = adapterBuildWitness(binary);
+  await mkdir(path.dirname(witness), { recursive: true });
+  await writeFile(witness, "// built");
+  assert.deepEqual(await status(), { available: true, diagnostic: `Runs ${binary}` });
 });

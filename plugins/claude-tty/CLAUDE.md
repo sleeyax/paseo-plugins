@@ -33,7 +33,7 @@ The daemon's own configuration is the one record, so `server/checkout.ts` reads 
 **It is no longer the only source, and failing to find it is no longer fatal.**
 `adapterExecutable` in the host settings names an adapter outright, and `server/adapter.ts` is the one place that decides between the two: the setting when it holds a path, the checkout otherwise, and neither is the end of the world on its own.
 It reads the setting through `readConfiguredExecutable` in `server/settings.ts`, which treats an invalid document as nothing configured.
-Nothing in there throws: a path that is missing, unexecutable or unbuilt comes back as a sentence on `problem`, which the panel shows and `connect()` throws only when there is no path at all.
+Nothing in there throws: a path that is missing, unexecutable or unbuilt comes back as a sentence on `problem`, which the panel shows, `status()` reports as the provider being unavailable, and `connect()` throws only when there is no path at all.
 The checkout is still resolved and still reported, because an update still builds in it and a host running the default still wants to see it.
 
 That is also why the resolution is no longer cached the way the checkout was.
@@ -49,6 +49,10 @@ The key is the adapter's build — the build witness's path, mtime and size, one
 Nothing else invalidates it. The daemon refetches when something asks it to refresh (`force`), and marks catalogues stale when the settings snapshot is refreshed; there is no expiry.
 It is a separate IPC call on essentially every provider snapshot read, so it must stay at one settings `read()` and one `stat`.
 An adapter that is not built yet answers with a shared key of its own rather than with none, so that failure is reported once instead of once per workspace, and the build that fixes it changes the key.
+
+`status()` is how the daemon learns whether the provider can run at all; without it, a registration with no `command` is checked by opening a connection, which spawns an adapter.
+It is asked on every provider snapshot too, so it reports `problem` and stops at the settings `read()` and the `stat`s `resolveAdapter` makes; the adapter's own `--diagnose` stays behind the panel's button.
+The registration sets no `command` on purpose: with one, the daemon resolves its own launch and hands it to `status` and `connect` as `request.launch`, which `runAcpProvider` spawns in place of the adapter `resolveAdapter` picked, and the **Adapter executable** setting would stop meaning anything.
 
 ## The adapter stays a subprocess, and `connector:` cannot replace it
 
