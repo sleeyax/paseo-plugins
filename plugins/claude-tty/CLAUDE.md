@@ -309,6 +309,10 @@ An agent whose launch has already ended when its transcript is found is history 
 The transcript is read incrementally, the way the adapter reads the session's own, because it runs to megabytes and this polls once a second per open session.
 Nothing rewrites a subagent's transcript, so a rewind can only be a truncation, and the tool calls sent as running are forgotten with it; the ones still open when the agent stops are canceled rather than left running.
 
+A background command is a child too, and is found the other way round: nothing on disk names the call that launched it, so the adapter marks the command's card with `_meta["claudeTty/backgroundCommand"]` carrying its task id and output file, `server/tool-details.ts` keeps that mark from the mirror, and the wrapper opens a child for any running call that has one.
+Its lifecycle is its card's, exactly as a subagent's is its launch's, and its timeline is one shell call whose output is the tail of that file.
+The adapter learns the output file only from the sentence Claude answers the launch with, so a reworded sentence leaves the child with the command and no output rather than failing.
+
 ## A module's directory picks its bundle
 
 `index.client.tsx` and `index.server.ts` are compiled separately, and the directory a module sits in decides which bundle it joins: `client/` the app's, `server/` the daemon's, `shared/` both.

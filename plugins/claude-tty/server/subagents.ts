@@ -1,6 +1,7 @@
 import { subagentsDirectory } from "./paths.ts";
 import { findSessionEntry } from "./sessions.ts";
 import { isSafeStateFileStem } from "../shared/sessions.ts";
+import { BackgroundCommandOutput, type BackgroundCommand } from "./background-commands.ts";
 import { readSidecars, SubagentTranscript } from "./subagent-transcripts.ts";
 import type { SubagentSource } from "./subsessions.ts";
 
@@ -9,7 +10,7 @@ import type { SubagentSource } from "./subsessions.ts";
  * daemon knows is the adapter's ACP session; which Claude session that is running on is recorded in
  * the adapter's state file and nowhere else, and it moves when the session compacts.
  */
-export function subagentSource(): SubagentSource {
+export function subagentSource(backgroundCommand: (sessionId: string, callId: string) => BackgroundCommand | null): SubagentSource {
   return {
     async locate(nativeSessionId: string, cwd: string) {
       if (!isSafeStateFileStem(nativeSessionId)) return null;
@@ -20,5 +21,7 @@ export function subagentSource(): SubagentSource {
     },
     list: (directory) => readSidecars(directory),
     open: (directory, agentId) => new SubagentTranscript(directory, agentId),
+    backgroundCommand,
+    openCommand: (command) => new BackgroundCommandOutput(command),
   };
 }

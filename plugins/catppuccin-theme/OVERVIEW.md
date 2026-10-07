@@ -1,0 +1,1 @@
+Adds the four [Catppuccin](https://catppuccin.com/palette/) flavours to Paseo as app themes: Latte (light), and Frappé, Macchiato and Mocha (dark). Choose one in Settings → Appearance. The plugin has no settings and only recolours the app; syntax highlighting keeps its own theme. Requires Paseo 0.9.0 or newer.

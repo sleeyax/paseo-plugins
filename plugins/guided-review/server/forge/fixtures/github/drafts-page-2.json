@@ -1,0 +1,4 @@
+{"data":{"repository":{"pullRequest":{"reviews":{"nodes":[{"id":"PRR_kwDOUFGNmM7x0Pnd","viewerDidAuthor":true}]},"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":"Y3Vyc29yOnYyOpHOAAAACA=="},"nodes":[
+{"path":"apps/claude-tty-acp/src/claude-runtime.test.ts","line":24,"originalLine":24,"startLine":23,"originalStartLine":23,"diffSide":"RIGHT","startDiffSide":"RIGHT","subjectType":"LINE","comments":{"nodes":[{"id":"PRRC_kwDOUFGNmM6kZ1a7","body":"A constant per key reads well.","pullRequestReview":{"id":"PRR_kwDOUFGNmM7x0Pnd"}}]}},
+{"path":"plugins/discord-rich-presence/package.json","line":12,"originalLine":12,"startLine":null,"originalStartLine":null,"diffSide":"RIGHT","startDiffSide":null,"subjectType":"LINE","comments":{"nodes":[{"id":"PRRC_kwDOUFGNmM6kZ0b2","body":"LGTM","pullRequestReview":{"id":"PRR_kwDOUFGNmM7xOth1"}}]}}
+]}}}}}

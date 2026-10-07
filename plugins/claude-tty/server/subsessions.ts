@@ -4,6 +4,7 @@ import type {
   ProviderInput,
   ProviderTimelineItem,
 } from "@getpaseo/plugin/server/provider";
+import { COMMAND_FAILED, type BackgroundCommand } from "./background-commands.ts";
 import type { SubagentSidecar } from "./subagent-transcripts.ts";
 
 /** The capability the daemon has to offer before a child session may be opened at all. */
@@ -15,10 +16,11 @@ const POLL_INTERVAL_MS = 1_000;
 /** What a subagent left running when it stopped is closed with this, since nothing else will. */
 const UNREPORTED = "Claude stopped before this agent reported back.";
 
-/** All the wrapper needs of one subagent's transcript, which is what lets a test stand in for it. */
+/** All the wrapper needs of one child's record, which is what lets a test stand in for it. */
 export type SubagentReader = {
   read(): Promise<ProviderTimelineItem[]>;
-  settle(): ProviderTimelineItem[];
+  /** `ended` is how the launch ended, and absent when the child is closed because its session went. */
+  settle(ended?: "completed" | "failed"): ProviderTimelineItem[];
 };
 
 /**
@@ -30,9 +32,15 @@ export type SubagentSource = {
   locate(nativeSessionId: string, cwd: string): Promise<string | null>;
   list(directory: string): Promise<SubagentSidecar[]>;
   open(directory: string, agentId: string): SubagentReader;
+  /**
+   * A command Claude backgrounded is shown as a subagent too, since it is work the session goes on waiting for with nothing else to show for it.
+   * The adapter marks its card, which is the only place that says a call runs on after its launch.
+   */
+  backgroundCommand(sessionId: string, callId: string): BackgroundCommand | null;
+  openCommand(command: BackgroundCommand): SubagentReader;
 };
 
-type Child = { sessionId: string; toolUseId: string; reader: SubagentReader };
+type Child = { sessionId: string; toolUseId: string; reader: SubagentReader; failure: string };
 
 type Parent = {
   sessionId: string;
@@ -92,7 +100,7 @@ export function withSubagentSessions(
     parents.delete(sessionId);
     for (const child of parent.children.values()) {
       for (const item of child.reader.settle()) emit({ type: "timeline.item", sessionId: child.sessionId, item });
-      emit({ type: "session.closed", sessionId: child.sessionId, error: { message: UNREPORTED } });
+      emit({ type: "session.closed", sessionId: child.sessionId, error: { message: child.failure } });
     }
     parent.children.clear();
     if (parents.size === 0 && timer !== null) {
@@ -203,6 +211,35 @@ async function pollParent(
   emit: (event: ProviderEvent) => void,
   alive: () => boolean,
 ): Promise<void> {
+  for (const callId of parent.running) openCommand(parent, callId, source, emit);
+  await openSubagents(parent, source, emit, alive);
+  if (!alive()) return;
+  for (const [agentId, child] of [...parent.children]) {
+    const items = await child.reader.read();
+    if (!alive()) return;
+    for (const item of items) {
+      emit({ type: "timeline.item", sessionId: child.sessionId, item });
+    }
+    const ended = parent.ended.get(child.toolUseId);
+    if (ended === undefined) continue;
+    parent.children.delete(agentId);
+    for (const item of child.reader.settle(ended)) {
+      emit({ type: "timeline.item", sessionId: child.sessionId, item });
+    }
+    emit({
+      type: "session.closed",
+      sessionId: child.sessionId,
+      ...(ended === "failed" ? { error: { message: child.failure } } : {}),
+    });
+  }
+}
+
+async function openSubagents(
+  parent: Parent,
+  source: SubagentSource,
+  emit: (event: ProviderEvent) => void,
+  alive: () => boolean,
+): Promise<void> {
   if (parent.nativeSessionId === null) return;
   // Resolved every time rather than once: a session that compacts moves to a Claude session of its
   // own, and only the adapter's state file says which one it is on now. A reader already open keeps
@@ -214,24 +251,25 @@ async function pollParent(
   for (const sidecar of sidecars) {
     openChild(parent, sidecar, source, emit);
   }
-  for (const [agentId, child] of [...parent.children]) {
-    const items = await child.reader.read();
-    if (!alive()) return;
-    for (const item of items) {
-      emit({ type: "timeline.item", sessionId: child.sessionId, item });
-    }
-    const ended = parent.ended.get(child.toolUseId);
-    if (ended === undefined) continue;
-    parent.children.delete(agentId);
-    for (const item of child.reader.settle()) {
-      emit({ type: "timeline.item", sessionId: child.sessionId, item });
-    }
-    emit({
-      type: "session.closed",
-      sessionId: child.sessionId,
-      ...(ended === "failed" ? { error: { message: UNREPORTED } } : {}),
-    });
-  }
+}
+
+/** A background command gets a session while its card is running, the way a subagent does while its launch is. */
+function openCommand(parent: Parent, callId: string, source: SubagentSource, emit: (event: ProviderEvent) => void): void {
+  const command = source.backgroundCommand(parent.sessionId, callId);
+  if (command === null || parent.seen.has(command.taskId)) return;
+  parent.seen.add(command.taskId);
+  const sessionId = `${parent.sessionId}:${command.taskId}`;
+  parent.children.set(command.taskId, { sessionId, toolUseId: callId, reader: source.openCommand(command), failure: COMMAND_FAILED });
+  emit({
+    type: "session.opened",
+    sessionId,
+    parentSessionId: parent.sessionId,
+    capabilities: [],
+    restoration: "parent",
+    cwd: parent.cwd,
+    title: "Background command",
+    description: command.description ?? command.command.split("\n")[0] ?? command.command,
+  });
 }
 
 /**
@@ -254,6 +292,7 @@ function openChild(
     sessionId,
     toolUseId: sidecar.toolUseId,
     reader: source.open(parent.directory ?? "", sidecar.agentId),
+    failure: UNREPORTED,
   });
   emit({
     type: "session.opened",

@@ -59,6 +59,14 @@ export function launchedBackgroundShell(toolUseResult: unknown): { taskId: strin
   return { taskId };
 }
 
+/**
+ * Where a background command's output goes, which Claude says only in the sentence it answers the launch with.
+ * The notification names the file too, but by then the command has finished.
+ */
+export function backgroundOutputFile(text: string): string | null {
+  return /Output is being written to: (\S+\.output)/.exec(text)?.[1] ?? null;
+}
+
 export type TaskNotification = {
   /** The `<task-id>` the report names, which is an agent's id or a background shell's. */
   taskId: string | null;
