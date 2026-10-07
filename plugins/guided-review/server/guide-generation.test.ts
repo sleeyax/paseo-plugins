@@ -9,7 +9,7 @@ import { fakeWorkspaces, type FakeWorkspaces } from "./fake-workspaces.ts";
 import { GuideAgentError } from "./guide-agent/port.ts";
 import { ReviewService } from "./review-service.ts";
 
-/** The review service's guide generation, driven through the RPCs the start surface and the panel call. */
+/** The review service's guide generation, driven through the RPCs the start screen and the panel call. */
 
 const URL = "https://github.com/acme/uploader/pull/7";
 const REVIEW_ID = "github/github.com/acme/uploader/7";

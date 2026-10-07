@@ -12,7 +12,7 @@ const POLL_MS = 2_000;
 /** A review started from the New review dialog, which gets a line of its own above the list while the list does not show it. */
 export type Pasted = { url: string; reviewId: string };
 
-/** Starting reviews from the start surface, as many at once as the reviewer likes: the New review dialog's and every review list row's one job. */
+/** Starting reviews from the start screen, as many at once as the reviewer likes: the New review dialog's and every review list row's one job. */
 export type ReviewStarts = {
   /**
    * Starts the review `url` names, and with `open` opens its panel once its workspace is ready.
@@ -37,7 +37,7 @@ export type ReviewStarts = {
 
 /**
  * Starts reviews, follows each one's preparation and guide until they settle, and opens a panel only for a start meant to open it.
- * `items` are the listed reviews, whose unsettled ones are followed too, as after the start surface was closed and opened again.
+ * `items` are the listed reviews, whose unsettled ones are followed too, as after the start screen was closed and opened again.
  */
 export function useReviewStarts(openPanel: (workspaceId: string) => void, items: readonly InboxItem[]): ReviewStarts {
   const startReview = useRpc(contracts.startReview);

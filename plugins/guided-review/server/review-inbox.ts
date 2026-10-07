@@ -17,7 +17,7 @@ export type ReviewInboxOptions = {
 };
 
 /**
- * The review requests of every forge, joined with the reviews started here and what the reviewer checked off: the start surface's list.
+ * The review requests of every forge, joined with the reviews started here and what the reviewer checked off: the start screen's list.
  * Each forge answers per host, so one that cannot be listed leaves the rest listed.
  *
  * GitLab's listing cannot count drafts, which take a call per MR, so they are counted only for the

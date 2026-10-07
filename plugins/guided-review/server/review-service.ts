@@ -71,7 +71,7 @@ type LocalCheckout = WorkspaceCheckout & { branch: string; repository: NonNullab
 type SuggestionJob = { agentId: string; state: Suggestion; done: Promise<void> };
 
 /**
- * The plugin's top level: every RPC the panel and the start surface call is a method here, and it
+ * The plugin's top level: every RPC the panel and the start screen call is a method here, and it
  * reaches the outside world only through the ports it is given, which is what the tests replace.
  * The work behind the larger ones lives in the modules it composes: `ReviewPreparation` reads a change
  * request and gives it a workspace, `GuideGenerations` has its guide written, `ReviewDrafts`
@@ -204,7 +204,7 @@ export class ReviewService {
     return this.#branchView(job);
   }
 
-  /** Where a start or a Regenerate of the review has got to, as the start surface and the panel follow it. */
+  /** Where a start or a Regenerate of the review has got to, as the start screen and the panel follow it. */
   async startProgress({ reviewId }: { reviewId: string }): Promise<StartProgress> {
     const running = this.#preparation.progressOf(reviewId);
     if (running) return running;
