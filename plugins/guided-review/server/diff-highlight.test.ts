@@ -62,6 +62,12 @@ test("reads a renamed file's old side at its previous path, and an added file's 
   assert.deepEqual(addedReads.shown, ["head:src/a.ts"]);
 });
 
+test("highlights a Vue single-file component", async () => {
+  const component: ChangedFile = { ...COMMENT_EDIT, path: "src/App.vue", patch: "@@ -1,1 +1,1 @@\n-<script setup>const a = 1;</script>\n+<script setup>const a = 2;</script>\n" };
+  const [, added] = (await highlighted(component, {})).hunks[0]!.lines;
+  assert.ok(styles(added!.tokens)?.some((style) => style !== null && style !== undefined));
+});
+
 test("leaves a language Paseo does not highlight, and a withheld diff, without tokens", async () => {
   const notes = await highlighted({ ...COMMENT_EDIT, path: "notes.unknownext" }, {});
   assert.ok(notes.hunks[0]!.lines.every((line) => line.tokens === undefined));

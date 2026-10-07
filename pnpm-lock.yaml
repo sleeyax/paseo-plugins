@@ -105,8 +105,8 @@ importers:
   plugins/guided-review:
     dependencies:
       '@getpaseo/highlight':
-        specifier: 0.9.2
-        version: 0.9.2
+        specifier: 0.11.0
+        version: 0.11.0
       markdown-it:
         specifier: ^14.3.2
         version: 14.3.2
@@ -326,8 +326,8 @@ packages:
   '@getpaseo/client@0.9.2':
     resolution: {integrity: sha512-MvStNVcWF3JhEaCAOhrPQ5qaLQJtkz1bvPop+wp8npqHB0z2PjAwPMZUYP/2T3kWrZj2ukWmODxjihKnwd0qTQ==}
 
-  '@getpaseo/highlight@0.9.2':
-    resolution: {integrity: sha512-VNHYq0dte+W0HmfEnXdPJyE2a9gtf/PXO2ntwbcW50TiGMjkJJB8ZRTsv7xJ7w2KfuJW0THsQ3YDmwevT2oz5g==}
+  '@getpaseo/highlight@0.11.0':
+    resolution: {integrity: sha512-K8yeWS+/DKdg1RglJ/rbKkWolzmuY+hxm1KmotQadwpHDhCUIc6ENXwEJiT1SWohBdVxUlKcZvqb4nCQMMU9GQ==}
 
   '@getpaseo/plugin@0.11.0':
     resolution: {integrity: sha512-1upr8Lfm1YwJ/bNC/KAMdxRy7qVRmEMdCsq1U3u5hV3BfX+Y3LbPpRb95Yy+wxNqXZY1tV4EMzXEQ8gi/Lxsgg==}
@@ -1750,7 +1750,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@getpaseo/highlight@0.9.2':
+  '@getpaseo/highlight@0.11.0':
     dependencies:
       '@codemirror/language': 6.12.4
       '@codemirror/legacy-modes': 6.5.4
