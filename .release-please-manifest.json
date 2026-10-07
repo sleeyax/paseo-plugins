@@ -1,7 +1,7 @@
 {
-  "plugins/catppuccin-theme": "0.0.1",
-  "plugins/claude-tty": "0.2.0",
+  "plugins/catppuccin-theme": "0.1.0",
+  "plugins/claude-tty": "0.3.0",
   "plugins/discord-rich-presence": "0.1.0",
   "plugins/guided-review": "0.0.0",
-  "apps/claude-tty-acp": "0.2.0"
+  "apps/claude-tty-acp": "0.3.0"
 }

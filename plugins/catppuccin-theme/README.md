@@ -6,7 +6,13 @@ Adds all [Catppuccin](https://catppuccin.com/palette/) flavours — Latte, Frapp
 
 ## Screenshots
 
-_None yet._
+![Catppuccin Latte](./docs/screenshots/latte.png)
+
+![Catppuccin Frappé](./docs/screenshots/frappe.png)
+
+![Catppuccin Macchiato](./docs/screenshots/macchiato.png)
+
+![Catppuccin Mocha](./docs/screenshots/mocha.png)
 
 ## Installation
 

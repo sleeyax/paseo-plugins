@@ -63,6 +63,7 @@ Which package a commit bumps comes from the files it touches rather than its sco
 | Skill | Description |
 | --- | --- |
 | `update-plugins` | Rebuild the apps and reload the plugins this host has installed from this checkout. |
+| `adopt-paseo-release` | Review the Paseo releases since the last review and file an issue with what the plugins should adopt. Runs only when invoked by name: `/adopt-paseo-release` in Claude Code, `$adopt-paseo-release` in Codex. |
 
 Working in this repository needs no installation; the symlinks are committed. To use a skill from another checkout, install it by name:
 
