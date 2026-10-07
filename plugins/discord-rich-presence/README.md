@@ -20,11 +20,11 @@ paseo plugin add sleeyax/paseo-plugins --path plugins/discord-rich-presence
 
 Paseo tracks the default branch from there, so `paseo plugin update discord-rich-presence` picks up new releases without a clone. `paseo plugin status` says what is installed against what is available.
 
-The plugin uses a shared Paseo Discord application by default. Open **Discord Rich Presence** in the Paseo sidebar to see the connection status and change its settings.
+The plugin uses a shared Paseo Discord application by default. Open **Discord** in the Paseo sidebar to see the connection status and change its settings.
 
 Native, Snap, and Flatpak Discord installations are supported. The plugin reconnects automatically when Discord starts.
 
-Requires Paseo 0.9 or newer. Earlier versions stored settings in `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/discord-rich-presence/`, which is no longer read. After updating, set your detail levels and application ID again (until then, every project shows as **Detailed**), then delete that directory.
+Requires Paseo 0.11 or newer. Versions of the plugin made for Paseo older than 0.9 stored settings in `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/discord-rich-presence/`, which is no longer read. After updating from one of those, set your detail levels and application ID again (until then, every project shows as **Detailed**), then delete that directory.
 
 ## Settings
 
