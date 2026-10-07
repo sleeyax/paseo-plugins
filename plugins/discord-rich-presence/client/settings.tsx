@@ -1,4 +1,4 @@
-import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
+import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
@@ -204,7 +204,7 @@ function ApplicationIdField({
   );
 }
 
-export function DiscordPresenceSurface({ theme, layout }: PluginSurfaceProps) {
+export function DiscordPresenceScreen({ theme, layout }: PluginScreenProps) {
   const palette = usePalette(theme);
   const queryClient = useQueryClient();
   const getStatus = useRpc(contracts.getStatus);

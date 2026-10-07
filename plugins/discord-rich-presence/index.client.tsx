@@ -1,18 +1,25 @@
-import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { DiscordPresenceSurface } from "./client/settings.tsx";
+import type { PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
+import { SidebarRow } from "@getpaseo/plugin/client/ui";
+import { DiscordPresenceScreen } from "./client/settings.tsx";
 import { setProjectLevel, updateSettings } from "./client/settings-writes.ts";
 
-export const SURFACE_ID = "settings";
+// The ID the sidebar item had before it opened a screen, so saved links to it still resolve.
+export const SCREEN_ID = "discord-rich-presence";
+const TITLE = "Discord";
+
+function DiscordSidebarItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
+  return (
+    <SidebarRow
+      icon="Gamepad2"
+      active={currentScreen?.screenId === SCREEN_ID}
+      onPress={() => openScreen({ screenId: SCREEN_ID })}
+    />
+  );
+}
 
 export default function contribute(client: PluginClientContext) {
-  client.addSurface(SURFACE_ID, DiscordPresenceSurface);
-
-  client.addSidebarItem({
-    id: "discord-rich-presence",
-    title: "Discord",
-    icon: "Gamepad2",
-    surface: SURFACE_ID,
-  });
+  client.addScreen({ id: SCREEN_ID, title: TITLE, Component: DiscordPresenceScreen });
+  client.addSidebarHeaderItem({ id: SCREEN_ID, title: TITLE, Component: DiscordSidebarItem });
 
   client.addCommandCenterItem({
     id: "discord-rich-presence-off",
