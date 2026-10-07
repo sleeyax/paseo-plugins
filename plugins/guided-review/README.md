@@ -9,10 +9,10 @@ _None yet._
 ## Installation
 
 ```sh
-paseo plugin add sleeyax/paseo-plugins --path plugins/guided-review
+paseo plugin add github:sleeyax/paseo-plugins:plugins/guided-review
 ```
 
-Paseo tracks the default branch from there, so `paseo plugin update guided-review` picks up new releases without a clone. `paseo plugin status` says what is installed against what is available.
+Paseo tracks the default branch from there, so `paseo plugin update guided-review` picks up new releases without a clone, and `paseo plugin update guided-review --check` says what is installed against what is available.
 
 Install and update both run `pnpm install --frozen-lockfile` first, from the manifest's `build` commands, for Paseo's syntax highlighter, which the plugin colours diffs with; so the plugin needs `pnpm` on the daemon's `PATH`. A failing build is reported and the installed version is left running. Installing from a clone works too; run `pnpm install --frozen-lockfile` in it first, since a directory installation runs no build.
 

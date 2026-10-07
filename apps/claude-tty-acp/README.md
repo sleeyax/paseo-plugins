@@ -25,7 +25,7 @@ The price is that every native affordance has to be reconstructed from terminal 
 
 ## Installation
 
-The adapter is installed through the [Claude TTY plugin](../../plugins/claude-tty): `paseo plugin add sleeyax/paseo-plugins --path plugins/claude-tty` clones this repository, builds the adapter, and registers it as the `claude-tty` provider.
+The adapter is installed through the [Claude TTY plugin](../../plugins/claude-tty): `paseo plugin add github:sleeyax/paseo-plugins:plugins/claude-tty` clones this repository, builds the adapter, and registers it as the `claude-tty` provider.
 The plugin's README covers installing, updating and removing it, and upgrading a host that registered this adapter in its Paseo configuration by hand.
 
 Setup is host-local: the adapter runs wherever the Paseo daemon runs, so install the plugin on each host that should offer Claude.

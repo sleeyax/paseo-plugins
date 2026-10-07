@@ -25,7 +25,7 @@ Every plugin's README follows the same template, so a new plugin starts from thi
 
 ## Installation
 
-<paseo plugin add sleeyax/paseo-plugins --path plugins/<name>, plus the update/status note; a plugin that needs a built artefact from this repo documents the absolute-path form instead>
+<paseo plugin add sleeyax/<name> for a plugin in the Paseo registry, else paseo plugin add github:sleeyax/paseo-plugins:plugins/<name>, plus the update note; a plugin that needs a built artefact from this repo documents the absolute-path form instead>
 
 <optional extra instructions>
 

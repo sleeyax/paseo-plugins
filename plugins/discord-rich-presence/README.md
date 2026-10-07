@@ -15,10 +15,16 @@ Show your current Paseo activity on Discord. The Paseo daemon and Discord app mu
 ## Installation
 
 ```sh
-paseo plugin add sleeyax/paseo-plugins --path plugins/discord-rich-presence
+paseo plugin add sleeyax/discord-rich-presence
 ```
 
-Paseo tracks the default branch from there, so `paseo plugin update discord-rich-presence` picks up new releases without a clone. `paseo plugin status` says what is installed against what is available.
+That installs the release published to the [Paseo plugin registry](https://paseo.sh/plugins), which needs Paseo 0.11 or later. To install straight from this repository's default branch instead:
+
+```sh
+paseo plugin add github:sleeyax/paseo-plugins:plugins/discord-rich-presence
+```
+
+Either way, `paseo plugin update discord-rich-presence` picks up new releases without a clone, and `paseo plugin update discord-rich-presence --check` says what is installed against what is available.
 
 The plugin uses a shared Paseo Discord application by default. Open **Discord Rich Presence** in the Paseo sidebar to see the connection status and change its settings.
 
