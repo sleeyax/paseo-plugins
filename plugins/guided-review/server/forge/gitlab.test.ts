@@ -301,7 +301,7 @@ test("glab runs without an agent's identity and without prompts", async () => {
 
   for (const call of run.calls) {
     assert.deepEqual(call.unsetEnv, ["PASEO_AGENT_ID", "GITLAB_BOT_IDENTITY"]);
-    assert.equal(call.env?.NO_PROMPT, "1");
+    assert.equal(call.env?.GLAB_NO_PROMPT, "1");
     assert.equal(call.env?.GLAB_CHECK_UPDATE, "0");
   }
 });
