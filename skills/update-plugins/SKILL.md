@@ -18,7 +18,7 @@ Nothing here is specific to one coding agent. It is shell commands and the files
 
 - **Only act on plugins the daemon already has.** `paseo plugin ls` is the list. A plugin that exists under `plugins/` but is not installed is not this skill's business — do not install it, do not mention it.
 - **Never touch git beyond a fast-forward pull.** No stash, no checkout, no fetch-and-reset. If the pull does not apply cleanly under the conditions below, skip it and rebuild the working copy as it stands.
-- **Never reload the provider hosting this session.** A reload closes every session on that provider, this one included, so the command never returns and the run ends in a system error. Hand that reload to the user instead.
+- **Never reload the provider hosting this session.** A reload closes every session on that provider, this one included, so the command never returns and the run ends in a system error. Type it into a workspace terminal for the user to run instead.
 - **Reload `claude-tty` last.** A reload closes the other sessions on its provider too. Everything else must be finished before that risk is taken.
 - **Report failures with their output.** A build that fails, a plugin that comes back `error` — say so and quote the error. Do not reload on top of a failed build and call it done.
 
@@ -93,7 +93,14 @@ paseo plugin reload <id> --json
 
 `status` in the response is the answer: `running` is a clean reload, anything else is a failure. Reload is the compile check for `index.client.tsx` and `index.server.ts`, so a bundle that no longer compiles surfaces here.
 
-Skip the plugin hosting this session, if step 1 found one.
+Skip the plugin hosting this session, if step 1 found one, and type its reload into a terminal of this workspace without pressing Enter, so the user runs it once they are done with the session:
+
+```sh
+paseo terminal create --cwd "$PWD" --name "reload <id>"
+paseo terminal send-keys --literal "reload <id>" 'paseo plugin reload <id> --json'
+```
+
+The daemon owns that terminal, so it outlives the sessions the reload closes.
 
 For any plugin that did not come back `running`, read its output:
 
@@ -109,7 +116,7 @@ One short summary:
 - What was rebuilt.
 - Each plugin reloaded, with its status.
 - Anything that failed, with the error.
-- When a plugin was skipped because it hosts this session, end with the command for the user to run once they are done with the session, `paseo plugin reload <id> --json`, and say that it closes this session.
+- When a plugin was skipped because it hosts this session, end by pointing the user at the `reload <id>` terminal, and say that pressing Enter there closes this session.
 
 When `claude-tty` was among them, add the one caveat that is not visible from the status: an adapter process keeps the code it started with, so the rebuilt adapter reaches only sessions started after the reload. Existing sessions carry the old one until they are restarted.
 Its adapter log is `~/.local/state/claude-tty-acp/logs/claude-tty-acp.log`, separate from the plugin's own `paseo plugin logs claude-tty`, because the daemon drops the adapter's stderr.
