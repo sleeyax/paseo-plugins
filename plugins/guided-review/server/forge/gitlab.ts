@@ -28,7 +28,7 @@ import {
 } from "./port.ts";
 
 /** No prompts, no update check and no colour codes: the output is parsed, not read. */
-const GLAB_ENV = { GLAB_CHECK_UPDATE: "0", NO_PROMPT: "1", NO_COLOR: "1", GIT_TERMINAL_PROMPT: "0" };
+const GLAB_ENV = { GLAB_CHECK_UPDATE: "0", GLAB_NO_PROMPT: "1", NO_COLOR: "1", GIT_TERMINAL_PROMPT: "0" };
 
 /**
  * Never passed on to `glab`. A `glab` wrapper can post as a bot account when it sees an agent's
