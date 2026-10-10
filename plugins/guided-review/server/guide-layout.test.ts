@@ -117,7 +117,7 @@ test("a dependency on an unknown node, a later node, or the node itself fails th
   });
 });
 
-test("lockfiles and generated files are never shown to the agent and go straight into Supporting", async (t) => {
+test("lockfiles and generated files are listed for the agent to skip and go straight into Supporting", async (t) => {
   const { service, agents } = await withHost(t, [
     file("src/upload.ts"),
     file("pnpm-lock.yaml"),
@@ -135,10 +135,11 @@ test("lockfiles and generated files are never shown to the agent and go straight
   });
 
   const prompt = agents.created[0]!.prompt;
-  for (const hidden of ["pnpm-lock.yaml", "app.min.js", "__generated__", "Cargo.lock", "upload.pb.go"]) {
-    assert.ok(!prompt.includes(hidden), `the prompt mentions ${hidden}`);
-  }
-  assert.match(prompt, /- src\/retry\.ts \(modified, \+1 −1\)\n\(5 lockfile or generated files are left out: they are placed already\.\)/);
+  assert.match(
+    prompt,
+    /## Placed already\n\nThese lockfiles and generated files are placed already: do not read or cover them\.\n- pnpm-lock\.yaml\n- web\/dist\/app\.min\.js\n- api\/__generated__\/schema\.ts\n- rust\/Cargo\.lock\n- proto\/upload\.pb\.go/,
+  );
+  assert.ok(!prompt.includes("src/retry.ts"));
 
   assert.equal(guide?.status, "ready");
   if (guide?.status !== "ready") return;

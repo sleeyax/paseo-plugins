@@ -28,6 +28,10 @@ export type FakeWorkspaces = WorkspacePort & {
   failCreate: Error | null;
   /** The files `fileAt` shows, by `sha:path`, in any workspace. */
   files: Map<string, string>;
+  /** Every `fetchCommits` asked for. */
+  fetchedCommits: { workspaceId: string; baseBranch: string; baseSha: string; headSha: string }[];
+  /** When set, `fetchCommits` answers with it, as git failing to bring a commit. */
+  missingCommits: string | null;
 };
 
 export function fakeWorkspaces(): FakeWorkspaces {
@@ -39,6 +43,8 @@ export function fakeWorkspaces(): FakeWorkspaces {
     created: [],
     failCreate: null,
     files: new Map(),
+    fetchedCommits: [],
+    missingCommits: null,
     archive(workspaceId) {
       active.delete(workspaceId);
     },
@@ -60,6 +66,10 @@ export function fakeWorkspaces(): FakeWorkspaces {
       const checkout = workspaces.checkouts.get(workspace.id);
       if (checkout === undefined) return { status: "failed", message: `No checkout at ${workspace.directory}.` };
       return checkout.outcome;
+    },
+    async fetchCommits({ workspace, baseBranch, baseSha, headSha }) {
+      workspaces.fetchedCommits.push({ workspaceId: workspace.id, baseBranch, baseSha, headSha });
+      return workspaces.missingCommits;
     },
     async fileAt({ sha, path }) {
       return workspaces.files.get(`${sha}:${path}`) ?? null;

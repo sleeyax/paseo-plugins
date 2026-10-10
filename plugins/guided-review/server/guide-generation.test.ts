@@ -84,7 +84,7 @@ test("a started review has a read-only guide agent in its workspace write the gu
   assert.equal((agent!.outputSchema as { type?: string }).type, "object");
 });
 
-test("the generation prompt carries the change, forbids findings, and ends with the guide's schema", async (t) => {
+test("the generation prompt carries what only the forge knows and how to read the rest, forbids findings, and ends with the guide's schema", async (t) => {
   const { service, agents } = await withHost(t);
 
   await service.start({ url: URL });
@@ -93,12 +93,15 @@ test("the generation prompt carries the change, forbids findings, and ends with 
   const prompt = agents.created[0]!.prompt;
   assert.match(prompt, /Write a guide to https:\/\/github\.com\/acme\/uploader\/pull\/7/);
   assert.match(prompt, /Explain only\. Do not report bugs, security issues, risks or style problems, and do not suggest fixes/);
-  assert.match(prompt, /Do not edit or write files, and do not run commands\./);
+  assert.match(prompt, /Do not edit or write files\. .* commands that only read, like `git log`/);
   assert.match(prompt, /Uploads that fail on a flaky network are retried with backoff\./);
-  assert.match(prompt, /- c{7} Retry uploads/);
   assert.match(prompt, /- #12 Uploads fail \(open\)/);
-  assert.match(prompt, /- src\/retry\.ts \(added, \+12 −0\)/);
-  assert.match(prompt, /### src\/upload\.ts\n\nHunk 1:\n\n```diff\n@@ -1,1 \+1,1 @@\n-a\n\+b\n```/);
+  assert.match(prompt, new RegExp(`Base commit: ${"a".repeat(40)}\nHead commit: ${HEAD}`));
+  assert.match(prompt, new RegExp(`- The commits: \`git log ${"a".repeat(40)}\\.\\.${HEAD}\``));
+  assert.match(prompt, new RegExp(`- The file list: \`git diff --name-status -M ${"a".repeat(40)}\\.\\.\\.${HEAD}\``));
+  assert.match(prompt, new RegExp(`\`git diff --no-ext-diff --no-color --diff-algorithm=myers -U3 --inter-hunk-context=1 -M ${"a".repeat(40)}\\.\\.\\.${HEAD} -- <path>\``));
+  // The agent reads the commits and the diff itself, so the prompt stays the same size whatever the change.
+  assert.doesNotMatch(prompt, /Retry uploads\n|src\/retry\.ts|```diff/);
   assert.match(prompt, /A node's `covers` names the code it explains/);
   assert.match(prompt, /"covers"/);
   assert.match(prompt, /Respond with JSON only that matches this JSON Schema, as your final message:\n\{\n/);
@@ -197,7 +200,7 @@ test("a node that names only a file's path covers all of it", async (t) => {
   assert.deepEqual(await guideOf(service), { status: "ready", agentId: "agent-1", guide: expected });
 });
 
-test("a file whose diff the forge withheld is covered whole, whatever lines the agent read in the checkout", async (t) => {
+test("a file whose diff the forge withheld is covered whole, whatever hunks or lines the agent read in the checkout", async (t) => {
   const { service, forge, agents } = await withHost(t);
   const files = sampleChangeRequest(URL).files.map((file) => (file.path === "src/retry.ts" ? { ...file, additions: 0, patch: null } : file));
   forge.changeRequests.set(URL, sampleChangeRequest(URL, { files }));
@@ -208,33 +211,26 @@ test("a file whose diff the forge withheld is covered whole, whatever lines the 
   await service.start({ url: URL });
   await service.settled();
 
-  assert.match(agents.created[0]!.prompt, /### src\/retry\.ts\n\n\(No diff: .* cover it whole: leave `hunks` and `lines` empty/);
   const shown = await guideOf(service);
   assert.equal(shown?.status, "ready");
   assert.deepEqual(shown?.status === "ready" ? shown.guide.nodes[0]!.covers : null, [{ path: "src/retry.ts", hunks: [], lines: [] }]);
 });
 
-test("a diff too large for the prompt is still listed by its numbered hunks, for nodes to name", async (t) => {
-  const { service, forge, agents } = await withHost(t);
-  const long = Array.from({ length: 5_000 }, (_, index) => `+line ${index}`).join("\n");
-  forge.changeRequests.set(
-    URL,
-    sampleChangeRequest(URL, {
-      files: [
-        { path: "src/upload.ts", previousPath: null, status: "modified", additions: 30, deletions: 7, patch: "@@ -1,1 +1,1 @@\n-a\n+b" },
-        { path: "src/retry.ts", previousPath: null, status: "added", additions: 12, deletions: 0, patch: `@@ -0,0 +1,5000 @@ intro\n${long}` },
-      ],
-    }),
-  );
+test("the base and head are fetched into the workspace before the agent reads them, and a guide fails without them", async (t) => {
+  const { service, workspaces, agents } = await withHost(t);
+  const { baseBranch, baseSha } = sampleChangeRequest(URL);
+  workspaces.missingCommits = "refs/heads/main did not bring aaaaaaaaaaaa with it.";
 
   await service.start({ url: URL });
   await service.settled();
 
-  assert.match(
-    agents.created[0]!.prompt,
-    /### src\/retry\.ts\n\n\(The diff is too large to include here\. Read the file in the repository\. Its hunks:\)\n- Hunk 1: @@ -0,0 \+1,5000 @@ intro\n/,
-  );
-  assert.doesNotMatch(agents.created[0]!.prompt, /\+line 4999/);
+  assert.deepEqual(workspaces.fetchedCommits, [{ workspaceId: WORKSPACE_ID, baseBranch, baseSha, headSha: HEAD }]);
+  assert.equal(agents.created.length, 0);
+  assert.deepEqual(await guideOf(service), {
+    status: "failed",
+    agentId: null,
+    message: "The guide agent could not be given the change to read: refs/heads/main did not bring aaaaaaaaaaaa with it.",
+  });
 });
 
 test("a reply with no JSON, an agent that fails, and one that cannot be created each fail the guide with a reason", async (t) => {

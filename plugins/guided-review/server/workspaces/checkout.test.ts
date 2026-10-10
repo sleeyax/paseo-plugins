@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { runCommand, type CommandRunner } from "../command-runner.ts";
-import { fastForward, readCheckout } from "./checkout.ts";
+import { fastForward, fetchMissing, readCheckout } from "./checkout.ts";
 
 /**
  * Real throwaway repositories: a bare `origin` with a change request's head under `refs/pull/7/head`,
@@ -180,4 +180,23 @@ test("a head that cannot be fetched fails in git's words and leaves the branch a
   const elsewhere = await fastForward(run, { directory: workspace, branch: BRANCH, fetchRef: FETCH_REF, headSha: "f".repeat(40) });
   assert.deepEqual(elsewhere, { status: "failed", message: `${FETCH_REF} did not bring ffffffffffff with it.` });
   assert.equal(head(workspace), pushed);
+});
+
+test("commits the checkout lacks are fetched without moving a branch, and ones it has are not fetched", async (t) => {
+  const { workspace, pushed, author, publishHead } = await withRepos(t);
+  const later = await commit(author, "retry.ts", "export const backoff = 2;\n", "Back off between retries");
+  publishHead(later);
+  const remoteBranches = git(workspace, "branch", "--remotes");
+
+  assert.equal(await fetchMissing(run, workspace, [{ sha: pushed, fetchRef: "refs/pull/8/head" }, { sha: later, fetchRef: FETCH_REF }]), null);
+  assert.equal(git(workspace, "cat-file", "-t", later), "commit");
+  assert.equal(head(workspace), pushed);
+  assert.equal(git(workspace, "branch", "--remotes"), remoteBranches);
+});
+
+test("a commit that cannot be fetched says why", async (t) => {
+  const { workspace } = await withRepos(t);
+
+  assert.match((await fetchMissing(run, workspace, [{ sha: "f".repeat(40), fetchRef: "refs/pull/8/head" }])) ?? "", /^Could not fetch refs\/pull\/8\/head: couldn't find remote ref/);
+  assert.equal(await fetchMissing(run, workspace, [{ sha: "f".repeat(40), fetchRef: FETCH_REF }]), `${FETCH_REF} did not bring ffffffffffff with it.`);
 });
