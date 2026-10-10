@@ -351,7 +351,7 @@ test("own work that can be told apart has the guide wait for the reviewer to cho
   assert.equal(guideAgents.created.length, 2);
 });
 
-test("a guide of the own work is written from its files and commits only, and lists the others' files apart", async (t) => {
+test("a guide of the own work reads its files and commits only, and lists the others' files apart", async (t) => {
   const { service, forge, guideAgents } = await withHost(t);
   const reviewId = "github/github.com/acme/uploader/7";
   carryForeignWorkBelowOwn(forge);
@@ -365,11 +365,9 @@ test("a guide of the own work is written from its files and commits only, and li
 
   const prompt = guideAgents.created[0]!.prompt;
   assert.match(prompt, /This guide is of the pull request's own work only\. Its branch also carries the commits of #5/);
-  assert.match(prompt, /### src\/upload\.ts/);
-  assert.doesNotMatch(prompt, /### src\/retry\.ts/);
-  assert.match(prompt, /\(1 file only #5 changes is left out: they are placed already\.\)/);
-  assert.match(prompt, new RegExp(`- ${OWN.slice(0, 7)} Retry uploads`));
-  assert.doesNotMatch(prompt, new RegExp(`- ${FOREIGN.slice(0, 7)} Back off`));
+  assert.match(prompt, new RegExp(`- The commits: \`git log ${OWN}\\^1\\.\\.${OWN}\``));
+  assert.match(prompt, new RegExp(`- The file list: \`git diff --name-status -M ${OWN}\\^1 ${OWN}\``));
+  assert.match(prompt, new RegExp(`-M ${"a".repeat(40)}\\.\\.\\.${OWN} -- <path>`), "hunks are still numbered as the whole diff cuts them");
 
   const panel = await service.panel({ workspaceId: progress.workspaceId! });
   assert.equal(panel.status, "ready");
@@ -378,7 +376,7 @@ test("a guide of the own work is written from its files and commits only, and li
   assert.deepEqual((await service.readingProgress({ reviewId }))?.foreign, { understood: 0, total: 1 });
 });
 
-test("a guide of the whole diff, chosen, is written from every file and commit", async (t) => {
+test("a guide of the whole diff, chosen, reads every file and commit", async (t) => {
   const { service, forge, guideAgents } = await withHost(t);
   carryForeignWorkBelowOwn(forge);
   await startAndSettle(service, URL);
@@ -388,8 +386,8 @@ test("a guide of the whole diff, chosen, is written from every file and commit",
 
   const prompt = guideAgents.created[0]!.prompt;
   assert.doesNotMatch(prompt, /own work only/);
-  assert.match(prompt, /### src\/retry\.ts/);
-  assert.match(prompt, new RegExp(`- ${FOREIGN.slice(0, 7)} Back off`));
+  assert.match(prompt, new RegExp(`- The commits: \`git log ${"a".repeat(40)}\\.\\.${OWN}\``));
+  assert.match(prompt, new RegExp(`- The file list: \`git diff --name-status -M ${"a".repeat(40)}\\.\\.\\.${OWN}\``));
 });
 
 test("switching the guide to the own work writes a new one at the same head, and the marks carry over to the same code", async (t) => {

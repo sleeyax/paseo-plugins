@@ -147,10 +147,9 @@ export class GuideGenerations {
       if (generation.agentId === null) await save({ status: "generating", guide: null, message: null });
       const changeRequest = await this.#store.snapshot(record.id, headSha);
       if (changeRequest === null) throw new Error("What the forge said at this head is missing. Start the review again.");
-      // Lockfiles and generated files never reach the agent, nor, for the own work, other change requests' files; they go straight into Supporting.
+      // Lockfiles and generated files, and for the own work other change requests' files, go straight into Supporting; the prompt keeps the agent off them.
       const classified = setAside(changeRequest.files);
       const files = own === null ? classified : keepOwnWork(classified, own.ownPaths);
-      const foreignFiles = files.setAside.length - classified.setAside.length;
       if (generation.agentId === null) {
         const { baseBranch, baseSha } = changeRequest;
         const missing = await this.#workspaces.fetchCommits({ workspace: record.workspace, ref: changeRequest.ref, baseBranch, baseSha, headSha });
@@ -160,10 +159,7 @@ export class GuideGenerations {
           workspace: record.workspace,
           title: `Guide: ${record.header.title}`,
           labels: { [GUIDE_AGENT_LABEL]: record.id, [GUIDE_HEAD_LABEL]: headSha },
-          prompt: withOutputSchema(
-            guidePrompt({ ...changeRequest, files: files.sent }, classified.setAside.length, own === null ? null : { foreign: own, foreignFiles }),
-            schema,
-          ),
+          prompt: withOutputSchema(guidePrompt(changeRequest, classified.setAside.map((entry) => entry.path), own), schema),
           outputSchema: schema,
         });
         generation.agentId = agent.id;
