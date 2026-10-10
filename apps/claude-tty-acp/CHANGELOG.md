@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-acp-v0.4.0...claude-tty-acp-v0.4.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **claude-tty:** send a prompt as the user's own words instead of one collapsed paste ([#140](https://github.com/sleeyax/paseo-plugins/issues/140)) ([421d071](https://github.com/sleeyax/paseo-plugins/commit/421d0714b902ba6ca932e020c985cce21db7dd2e))
+
 ## [0.4.0](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-acp-v0.3.0...claude-tty-acp-v0.4.0) (2026-10-07)
 
 
