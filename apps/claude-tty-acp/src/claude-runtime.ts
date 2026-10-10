@@ -57,10 +57,13 @@ const LATE_PASTE_MS = 2_000;
 const PROMPT_ECHO_CHARS = 40;
 // How long Claude is given to read one batch of a prompt before the next is written: see `PASTE_WRITE_BYTES` in prompt-content.ts.
 const PASTE_WRITE_GAP_MS = 10;
-// Claude drops the submit key while it is still taking a prompt in, and one that takes several writes keeps it painting a while: 1,500 lines took about 1.6s on Claude Code v2.1.295.
-// Such a prompt is submitted only once the screen has been still this long, or once the bound below is up, for a screen that never stops moving.
+// Claude drops the submit key while it is still taking a prompt in, and one that takes several writes keeps it busy a while: 1,500 lines took one to two seconds on Claude Code v2.1.295.
+// A still screen does not say it is done, because it stops painting while it works through a large input, so such a prompt is submitted only once its own end is on the screen, which the box scrolls to as it fills, and the screen has then been still this long.
+// The bound is for an end that never reads back, as a line of wide characters the terminal draws differently from Claude can make it.
 const PASTE_SETTLE_MS = 150;
-const PASTE_SETTLE_LIMIT_MS = 5_000;
+const PASTE_SETTLE_LIMIT_MS = 10_000;
+// How much of a prompt's end has to be on the screen, as `screenText` reads it: enough that a short line the prompt repeats does not pass for its end.
+const PROMPT_END_CHARS = 120;
 // How many times the keyboard is asked back off a question Claude has open, and how long each key is given
 // to take effect. Bounded rather than patient: a question Escape does not close is one this cannot answer,
 // and a prompt that fails saying so is worth more than one that goes on pressing keys into it.
@@ -1066,7 +1069,8 @@ export class ClaudeRuntime {
   private async submit(pastes: string[]): Promise<void> {
     const activityBefore = this.activityAt;
     const typed = pastes.map((text) => `${text}${COMPLETION_DISMISS}`);
-    const echo = squashSpaces(typed.join(""));
+    const echo = screenText(typed.join(""));
+    const end = echo.slice(-PROMPT_END_CHARS);
     const paste = async (): Promise<void> => {
       await this.clearInputBox();
       const writes = typed.flatMap(inputBoxPaste);
@@ -1076,7 +1080,8 @@ export class ClaudeRuntime {
       }
       if (writes.length > 1) {
         const deadline = Date.now() + PASTE_SETTLE_LIMIT_MS;
-        while (!this.screen.quietFor(this.pasteSettleMs) && Date.now() < deadline) await delay(STARTUP_POLL_INTERVAL_MS);
+        const settled = () => this.screen.quietFor(this.pasteSettleMs) && screenText(this.screen.snapshot()).includes(end);
+        while (!settled() && Date.now() < deadline) await delay(STARTUP_POLL_INTERVAL_MS);
       }
     };
     if ((await this.takeTheKeyboardBack(activityBefore)) === "delivered") return;
@@ -1497,18 +1502,22 @@ function inputBoxTail(screen: string): string {
 }
 
 /**
- * Whether the input box is showing the prompt `echo` is of, with its spaces squashed. The box shows a
- * prompt from its first line, and one taller than the box from whichever line Claude has scrolled it
- * to, so what is read is the first visible line of it, which is a stretch of the prompt either way.
+ * Whether the input box is showing the prompt `echo` is the `screenText` of. The box shows a prompt
+ * from its first line, and one taller than the box from whichever line Claude has scrolled it to, so
+ * what is read is the first visible line of it, which is a stretch of the prompt either way.
  */
 function inputBoxHolds(screen: string, echo: string): boolean {
-  const content = squashSpaces(inputBoxContent(screen) ?? "");
+  const content = screenText(inputBoxContent(screen) ?? "");
   return content !== "" && echo.includes(content);
 }
 
-/** Claude wraps a long line where it likes and draws a tab as spaces, so text is compared with every run of whitespace as one space. */
-function squashSpaces(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+/**
+ * Text as it can be found again on Claude's screen: with no whitespace, since Claude wraps and indents
+ * where it likes and draws a tab as spaces, and nothing outside printable ASCII, since a terminal can
+ * draw a wide character over the cells around it.
+ */
+function screenText(text: string): string {
+  return text.replace(/[^\x21-\x7e]/g, "");
 }
 
 // Registering a status line makes Claude drop most footer hints, `? for shortcuts` among them, so that alternative cannot match in an adapter-launched session.

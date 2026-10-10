@@ -647,7 +647,8 @@ test("submits a prompt taller than Claude's input box once, reading the box from
   let pty!: FakePty;
   const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
     pty = new FakePty(6800, (text) => {
-      if (text.includes("\u001b[200~")) pty.emitData("\u001b[2J\u001b[H\u276f line 120:    some   text\r\n  line 121: some text\r\n");
+      // The box scrolled to the cursor, at the end of the prompt, with its first visible line wherever that leaves it.
+      if (text.includes("\u001b[200~")) pty.emitData(`\u001b[2J\u001b[H\u276f line 120:    some   text\r\n${Array.from({ length: 10 }, (_, index) => `  line ${290 + index}: some text\r\n`).join("")}`);
       if (text === "\r") pty.emitData("\u001b[2J\u001b[H\u276f\r\n");
     });
     const sessionId = args[args.indexOf("--session-id") + 1];
@@ -1719,7 +1720,7 @@ test("pastes a known command apart from its attachment, so Claude runs it rather
   let pty!: FakePty;
   const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
     pty = new FakePty(6700, (text) => {
-      if (text.startsWith("\u001b[200~")) pty.emitData("\u001b[2J\u001b[H\u276f /implement-spec https://example.com/issues/88\r\n");
+      if (text.startsWith("\u001b[200~")) pty.emitData('\u001b[2J\u001b[H\u276f /implement-spec https://example.com/issues/88\r\n  <resource uri="paseo://issue/88">\r\n  the issue\r\n  </resource>\r\n');
       if (text === "\r") pty.emitData("\u001b[2J\u001b[H\u276f\r\n");
     });
     const sessionId = args[args.indexOf("--session-id") + 1];
