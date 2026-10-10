@@ -43,6 +43,12 @@ export interface WorkspacePort {
    * and says why.
    */
   fastForward(input: { workspace: ReviewWorkspace; branch: string; ref: ChangeRequestRef; headSha: string }): Promise<FastForwardResult>;
+  /**
+   * Makes sure the workspace's repository has the change request's base and head commits, which the
+   * guide agent diffs, fetching what it lacks from `origin` without moving a branch. Null once both
+   * are there, else why one is not.
+   */
+  fetchCommits(input: { workspace: ReviewWorkspace; ref: ChangeRequestRef; baseBranch: string; baseSha: string; headSha: string }): Promise<string | null>;
   /** A file's text at a commit of the workspace's repository; null when git cannot show it there. */
   fileAt(input: { workspace: ReviewWorkspace; sha: string; path: string }): Promise<string | null>;
   /** The root of a Paseo project whose `origin` is this repository, if there is one. */

@@ -109,7 +109,7 @@ export class ReviewService {
     this.#now = options.now ?? (() => new Date());
     this.#log = options.log ?? (() => {});
     const shared = { store: this.#store, now: this.#now, log: this.#log };
-    this.#guides = new GuideGenerations({ ...shared, guideAgents: this.#guideAgents });
+    this.#guides = new GuideGenerations({ ...shared, guideAgents: this.#guideAgents, workspaces: this.#workspaces });
     this.#preparation = new ReviewPreparation({
       ...shared,
       workspaces: this.#workspaces,

@@ -237,6 +237,23 @@ test("a diff too large for the prompt is still listed by its numbered hunks, for
   assert.doesNotMatch(agents.created[0]!.prompt, /\+line 4999/);
 });
 
+test("the base and head are fetched into the workspace before the agent reads them, and a guide fails without them", async (t) => {
+  const { service, workspaces, agents } = await withHost(t);
+  const { baseBranch, baseSha } = sampleChangeRequest(URL);
+  workspaces.missingCommits = "refs/heads/main did not bring aaaaaaaaaaaa with it.";
+
+  await service.start({ url: URL });
+  await service.settled();
+
+  assert.deepEqual(workspaces.fetchedCommits, [{ workspaceId: WORKSPACE_ID, baseBranch, baseSha, headSha: HEAD }]);
+  assert.equal(agents.created.length, 0);
+  assert.deepEqual(await guideOf(service), {
+    status: "failed",
+    agentId: null,
+    message: "The guide agent could not be given the change to read: refs/heads/main did not bring aaaaaaaaaaaa with it.",
+  });
+});
+
 test("a reply with no JSON, an agent that fails, and one that cannot be created each fail the guide with a reason", async (t) => {
   const { service, agents } = await withHost(t);
 

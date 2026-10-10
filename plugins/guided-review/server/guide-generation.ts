@@ -9,6 +9,7 @@ import { jsonSchemaOf, withOutputSchema } from "./guide-agent/structured.ts";
 import { keepQuotedDecisions, layOutGuide, parseGuide } from "./guide-output.ts";
 import { guidePrompt } from "./guide-prompt.ts";
 import type { GuideRecord, ProgressRecord, ReviewRecord, ReviewStore } from "./review-store.ts";
+import type { WorkspacePort } from "./workspaces/port.ts";
 
 /** A guide being generated; `agentId` is set once its agent exists. */
 export type Generation = { agentId: string | null; done: Promise<void> };
@@ -19,6 +20,7 @@ export type ReadyGuide = GuideRecord & { status: "ready"; agentId: string; guide
 export type GuideGenerationsOptions = {
   store: ReviewStore;
   guideAgents: GuideAgentPort;
+  workspaces: WorkspacePort;
   now: () => Date;
   log: (message: string) => void;
 };
@@ -31,6 +33,7 @@ export type GuideGenerationsOptions = {
 export class GuideGenerations {
   readonly #store: ReviewStore;
   readonly #guideAgents: GuideAgentPort;
+  readonly #workspaces: WorkspacePort;
   readonly #now: () => Date;
   readonly #log: (message: string) => void;
   /** Guide generations running, by review and head SHA. */
@@ -39,6 +42,7 @@ export class GuideGenerations {
   constructor(options: GuideGenerationsOptions) {
     this.#store = options.store;
     this.#guideAgents = options.guideAgents;
+    this.#workspaces = options.workspaces;
     this.#now = options.now;
     this.#log = options.log;
   }
@@ -148,6 +152,9 @@ export class GuideGenerations {
       const files = own === null ? classified : keepOwnWork(classified, own.ownPaths);
       const foreignFiles = files.setAside.length - classified.setAside.length;
       if (generation.agentId === null) {
+        const { baseBranch, baseSha } = changeRequest;
+        const missing = await this.#workspaces.fetchCommits({ workspace: record.workspace, ref: changeRequest.ref, baseBranch, baseSha, headSha });
+        if (missing !== null) throw new Error(`The guide agent could not be given the change to read: ${missing}`);
         const schema = jsonSchemaOf(GuideSchema);
         const agent = await this.#guideAgents.create({
           workspace: record.workspace,

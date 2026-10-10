@@ -89,6 +89,28 @@ export async function fastForward(run: CommandRunner, request: FastForwardReques
   return { status: "fast-forwarded", from };
 }
 
+export type WantedCommit = {
+  sha: string;
+  /** Where on `origin` a fetch brings it: `refs/pull/7/head`, or the branch it is on. */
+  fetchRef: string;
+};
+
+/**
+ * Fetches each of `commits` the checkout's repository lacks from its `fetchRef` on `origin`, into
+ * `FETCH_HEAD` only, so no branch moves. Null once all of them are there, else why one is not.
+ */
+export async function fetchMissing(run: CommandRunner, directory: string, commits: readonly WantedCommit[]): Promise<string | null> {
+  const git = gitIn(run, directory);
+  const present = async (sha: string) => (await git(["cat-file", "-e", `${sha}^{commit}`])).exitCode === 0;
+  for (const commit of commits) {
+    if (await present(commit.sha)) continue;
+    const fetched = await git(["fetch", "--no-tags", "origin", commit.fetchRef], FETCH_TIMEOUT_MS);
+    if (fetched.exitCode !== 0) return failedMessage(`Could not fetch ${commit.fetchRef}`, fetched);
+    if (!(await present(commit.sha))) return `${commit.fetchRef} did not bring ${short(commit.sha)} with it.`;
+  }
+  return null;
+}
+
 /** A file's text at `sha`, its path from the repository's root; null when git cannot show it, as for a commit the clone lacks. */
 export async function showFile(run: CommandRunner, directory: string, sha: string, path: string): Promise<string | null> {
   const shown = await gitIn(run, directory)(["show", `${sha}:${path}`]);
@@ -110,8 +132,12 @@ async function currentBranch(git: Git): Promise<string | null> {
 }
 
 function failed(context: string, result: CommandResult): FastForwardResult {
+  return { status: "failed", message: failedMessage(context, result) };
+}
+
+function failedMessage(context: string, result: CommandResult): string {
   const reason = result.spawnError ?? firstLine(result.stderr) ?? `exit code ${result.exitCode}`;
-  return { status: "failed", message: `${context}: ${reason.replace(/^(fatal|error): /, "")}` };
+  return `${context}: ${reason.replace(/^(fatal|error): /, "")}`;
 }
 
 /** git says what went wrong first, and follows it with hints. */
