@@ -90,28 +90,40 @@ export function guideMode(provider: string, modes: readonly ProviderMode[], conf
 export function answerPermission(request: PermissionRequest, unattended: boolean): PaseoAgentPermissionResponse | null {
   if (changesSomething(request)) return { behavior: "deny", message: READ_ONLY_DENIAL };
   if (!unattended) return null;
-  const detail = request.detail;
-  const reads = detail?.type === "read" || detail?.type === "search" || detail?.type === "shell";
+  const type = request.detail?.type;
+  const reads = type === "read" || type === "search" || commandOf(request) !== null;
   if (request.kind === "tool" && reads) return { behavior: "allow" };
   return { behavior: "deny", message: UNATTENDED_DENIAL };
+}
+
+/**
+ * The command a request asks to run, if it asks to run one: its shell detail's, or, from a provider
+ * whose permission requests carry no detail, as a plugin's ACP provider's do, the `command` of the
+ * tool's own input.
+ */
+function commandOf(request: PermissionRequest): string | null {
+  if (request.detail?.type === "shell") return request.detail.command;
+  if (request.detail !== undefined) return null;
+  const command = request.input?.command;
+  return typeof command === "string" ? command : null;
 }
 
 function changesSomething(request: PermissionRequest): boolean {
   if (request.kind === "plan" || request.kind === "mode") return true;
   if (request.kind !== "tool") return false;
+  const command = commandOf(request);
+  if (command !== null) return !readOnlyCommand(command);
   switch (request.detail?.type) {
     case "edit":
     case "write":
       return true;
-    case "shell":
-      return !readOnlyCommand(request.detail.command);
     case "read":
     case "search":
     case "fetch":
       return false;
     default:
-      // A tool the provider did not describe is judged by its name.
-      return /edit|write|patch|bash|shell|exec|command|notebook|delete|move|rename/i.test(request.name);
+      // A tool the provider did not describe is judged by its name, which may go on to say what it is used on ("Read: src/editor.ts"), so only up to that.
+      return /edit|write|patch|bash|shell|exec|command|notebook|delete|move|rename/i.test(request.name.split(":", 1)[0]!);
   }
 }
 

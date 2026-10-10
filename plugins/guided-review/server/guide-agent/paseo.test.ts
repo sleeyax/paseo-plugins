@@ -212,6 +212,15 @@ test("writes, edits, commands that may write and leaving plan mode are always de
   assert.equal(answerPermission(request({ detail: { type: "shell", command: "git diff abc...def -- src/a.ts" } }), false), null);
   assert.deepEqual(answerPermission(request({ detail: { type: "shell", command: "git log abc..def | head" } }), true), { behavior: "allow" });
   assert.deepEqual(answerPermission(request({ detail: { type: "shell", command: "git log > log.txt" } }), true), denied);
+
+  // A plugin's ACP provider, claude-tty among them, sends no detail: the tool's title as its name and its raw input.
+  const claudeTty = (name: string, input: Record<string, unknown>) => request({ name, input, detail: undefined });
+  assert.deepEqual(answerPermission(claudeTty("Bash: Show the diff", { command: "git diff abc...def -- src/a.ts" }), true), { behavior: "allow" });
+  assert.equal(answerPermission(claudeTty("Bash: Show the diff", { command: "git diff abc...def -- src/a.ts" }), false), null);
+  assert.deepEqual(answerPermission(claudeTty("Bash: Clean up", { command: "rm -rf ." }), false), denied);
+  assert.deepEqual(answerPermission(claudeTty("Bash", {}), false), denied);
+  assert.deepEqual(answerPermission(claudeTty("Edit: src/upload.ts", { file_path: "src/upload.ts" }), false), denied);
+  assert.equal(answerPermission(claudeTty("Read: src/editor.ts", { file_path: "src/editor.ts" }), false), null);
   assert.equal(answerPermission(request({ kind: "question" }), true)?.behavior, "deny");
 });
 
