@@ -4,6 +4,17 @@ import path from "node:path";
 import type { AvailableCommand, ContentBlock } from "@agentclientprotocol/sdk";
 
 const INLINE_RESOURCE_BYTES = 32 * 1024;
+const BRACKETED_PASTE_START = "\u001b[200~";
+const BRACKETED_PASTE_END = "\u001b[201~";
+// Claude collapses a paste of more than three lines, or of more than about 800 characters, into a `[Pasted text]` placeholder, and hands it to the model inside `<pasted_content>` tags as text the user did not write themselves.
+// A model told to follow such text only where the user's own message asks it to will then ask what to do with a prompt instead of answering it, since the whole prompt is the paste.
+// So a prompt goes in a line at a time, each line as pastes no longer than this, with the newline key between lines: Claude reads every piece inline and the key as typed, and the prompt reaches the model unwrapped.
+// Measured against Claude Code v2.1.295: a 4-line paste and a 1,000-character one came back wrapped, 401 lines and 16,710 characters sent this way came back plain.
+const PASTE_CHUNK_CHARS = 500;
+const NEWLINE_KEY = "\n";
+// Claude reads its input in whatever pieces the terminal hands over, and a paste's opening sequence cut between two reads reaches it as text: a 404-line prompt written in one go came back with `200~` at the start of a line.
+// So the pieces are written in batches no larger than this, each ending where a piece does, which `PASTE_WRITE_GAP_MS` then spaces out.
+const PASTE_WRITE_BYTES = 1024;
 
 export type MaterializedPrompt = {
   text: string;
@@ -68,6 +79,29 @@ export function promptPastes(text: string, commands: readonly AvailableCommand[]
   if (!match || !commands.some((command) => command.name === match[1])) return [text];
   const rest = text.slice(match[0].length);
   return rest ? [`/${match[1]}`, rest] : [text];
+}
+
+/** The writes that put `text` in Claude's input box as the user's own words: see `PASTE_CHUNK_CHARS` and `PASTE_WRITE_BYTES`. */
+export function inputBoxPaste(text: string): string[] {
+  const pieces = text.split(/\r?\n/).flatMap((line, index) => {
+    const characters = Array.from(line);
+    const pastes: string[] = [];
+    for (let start = 0; start < characters.length; start += PASTE_CHUNK_CHARS) {
+      pastes.push(`${BRACKETED_PASTE_START}${characters.slice(start, start + PASTE_CHUNK_CHARS).join("")}${BRACKETED_PASTE_END}`);
+    }
+    return index === 0 ? pastes : [NEWLINE_KEY, ...pastes];
+  });
+  const writes: string[] = [];
+  let current = "";
+  for (const piece of pieces) {
+    if (current !== "" && Buffer.byteLength(current + piece) > PASTE_WRITE_BYTES) {
+      writes.push(current);
+      current = "";
+    }
+    current += piece;
+  }
+  if (current !== "") writes.push(current);
+  return writes;
 }
 
 export async function cleanupPromptFiles(files: string[]): Promise<void> {
