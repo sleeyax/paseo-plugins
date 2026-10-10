@@ -2,6 +2,7 @@ import type { PaseoAgent, PaseoAgentHandle, PaseoAgentPermissionResponse, PaseoA
 import { DEFAULT_GUIDE_AGENT, FALLBACK_GUIDE_AGENT } from "../../shared/settings.ts";
 import type { GuideAgentSettings } from "../settings.ts";
 import { GUIDE_AGENT_LABEL, GuideAgentError, type GuideAgentPort } from "./port.ts";
+import { readOnlyCommand } from "./read-only-command.ts";
 
 export type PermissionRequest = PaseoAgent["pendingPermissions"][number];
 
@@ -36,7 +37,7 @@ const NATIVE_SCHEMA_PROVIDERS = new Set(["codex", "opencode"]);
 const MAX_TITLE = 200;
 
 const READ_ONLY_DENIAL =
-  "This guide agent is read-only: do not change files, run commands or leave plan mode. Give your answer as a normal message.";
+  "This guide agent is read-only: do not change files or leave plan mode, and run only commands that read, like git log, git diff, git show, ls, grep, rg or find, with no redirects to files and no unquoted globs for git, find, rg, sort, tree or file. Give your answer as a normal message.";
 const UNATTENDED_DENIAL =
   "Nobody is watching this run to answer requests. Carry on without it, and give your answer as a normal message.";
 
@@ -81,15 +82,17 @@ export function guideMode(provider: string, modes: readonly ProviderMode[], conf
 
 /**
  * How the plugin answers a guide agent's permission request. Anything that would change the checkout
- * or leave the read-only mode is denied. Unattended, while the plugin is waiting for a reply nobody
- * is watching, reads and searches are allowed and the rest denied, so the run never stalls; attended,
- * those are left to the reviewer in the agent's chat.
+ * or leave the read-only mode is denied, and so is any command `readOnlyCommand` does not recognise.
+ * Unattended, while the plugin is waiting for a reply nobody is watching, reads, searches and
+ * read-only commands are allowed and the rest denied, so the run never stalls; attended, those are
+ * left to the reviewer in the agent's chat.
  */
 export function answerPermission(request: PermissionRequest, unattended: boolean): PaseoAgentPermissionResponse | null {
   if (changesSomething(request)) return { behavior: "deny", message: READ_ONLY_DENIAL };
   if (!unattended) return null;
-  const type = request.detail?.type;
-  if (request.kind === "tool" && (type === "read" || type === "search")) return { behavior: "allow" };
+  const detail = request.detail;
+  const reads = detail?.type === "read" || detail?.type === "search" || detail?.type === "shell";
+  if (request.kind === "tool" && reads) return { behavior: "allow" };
   return { behavior: "deny", message: UNATTENDED_DENIAL };
 }
 
@@ -99,8 +102,9 @@ function changesSomething(request: PermissionRequest): boolean {
   switch (request.detail?.type) {
     case "edit":
     case "write":
-    case "shell":
       return true;
+    case "shell":
+      return !readOnlyCommand(request.detail.command);
     case "read":
     case "search":
     case "fetch":

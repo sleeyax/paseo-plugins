@@ -192,8 +192,12 @@ test("the read-only mode is plan, then read-only, and read-only for Codex even u
   assert.deepEqual(parseAgentSetting("claude/"), { provider: "claude", model: null });
 });
 
-test("writes, edits, commands and leaving plan mode are always denied; the rest only while nobody is watching", () => {
-  const denied = { behavior: "deny", message: "This guide agent is read-only: do not change files, run commands or leave plan mode. Give your answer as a normal message." };
+test("writes, edits, commands that may write and leaving plan mode are always denied; the rest only while nobody is watching", () => {
+  const denied = {
+    behavior: "deny",
+    message:
+      "This guide agent is read-only: do not change files or leave plan mode, and run only commands that read, like git log, git diff, git show, ls, grep, rg or find, with no redirects to files and no unquoted globs for git, find, rg, sort, tree or file. Give your answer as a normal message.",
+  };
   assert.deepEqual(answerPermission(request({ detail: { type: "edit", filePath: "a.ts" } }), false), denied);
   assert.deepEqual(answerPermission(request({ detail: { type: "write", filePath: "a.ts" } }), false), denied);
   assert.deepEqual(answerPermission(request({ detail: { type: "shell", command: "rm -rf ." } }), false), denied);
@@ -205,6 +209,9 @@ test("writes, edits, commands and leaving plan mode are always denied; the rest 
   assert.equal(answerPermission(request({ kind: "question" }), false), null);
   assert.deepEqual(answerPermission(request({ detail: { type: "read", filePath: "a.ts" } }), true), { behavior: "allow" });
   assert.deepEqual(answerPermission(request({ detail: { type: "search", query: "retry" } }), true), { behavior: "allow" });
+  assert.equal(answerPermission(request({ detail: { type: "shell", command: "git diff abc...def -- src/a.ts" } }), false), null);
+  assert.deepEqual(answerPermission(request({ detail: { type: "shell", command: "git log abc..def | head" } }), true), { behavior: "allow" });
+  assert.deepEqual(answerPermission(request({ detail: { type: "shell", command: "git log > log.txt" } }), true), denied);
   assert.equal(answerPermission(request({ kind: "question" }), true)?.behavior, "deny");
 });
 
