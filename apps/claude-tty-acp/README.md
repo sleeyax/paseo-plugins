@@ -156,7 +156,12 @@ Slash commands are the one thing the adapter never asks Claude for: an interacti
 ### Prompts go in as keystrokes
 
 A prompt is flattened into one block of text: images and embedded resources become files in the runtime directory referenced as `@path`, and host-local resource links become `@path` directly.
-The adapter clears Claude's input box with Ctrl-U, writes that text into the PTY wrapped in bracketed paste, waits briefly, then writes Enter, exactly as a person pasting into the terminal would.
+The adapter clears Claude's input box with Ctrl-U, writes that text into the PTY as bracketed pastes, waits briefly, then writes Enter, exactly as a person pasting into the terminal would.
+The text goes in a line at a time, each line as pastes of at most 500 characters and the line breaks as newline keys, because Claude collapses a paste of more than three lines or about 800 characters into a `[Pasted text]` placeholder and hands it to the model inside `<pasted_content>` tags, as text the user did not write themselves.
+A prompt that arrived as nothing but such a paste was one the model would ask about rather than act on: a guide agent's prompt came back as a question about what to do with "the pasted guide-agent prompt".
+Pieces of that size come through inline, measured against Claude Code v2.1.295 up to 1,500 lines, so the prompt reaches the model as the user's own words; Claude turns tabs into spaces either way.
+They are written in batches of at most a kilobyte, each ending where a piece does, a moment apart: Claude reads its input in whatever pieces the terminal hands over, and a paste's opening sequence cut between two reads reaches it as text.
+A prompt that takes more than one batch is submitted only once the screen has stopped changing, since Claude drops the Enter while it is still taking a long prompt in.
 The clear is what keeps a prompt from being read as the end of another one: Claude appends a bracketed paste to whatever the box already holds, and the box is not reliably empty -- interrupting a turn puts the prompt it interrupted back for editing, and a submit a cancel abandons between its paste and its Enter leaves that paste behind.
 Paseo interrupts before it replaces a turn, so in a session it is steering both are one message away, and what Claude would otherwise receive is the two run together as a single prompt nobody wrote.
 One Ctrl-U is not enough, because it kills the visual line the cursor is on and Claude wraps a long prompt across several; the keys go in one per line the box has grown to, bounded by the height of the screen, which is as tall as a box drawn on it can be.
@@ -168,6 +173,7 @@ What is compared is the screen from the box down rather than the box's own line,
 A box that did have something in it is named in the log, with the number of keys it took, whether it ended up empty, and whether the keys had simply stopped doing anything.
 The paste ends with a space so Claude's completion menu is closed rather than swallowing that Enter, and the adapter watches its input box on the headless screen and presses Enter again while the prompt is still sitting there, because Claude drops the key while it is settling a paste.
 
+The echo is the first line of the box that is on screen, which for a prompt taller than the box is whichever of its lines Claude has scrolled to, so the box counts as holding the prompt when that line is any stretch of it.
 That echo is also what says the prompt went in at all, and it is not always prompt: Claude reads a bracketed paste at once but only shows it a render later, and on a loaded host that render is what slips.
 An Enter sent before it lands sends nothing, and the prompt turns up afterwards in a box nothing will press Enter on again -- so the adapter waits for a late echo rather than assuming there is not one coming, and submits it properly when it arrives.
 If the echo never arrives, or the box will not let go of the prompt after every attempt, the prompt fails instead of returning: every way a turn ends is a hook Claude fires, so a prompt Claude never took ends nothing, and the session would show as working for the rest of its life with the message gone and no line written anywhere.

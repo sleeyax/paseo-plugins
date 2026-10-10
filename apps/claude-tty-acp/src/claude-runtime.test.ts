@@ -32,6 +32,7 @@ const TEST_TIMINGS = {
   pasteEchoMs: 30,
   submitConfirmMs: 30,
   latePasteMs: 100,
+  pasteSettleMs: 5,
   transcriptFlushIntervalMs: 2,
   clearInputKeyMs: 1,
   dialogPollMs: 10,
@@ -198,7 +199,7 @@ test("keeps three parallel PTYs, hooks, cancellation, and attachments isolated",
     assert.equal(secondSpawn?.pty.writes.join(""), "\u001b[200~second \u001b[201~\r");
     const attachment = /@(\/[^\u001b\n ]+\.png)/.exec(thirdSpawn?.pty.writes[0] ?? "")?.[1];
     assert.ok(attachment);
-    assert.equal(thirdSpawn?.pty.writes[0], `\u001b[200~third\n@${attachment} \u001b[201~`);
+    assert.equal(thirdSpawn?.pty.writes[0], `\u001b[200~third\u001b[201~\n\u001b[200~@${attachment} \u001b[201~`);
     assert.equal(path.dirname(attachment), path.dirname(thirdSpawn!.args.at(-1)!));
     assert.notEqual(path.dirname(attachment), path.dirname(firstSpawn!.args.at(-1)!));
 
@@ -632,6 +633,38 @@ test("presses nothing when Claude's external-imports question goes before the ca
     assert.deepEqual((spawned as unknown as FakePty).writes, ["[200~hello [201~", "\r"]);
     // And nothing is claimed about a session whose answer the adapter never gave.
     assert.deepEqual(vendor.filter((update) => update.method === NOTICE_METHOD), []);
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(runtimeRoot, { force: true, recursive: true });
+  }
+});
+
+test("submits a prompt taller than Claude's input box once, reading the box from whichever of its lines Claude scrolled to", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-tall-test-"));
+  let agent!: ClaudeTtyAgent;
+  let pty!: FakePty;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    pty = new FakePty(6800, (text) => {
+      if (text.includes("\u001b[200~")) pty.emitData("\u001b[2J\u001b[H\u276f line 120:    some   text\r\n  line 121: some text\r\n");
+      if (text === "\r") pty.emitData("\u001b[2J\u001b[H\u276f\r\n");
+    });
+    const sessionId = args[args.indexOf("--session-id") + 1];
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return pty;
+  };
+  agent = new ClaudeTtyAgent(createConnection([]), { ...TEST_TIMINGS, spawnPty, runtimeRoot, stateDirectory: path.join(runtimeRoot, "state"), startupTimeoutMs: 500, readinessTimeoutMs: 0, submitDelayMs: 0, contextRefreshTimeoutMs: 0 });
+
+  try {
+    const session = await agent.newSession({ cwd: "/work/tall", mcpServers: [] });
+    const text = Array.from({ length: 300 }, (_, index) => `line ${index}: some text`).join("\n");
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text }] });
+    await waitFor(() => pty !== undefined && pty.writes.at(-1) === "\r");
+    const pasted = pty.writes.slice(0, -1);
+    assert.ok(pasted.length > 1, "a prompt this long goes in several writes");
+    assert.equal(pasted.join("").replace(/\u001b\[20[01]~/g, ""), `${text} `);
+    assert.equal(pty.writes.filter((write) => write === "\r").length, 1);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
     assert.deepEqual(await turn, { stopReason: "end_turn" });
   } finally {
@@ -1686,7 +1719,7 @@ test("pastes a known command apart from its attachment, so Claude runs it rather
   let pty!: FakePty;
   const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
     pty = new FakePty(6700, (text) => {
-      if (text.startsWith("\u001b[200~")) pty.emitData("\u001b[2J\u001b[H\u276f /implement-spec [Pasted text #1 +3 lines]\r\n");
+      if (text.startsWith("\u001b[200~")) pty.emitData("\u001b[2J\u001b[H\u276f /implement-spec https://example.com/issues/88\r\n");
       if (text === "\r") pty.emitData("\u001b[2J\u001b[H\u276f\r\n");
     });
     const sessionId = args[args.indexOf("--session-id") + 1];
@@ -1704,9 +1737,10 @@ test("pastes a known command apart from its attachment, so Claude runs it rather
         { type: "resource", resource: { uri: "paseo://issue/88", mimeType: "text/plain", text: "the issue" } },
       ],
     });
-    await waitFor(() => pty !== undefined && pty.writes.length === 2);
+    await waitFor(() => pty !== undefined && pty.writes.length === 3);
     assert.deepEqual(pty.writes, [
-      '\u001b[200~/implement-spec \u001b[201~\u001b[200~https://example.com/issues/88\n<resource uri="paseo://issue/88">\nthe issue\n</resource> \u001b[201~',
+      "\u001b[200~/implement-spec \u001b[201~",
+      '\u001b[200~https://example.com/issues/88\u001b[201~\n\u001b[200~<resource uri="paseo://issue/88">\u001b[201~\n\u001b[200~the issue\u001b[201~\n\u001b[200~</resource> \u001b[201~',
       "\r",
     ]);
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });

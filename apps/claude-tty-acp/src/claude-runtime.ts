@@ -11,7 +11,7 @@ import { DialogWatcher } from "./dialog-cards.ts";
 import { type HookPayload, type HookRegistration, type HookResponse, HookServer } from "./hook-server.ts";
 import { InteractionBridge } from "./interactions.ts";
 import { writeLog } from "./log.ts";
-import { cleanupPromptFiles, materializePrompt, promptPastes } from "./prompt-content.ts";
+import { cleanupPromptFiles, inputBoxPaste, materializePrompt, promptPastes } from "./prompt-content.ts";
 import { markRuntimeDirectory, runtimePrefix } from "./runtime-directories.ts";
 import { INHERIT_EFFORT_ID, INHERIT_MODEL_ID } from "./session-options.ts";
 import { claudeIsWaitingFor } from "./session-status.ts";
@@ -55,13 +55,17 @@ const PASTE_ECHO_MS = 300;
 // before it lands leaves that prompt sitting there unsent, with no hook to end the turn waiting on it.
 const LATE_PASTE_MS = 2_000;
 const PROMPT_ECHO_CHARS = 40;
+// How long Claude is given to read one batch of a prompt before the next is written: see `PASTE_WRITE_BYTES` in prompt-content.ts.
+const PASTE_WRITE_GAP_MS = 10;
+// Claude drops the submit key while it is still taking a prompt in, and one that takes several writes keeps it painting a while: 1,500 lines took about 1.6s on Claude Code v2.1.295.
+// Such a prompt is submitted only once the screen has been still this long, or once the bound below is up, for a screen that never stops moving.
+const PASTE_SETTLE_MS = 150;
+const PASTE_SETTLE_LIMIT_MS = 5_000;
 // How many times the keyboard is asked back off a question Claude has open, and how long each key is given
 // to take effect. Bounded rather than patient: a question Escape does not close is one this cannot answer,
 // and a prompt that fails saying so is worth more than one that goes on pressing keys into it.
 const DIALOG_DISMISS_ATTEMPTS = 3;
 const DIALOG_DISMISS_MS = 500;
-const BRACKETED_PASTE_START = "\u001b[200~";
-const BRACKETED_PASTE_END = "\u001b[201~";
 // Claude keeps its completion menu open while the cursor sits at the end of an @mention or a /command, and the submit key then picks an entry instead of sending the prompt.
 // A trailing space closes the menu, so every paste ends with one.
 const COMPLETION_DISMISS = " ";
@@ -159,6 +163,7 @@ export type RuntimeDependencies = {
   pasteEchoMs?: number;
   submitConfirmMs?: number;
   latePasteMs?: number;
+  pasteSettleMs?: number;
   dialogDismissMs?: number;
   clearInputKeyMs?: number;
   dialogPollMs?: number;
@@ -212,6 +217,7 @@ export class ClaudeRuntime {
   private readonly pasteEchoMs: number;
   private readonly submitConfirmMs: number;
   private readonly latePasteMs: number;
+  private readonly pasteSettleMs: number;
   private readonly dialogDismissMs: number;
   private readonly clearInputKeyMs: number;
   private readonly transcriptPollIntervalMs: number | undefined;
@@ -315,6 +321,7 @@ export class ClaudeRuntime {
     this.pasteEchoMs = dependencies.pasteEchoMs ?? PASTE_ECHO_MS;
     this.submitConfirmMs = dependencies.submitConfirmMs ?? SUBMIT_CONFIRM_MS;
     this.latePasteMs = dependencies.latePasteMs ?? LATE_PASTE_MS;
+    this.pasteSettleMs = dependencies.pasteSettleMs ?? PASTE_SETTLE_MS;
     this.dialogDismissMs = dependencies.dialogDismissMs ?? DIALOG_DISMISS_MS;
     this.clearInputKeyMs = dependencies.clearInputKeyMs ?? CLEAR_INPUT_KEY_MS;
     this.transcriptPollIntervalMs = dependencies.transcriptPollIntervalMs;
@@ -1058,11 +1065,19 @@ export class ClaudeRuntime {
    */
   private async submit(pastes: string[]): Promise<void> {
     const activityBefore = this.activityAt;
-    const echo = promptEcho(pastes[0]!);
+    const typed = pastes.map((text) => `${text}${COMPLETION_DISMISS}`);
+    const echo = squashSpaces(typed.join(""));
     const paste = async (): Promise<void> => {
       await this.clearInputBox();
-      // Claude keeps bracketed pastes apart even when they arrive in one write.
-      this.pty?.write(pastes.map((text) => `${BRACKETED_PASTE_START}${text}${COMPLETION_DISMISS}${BRACKETED_PASTE_END}`).join(""));
+      const writes = typed.flatMap(inputBoxPaste);
+      for (let index = 0; index < writes.length; index += 1) {
+        if (index > 0) await delay(PASTE_WRITE_GAP_MS);
+        this.pty?.write(writes[index]!);
+      }
+      if (writes.length > 1) {
+        const deadline = Date.now() + PASTE_SETTLE_LIMIT_MS;
+        while (!this.screen.quietFor(this.pasteSettleMs) && Date.now() < deadline) await delay(STARTUP_POLL_INTERVAL_MS);
+      }
     };
     if ((await this.takeTheKeyboardBack(activityBefore)) === "delivered") return;
     await paste();
@@ -1450,10 +1465,6 @@ function selectionArgs(model: string, mode: string, effort: string): string[] {
   return args;
 }
 
-function promptEcho(text: string): string {
-  return text.trim().split("\n", 1)[0]!.trim().slice(0, PROMPT_ECHO_CHARS);
-}
-
 /**
  * Whether Claude's input box is on screen at all, empty or not.
  * An empty box only means the prompt is not in it where there is a box to read: a session whose terminal
@@ -1485,8 +1496,19 @@ function inputBoxTail(screen: string): string {
   return (index < 0 ? lines : lines.slice(index)).join("\n");
 }
 
+/**
+ * Whether the input box is showing the prompt `echo` is of, with its spaces squashed. The box shows a
+ * prompt from its first line, and one taller than the box from whichever line Claude has scrolled it
+ * to, so what is read is the first visible line of it, which is a stretch of the prompt either way.
+ */
 function inputBoxHolds(screen: string, echo: string): boolean {
-  return inputBoxContent(screen)?.startsWith(echo) ?? false;
+  const content = squashSpaces(inputBoxContent(screen) ?? "");
+  return content !== "" && echo.includes(content);
+}
+
+/** Claude wraps a long line where it likes and draws a tab as spaces, so text is compared with every run of whitespace as one space. */
+function squashSpaces(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 // Registering a status line makes Claude drop most footer hints, `? for shortcuts` among them, so that alternative cannot match in an adapter-launched session.
