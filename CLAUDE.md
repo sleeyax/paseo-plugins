@@ -1,46 +1,59 @@
 # Working in this workspace
 
-A pnpm workspace of paseo plugins, one per directory under `plugins/`.
-Each package is a plugin directory in its own right: paseo is installed against `plugins/<name>`, and `paseo-plugin.json` and the runtime entries sit at that package's root because the loader stats exactly those names.
-Since Paseo 0.8 those entries are `index.client.tsx` and `index.server.ts`, either or both, and every other module lives under `client/`, `server/`, or `shared/`, which is what decides the bundle it joins.
+A pnpm workspace of Paseo plugins under `plugins/`, and the apps they run under `apps/`.
+Paseo installs a plugin against its package directory, so `paseo-plugin.json`, `index.client.tsx` and `index.server.ts` sit at the package root, where the loader looks for exactly those names.
+Every other module lives under `client/`, `server/` or `shared/`, and that directory decides which bundle it joins.
 
 Dependencies belong to the package that uses them, not the root, because the daemon's esbuild resolves from the plugin directory.
-`pnpm typecheck` and `pnpm test` at the root fan out to every package; the package-level scripts are the ones to run while working on a single plugin.
 
-Paseo documents the plugin contract at `public-docs/plugins/reference.md` in `getpaseo/paseo`: which modules each runtime may import, the settings store, the theme tokens, the host UI components, and the CLI.
-`providers.md` beside it covers ACP providers, `publishing.md` npm distribution, and `migration.md` the runtime-entry migration.
+Paseo documents the plugin contract at `public-docs/plugins/reference.md` in `getpaseo/paseo`, with `providers.md`, `publishing.md` and `migration.md` beside it.
 Read it before inferring a rule from a failed build.
-Each package carries its own CLAUDE.md, which records only what that reference does not.
+
+A package's CLAUDE.md holds only what an agent cannot find out from the code, `git log` or that reference: the traps that break something when you don't know them.
+Decisions with a real trade-off go in an ADR instead (see **Domain docs** below).
 
 ## Plugin READMEs
 
-Every plugin's README follows the same template, so a new plugin starts from this and drops only the sections marked optional:
+A README is for someone installing and using the plugin.
+Internals, rationale and history stay out of it.
+A change updates the section it belongs to rather than appending a paragraph, and leaves out what the UI already tells the user.
+Write short, plain sentences, one per line.
+
+Every plugin's README follows this template; sections marked optional are dropped when there is nothing to put in them:
 
 ```md
 # plugin name
 
-<short description>
+<one or two sentences on what it does for the user>
 
-## Screenshots
+## Screenshots (optional)
 
 ## Installation
 
-<paseo plugin add sleeyax/<name> for a plugin in the Paseo registry, else paseo plugin add github:sleeyax/paseo-plugins:plugins/<name>, plus the update note; a plugin that needs a built artefact from this repo documents the absolute-path form instead>
+<the Paseo version it needs and what the host has to provide>
 
-<optional extra instructions>
+<paseo plugin add sleeyax/<name> for a plugin in the Paseo registry, else paseo plugin add github:sleeyax/paseo-plugins:plugins/<name>, plus the update note>
 
-## Settings
+## Usage
+
+<one ### per thing a user does with it, written as how to do it>
+
+## Settings (optional)
+
+<a table of setting, default, and what it does>
 
 ## Troubleshooting (optional)
 
+<only the problems whose fix the message itself does not give>
+
 ## Development
 
-<instructions for developers>
+<package-level commands, and what a developer needs beyond them>
 
 ## License and attributions (optional)
 ```
 
-Where a plugin's settings file lives is documented once in the root README, not per plugin.
+Where a plugin's settings live is documented once in the root README, not per plugin.
 
 ## Agent skills
 
