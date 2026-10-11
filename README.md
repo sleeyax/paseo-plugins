@@ -13,7 +13,23 @@ Extensions for [Paseo](https://github.com/getpaseo/paseo), organized in a pnpm w
 | [Claude TTY](plugins/claude-tty) | Offer the Claude TTY ACP adapter as a Paseo provider, and manage it on the daemon host. |
 | [Guided Review](plugins/guided-review) | Show a trunk-first guide to a pull request or merge request, and build your draft review alongside it. |
 
-Each app and plugin has its own README with installation, settings, and development details.
+Each app and plugin has its own README.
+
+## Installation
+
+Enable plugins in Paseo, then install a plugin by its directory in this repository:
+
+```sh
+paseo plugin add github:sleeyax/paseo-plugins:plugins/discord-rich-presence
+```
+
+Plugins in the [Paseo plugin registry](https://paseo.sh/plugins) also install by their registry ID, which their README gives.
+Update with `paseo plugin update <id>`, or preview the update with `paseo plugin update <id> --check`.
+
+`claude-tty` and `guided-review` run a `pnpm` build when installed or updated, so they need `pnpm` on the daemon's `PATH`.
+
+Plugins keep their settings in `$PASEO_HOME/plugin-settings/<plugin-id>/`.
+Paseo manages that directory and removes it with the plugin.
 
 ## Local development
 
@@ -25,55 +41,37 @@ pnpm typecheck
 pnpm test
 ```
 
-Enable Paseo plugins, then install each plugin by its directory in this repository:
-
-```sh
-paseo plugin add github:sleeyax/paseo-plugins:plugins/discord-rich-presence
-paseo plugin ls
-```
-
-Paseo clones the repository itself and tracks the default branch, so `paseo plugin update <id>` keeps an installation current and `paseo plugin update <id> --check` previews what it would install. Plugins published to the [Paseo plugin registry](https://paseo.sh/plugins) also install by their registry ID, which their READMEs give.
-
-Two plugins ask something of the host: `claude-tty` runs an adapter that has to be built, and `guided-review` bundles Paseo's syntax highlighter, an npm dependency. Installing and updating either runs the `build` commands in its manifest, so both need `pnpm` on the daemon's `PATH`; `claude-tty` can instead take a path to an adapter built elsewhere, in its own **Adapter executable** setting.
-
-To work on a plugin, install it from the working copy instead. A directory installation runs no `build`, so build what it needs first:
+To work on a plugin, install it from your working copy.
+A directory installation runs no build, so build what the plugin needs first:
 
 ```sh
 paseo plugin add "/absolute/path/to/paseo-plugins/plugins/discord-rich-presence"
 ```
 
-After making changes, run `paseo plugin reload <id>`. Paseo does not hot-reload plugins, and reloading is the compile check for the client and server bundles built from `index.client.tsx` and `index.server.ts`.
+Paseo does not hot-reload plugins.
+Run `paseo plugin reload <id>` after each change; the reload is also what compiles the plugin's bundles.
 
 ## Releasing a plugin
 
-A plugin's `version` in its own `package.json` is its update identity: [Paseo Cafe](https://github.com/paseo-cafe/paseo-cafe) compares it against the installed copy's, and only a higher version offers an update.
-Until it moves, installations stay on the old code however many commits land here.
+[release-please](https://github.com/googleapis/release-please) releases from the conventional commits on `main`: a `feat` bumps the minor version, a `fix` the patch version, and `chore` or `docs` release nothing.
+It keeps one release pull request open, and merging it is the release: versions, `CHANGELOG.md` files, tags and GitHub releases.
 
-[release-please](https://github.com/googleapis/release-please) does the bumping, from the conventional commits on `main`: a `feat` takes a minor, a `fix` takes a patch, and a `chore` or `docs` releases nothing.
-It keeps a single release pull request open and adds to it as more commits land, so a release can cover one pull request or a batch of them.
-Merging it is the release: the new versions and each package's `CHANGELOG.md` are written, tagged, and published as GitHub releases.
-Nothing reaches npm, since every package here is private.
-
-Which package a commit bumps comes from the files it touches rather than its scope, so keep a change inside the plugin it belongs to.
-`claude-tty` and the `claude-tty-acp` adapter it runs are versioned together, because a change to the adapter changes what the plugin ships.
+A plugin's `version` in its `package.json` is what [Paseo Cafe](https://github.com/paseo-cafe/paseo-cafe) compares to offer an update, so installations only move when the version does.
+release-please picks the package to bump from the files a commit touches, not its scope, so keep each commit inside one package.
+`claude-tty` and `claude-tty-acp` share one version.
 
 ## Skills
 
-`skills/` holds agent skills for working on this repository, in the [Agent Skills](https://agentskills.io) format, so any harness that reads them can use them.
-`.claude/skills/` and `.agents/skills/` are symlinks into it — the first is where Claude Code looks, the second is where Codex, Cursor, OpenCode and GitHub Copilot do — and editing the file under `skills/` updates every harness at once.
+`skills/` holds agent skills for working on this repository, in the [Agent Skills](https://agentskills.io) format.
+`.claude/skills/` (Claude Code) and `.agents/skills/` (Codex, Cursor, OpenCode, GitHub Copilot) are committed symlinks into it, so edit the files under `skills/`.
 
 | Skill | Description |
 | --- | --- |
 | `update-plugins` | Rebuild the apps and reload the plugins this host has installed from this checkout. |
 | `adopt-paseo-release` | Review the Paseo releases since the last review and file an issue with what the plugins should adopt. Runs only when invoked by name: `/adopt-paseo-release` in Claude Code, `$adopt-paseo-release` in Codex. |
 
-Working in this repository needs no installation; the symlinks are committed. To use a skill from another checkout, install it by name:
+To use a skill from another checkout, install it by name:
 
 ```sh
 npx skills add sleeyax/paseo-plugins --skill update-plugins
 ```
-
-## Plugin settings
-
-Plugins keep their settings in `$PASEO_HOME/plugin-settings/<plugin-id>/`, managed by Paseo and removed with the plugin.
-Versions from before Paseo 0.9 used `${XDG_CACHE_HOME:-~/.cache}/paseo-plugins/<plugin-id>/` instead; each plugin's README says whether it carries those settings over.
