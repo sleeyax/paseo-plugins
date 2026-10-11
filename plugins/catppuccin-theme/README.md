@@ -2,7 +2,7 @@
 
 [![Paseo Cafe](https://img.shields.io/badge/Paseo_Cafe-catppuccin--theme-blue)](https://paseo.cafe/plugins/catppuccin-theme)
 
-Adds all [Catppuccin](https://catppuccin.com/palette/) flavours — Latte, Frappé, Macchiato, and Mocha — as Paseo app themes.
+Adds the four [Catppuccin](https://catppuccin.com/palette/) flavours to Paseo as app themes: Latte, Frappé, Macchiato and Mocha.
 
 ## Screenshots
 
@@ -16,33 +16,35 @@ Adds all [Catppuccin](https://catppuccin.com/palette/) flavours — Latte, Frapp
 
 ## Installation
 
+Requires Paseo 0.9 or newer.
+Install from the [Paseo plugin registry](https://paseo.sh/plugins), which needs Paseo 0.11 or newer:
+
 ```sh
 paseo plugin add sleeyax/catppuccin-theme
 ```
 
-That installs the release published to the [Paseo plugin registry](https://paseo.sh/plugins), which needs Paseo 0.11 or later. To install straight from this repository's default branch instead:
+Or install from this repository's default branch:
 
 ```sh
 paseo plugin add github:sleeyax/paseo-plugins:plugins/catppuccin-theme
 ```
 
-Then pick your favorite theme in **Settings -> Appearance**.
+Update with `paseo plugin update catppuccin-theme`.
 
-Either way, `paseo plugin update catppuccin-theme` picks up new releases without a clone, and `paseo plugin update catppuccin-theme --check` says what is installed against what is available.
+## Usage
 
-## Settings
-
-The plugin has no settings. Change the theme in Settings -> Appearance.
+Pick a flavour under **Settings → Appearance**.
+The themes recolour the app only; syntax highlighting keeps its own theme.
 
 ## Development
 
 ```sh
+pnpm --filter @paseo-plugins/catppuccin-theme typecheck
+pnpm --filter @paseo-plugins/catppuccin-theme test
 paseo plugin reload catppuccin-theme
 paseo plugin logs catppuccin-theme
 ```
 
-Each flavour maps the same seven palette colours onto Paseo's theme tokens.
-
 ## License and attributions
 
-The palettes comes from [Catppuccin](https://github.com/catppuccin/catppuccin), licensed under the MIT License.
+The palettes come from [Catppuccin](https://github.com/catppuccin/catppuccin), licensed under the MIT License.
