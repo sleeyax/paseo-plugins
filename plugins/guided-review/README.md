@@ -5,17 +5,19 @@ Each review gets its own Paseo workspace, checked out at the change, with a **Gu
 
 ## Installation
 
-Guided Review needs Paseo 0.11 or newer, and on the daemon's host:
+Requires:
 
-- `pnpm` on the daemon's `PATH`, since installing and updating build the plugin.
-- [`gh`](https://cli.github.com/) logged in with `gh auth login`, to review GitHub pull requests.
-- [`glab`](https://gitlab.com/gitlab-org/cli) logged in with `glab auth login`, to review GitLab merge requests, on gitlab.com or a self-hosted GitLab.
+- Paseo 0.11 or newer
+- `pnpm` on the daemon's `PATH`
+- [`gh`](https://cli.github.com/), logged in with `gh auth login`, to review GitHub pull requests
+- [`glab`](https://gitlab.com/gitlab-org/cli), logged in with `glab auth login`, to review GitLab merge requests on gitlab.com or a self-hosted GitLab
 
 ```sh
 paseo plugin add github:sleeyax/paseo-plugins:plugins/guided-review
 ```
 
 Update with `paseo plugin update guided-review`.
+To install from source, see the [root README](../../README.md#from-source).
 
 ## Usage
 

@@ -11,16 +11,16 @@ This adapter avoids the SDK by driving the same CLI you would run in a terminal.
 You keep its binary, login, billing, sessions, `CLAUDE.md` files, MCP servers, plugins, skills and permission rules.
 The cost is that Paseo's features are rebuilt from Claude's transcripts, hooks and screen, which is where the [limitations](#limitations) come from.
 
-## Requirements
+## Installation
+
+Requires:
 
 - Linux or macOS
 - Node.js 22 or newer
 - Paseo 0.11 or newer
 - Claude Code, logged in as the user the Paseo daemon runs as
 
-## Installation
-
-Install the [Claude TTY plugin](../../plugins/claude-tty/README.md#installation); it builds this adapter and registers it as a provider.
+Install it through the [Claude TTY plugin](../../plugins/claude-tty/README.md#installation), which builds this adapter and registers it as a provider.
 
 Then run `claude` once, interactively, as the user the daemon runs as, and log in.
 If the daemon runs under systemd, open a login shell for that account so the credentials land in its home directory.

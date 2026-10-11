@@ -14,15 +14,21 @@ Show your current Paseo activity on your Discord profile.
 
 ## Installation
 
-You need Paseo 0.11 or newer.
-The Discord desktop app must run on the same machine as the Paseo daemon.
-Native, Snap, and Flatpak installs of Discord all work.
+Requires:
+
+- Paseo 0.11 or newer
+- The Discord desktop app, running on the same machine as the Paseo daemon
 
 ```sh
-paseo plugin add sleeyax/discord-rich-presence
+paseo plugin add github:sleeyax/paseo-plugins:plugins/discord-rich-presence
 ```
 
-Run `paseo plugin update discord-rich-presence` to get new releases.
+Also available as `sleeyax/discord-rich-presence` on [Paseo Community Plugins](https://paseo.sh/plugins) and on [Paseo Cafe](https://paseo.cafe/plugins/discord-rich-presence).
+
+Update with `paseo plugin update discord-rich-presence`.
+To install from source, see the [root README](../../README.md#from-source).
+
+Native, Snap and Flatpak installs of Discord all work.
 
 ## Usage
 

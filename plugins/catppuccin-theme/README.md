@@ -16,20 +16,18 @@ Adds the four [Catppuccin](https://catppuccin.com/palette/) flavours to Paseo as
 
 ## Installation
 
-Requires Paseo 0.9 or newer.
-Install from the [Paseo plugin registry](https://paseo.sh/plugins), which needs Paseo 0.11 or newer:
+Requires:
 
-```sh
-paseo plugin add sleeyax/catppuccin-theme
-```
-
-Or install from this repository's default branch:
+- Paseo 0.9 or newer
 
 ```sh
 paseo plugin add github:sleeyax/paseo-plugins:plugins/catppuccin-theme
 ```
 
+Also available as `sleeyax/catppuccin-theme` on [Paseo Community Plugins](https://paseo.sh/plugins) and on [Paseo Cafe](https://paseo.cafe/plugins/catppuccin-theme).
+
 Update with `paseo plugin update catppuccin-theme`.
+To install from source, see the [root README](../../README.md#from-source).
 
 ## Usage
 

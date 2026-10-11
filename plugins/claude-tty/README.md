@@ -5,27 +5,20 @@ A sidebar panel diagnoses the adapter and manages its saved sessions on the sele
 
 ## Installation
 
-You need:
+Requires:
 
-- Paseo 0.11 or newer.
-- `pnpm` on the daemon's `PATH`, because installing and updating build the adapter.
-- Claude Code installed and logged in as the user the daemon runs as (see the [adapter's requirements](../../apps/claude-tty-acp/README.md)).
+- Paseo 0.11 or newer
+- `pnpm` on the daemon's `PATH`
+- Claude Code, installed and logged in as the user the daemon runs as
 
 ```sh
 paseo plugin add github:sleeyax/paseo-plugins:plugins/claude-tty
 ```
 
 Update with `paseo plugin update claude-tty`.
-A failed build is reported, and the installed version keeps running.
+To install from source, see the [root README](../../README.md#from-source).
+
 Install the plugin on each host that should offer Claude.
-
-To install from a clone, build the adapter first, since a directory install runs no build:
-
-```sh
-pnpm install --frozen-lockfile
-pnpm --filter @paseo-plugins/claude-tty-acp build
-paseo plugin add "/absolute/path/to/paseo-plugins/plugins/claude-tty"
-```
 
 If the daemon can't build the adapter, build it from a clone yourself and put the path to `apps/claude-tty-acp/bin/claude-tty-acp` in the **Adapter executable** setting.
 The panel's **Adapter** section shows which adapter runs and whether it can.

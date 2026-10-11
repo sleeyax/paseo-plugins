@@ -21,7 +21,7 @@ Write short, plain sentences, one per line.
 
 Every plugin's README follows this template; sections marked optional are dropped when there is nothing to put in them:
 
-```md
+````md
 # plugin name
 
 <one or two sentences on what it does for the user>
@@ -30,9 +30,22 @@ Every plugin's README follows this template; sections marked optional are droppe
 
 ## Installation
 
-<the Paseo version it needs and what the host has to provide>
+Requires:
 
-<paseo plugin add sleeyax/<name> for a plugin in the Paseo registry, else paseo plugin add github:sleeyax/paseo-plugins:plugins/<name>, plus the update note>
+- Paseo <version> or newer
+- <anything else the daemon's host needs>
+
+```sh
+paseo plugin add github:sleeyax/paseo-plugins:plugins/<name>
+```
+
+Also available as `sleeyax/<name>` on [Paseo Community Plugins](https://paseo.sh/plugins) and on [Paseo Cafe](https://paseo.cafe/plugins/<name>).
+<only when the plugin is listed there>
+
+Update with `paseo plugin update <name>`.
+To install from source, see the [root README](../../README.md#from-source).
+
+<plugin-specific notes, if any>
 
 ## Usage
 
@@ -51,7 +64,7 @@ Every plugin's README follows this template; sections marked optional are droppe
 <package-level commands, and what a developer needs beyond them>
 
 ## License and attributions (optional)
-```
+````
 
 ## Agent skills
 
