@@ -92,12 +92,7 @@ For errors inside a running session, see the [adapter's troubleshooting](../../a
 
 ## Development
 
-```sh
-pnpm --filter @paseo-plugins/claude-tty typecheck
-pnpm --filter @paseo-plugins/claude-tty test
-paseo plugin reload claude-tty
-paseo plugin logs claude-tty
-```
+For development instructions, see the [root README](../../README.md#development).
 
 After changing the adapter, rebuild it with `pnpm --filter @paseo-plugins/claude-tty-acp build`.
 Sessions already running keep the old build.
@@ -120,4 +115,4 @@ The copy shows up as **Claude TTY (dev)**, with its own provider and its own sta
 Agents can't move between the two providers, so start throwaway sessions on the dev one.
 `pnpm --filter @paseo-plugins/claude-tty identity claude-tty` stamps the checkout back.
 
-See [CLAUDE.md](./CLAUDE.md) before changing the code, and [docs/adr](docs/adr) for the design decisions.
+Design decisions are in [docs/adr](docs/adr).

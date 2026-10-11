@@ -36,12 +36,7 @@ The themes recolour the app only; syntax highlighting keeps its own theme.
 
 ## Development
 
-```sh
-pnpm --filter @paseo-plugins/catppuccin-theme typecheck
-pnpm --filter @paseo-plugins/catppuccin-theme test
-paseo plugin reload catppuccin-theme
-paseo plugin logs catppuccin-theme
-```
+For development instructions, see the [root README](../../README.md#development).
 
 ## License and attributions
 

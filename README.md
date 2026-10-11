@@ -69,18 +69,27 @@ Install the plugin you are working on [from source](#from-source), then:
 1. After each change, reload the plugin, and read its logs if something broke:
 
    ```sh
-   paseo plugin reload <id>
-   paseo plugin logs <id>
+   paseo plugin reload <name>
+   paseo plugin logs <name>
    ```
 
-2. Typecheck and test every package from the repository root:
+2. Typecheck and test the package you are working on:
+
+   ```sh
+   pnpm --filter @paseo-plugins/<name> typecheck
+   pnpm --filter @paseo-plugins/<name> test
+   ```
+
+   Or every package at once, from the repository root:
 
    ```sh
    pnpm typecheck
    pnpm test
    ```
 
-Each plugin's README has its package-level commands and anything else specific to it in its own Development section.
+`<name>` is the package's directory name, which is also its plugin ID.
+
+Each plugin's README has anything else specific to it in its own Development section.
 
 ### Skills
 

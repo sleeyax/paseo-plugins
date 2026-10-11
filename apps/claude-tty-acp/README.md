@@ -112,9 +112,9 @@ Delete it only if you no longer need to resume old sessions.
 
 ## Development
 
+For development instructions, see the [root README](../../README.md#development).
+
 ```sh
-pnpm --filter @paseo-plugins/claude-tty-acp typecheck
-pnpm --filter @paseo-plugins/claude-tty-acp test
 pnpm --filter @paseo-plugins/claude-tty-acp build
 pnpm --filter @paseo-plugins/claude-tty-acp diagnose
 ```
@@ -129,4 +129,5 @@ pnpm --filter @paseo-plugins/claude-tty-acp smoke:live -- /absolute/project/path
 ```
 
 To run a changed adapter in Paseo, see the plugin's [Development](../../plugins/claude-tty/README.md#development) section.
-Design decisions are in [docs/adr](docs/adr), and the traps to know before changing the code are in [CLAUDE.md](CLAUDE.md).
+
+Design decisions are in [docs/adr](docs/adr).

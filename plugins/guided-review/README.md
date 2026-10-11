@@ -125,11 +125,6 @@ Run `paseo plugin logs guided-review` for more detail.
 
 ## Development
 
-```sh
-pnpm --filter @paseo-plugins/guided-review typecheck
-pnpm --filter @paseo-plugins/guided-review test
-paseo plugin reload guided-review
-paseo plugin logs guided-review
-```
+For development instructions, see the [root README](../../README.md#development).
 
-Reload after every change: the reload is what compiles the plugin's bundles.
+Design decisions are in [docs/adr](docs/adr).

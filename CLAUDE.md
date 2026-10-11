@@ -61,7 +61,12 @@ To install from source, see the [root README](../../README.md#from-source).
 
 ## Development
 
-<package-level commands, and what a developer needs beyond them>
+For development instructions, see the [root README](../../README.md#development).
+
+<anything else this package needs, if any>
+
+Design decisions are in [docs/adr](docs/adr).
+<only when the package has ADRs>
 
 ## License and attributions (optional)
 ````

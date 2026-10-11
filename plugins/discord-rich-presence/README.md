@@ -108,12 +108,7 @@ Run `paseo plugin logs discord-rich-presence` for more detail.
 
 ## Development
 
-```sh
-pnpm --filter @paseo-plugins/discord-rich-presence typecheck
-pnpm --filter @paseo-plugins/discord-rich-presence test
-paseo plugin reload discord-rich-presence
-paseo plugin logs discord-rich-presence
-```
+For development instructions, see the [root README](../../README.md#development).
 
 To regenerate the artwork in `assets/` after Paseo changes its own, run this against a Paseo checkout:
 
@@ -122,6 +117,8 @@ scripts/render-assets.sh /path/to/paseo
 ```
 
 The script needs ImageMagick (`magick`) and `rsvg-convert`.
+
+Design decisions are in [docs/adr](docs/adr).
 
 ## License and attributions
 
