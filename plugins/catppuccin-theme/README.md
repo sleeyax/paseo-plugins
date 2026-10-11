@@ -25,6 +25,7 @@ paseo plugin add github:sleeyax/paseo-plugins:plugins/catppuccin-theme
 ```
 
 Also available as `sleeyax/catppuccin-theme` on [Paseo Community Plugins](https://paseo.sh/plugins) and on [Paseo Cafe](https://paseo.cafe/plugins/catppuccin-theme).
+Installing by registry ID needs Paseo 0.11 or newer.
 
 Update with `paseo plugin update catppuccin-theme`.
 To install from source, see the [root README](../../README.md#from-source).
