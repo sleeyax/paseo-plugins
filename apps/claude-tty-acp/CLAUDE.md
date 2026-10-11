@@ -8,11 +8,12 @@ The server speaks ACP as newline-delimited JSON on stdout, so any other byte wri
 Log with `writeLog` from `src/log.ts`, which writes to stderr and to the log file under the state directory.
 The daemon drops stderr, so the file is the only record of a session.
 
-## One write to the PTY is one read for Claude
+## How a write is cut up decides what Claude reads
 
-Claude reads a multi-character write as pasted text, not as keys.
+Claude reads several characters that arrive together as pasted text, not as keys.
 Send each control key as its own write with a gap after it, as the Ctrl-U clear does, or Claude inserts them as literal characters.
-Large pastes go in batches for the same reason, see `PASTE_WRITE_BYTES`.
+A large write goes the other way: the terminal can hand it over in several reads, and a paste's opening sequence cut between two of them reaches Claude as text.
+So pastes go in batches that each end on a whole piece, see `PASTE_WRITE_BYTES`.
 
 ## The client has no session until the response
 
