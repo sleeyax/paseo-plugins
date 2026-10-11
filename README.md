@@ -23,10 +23,16 @@ Install a plugin by its directory in this repository:
 paseo plugin add github:sleeyax/paseo-plugins:plugins/discord-rich-presence
 ```
 
-A plugin in the [Paseo plugin registry](https://paseo.sh/plugins) also installs by the registry ID its README gives.
 Update with `paseo plugin update <id>`.
 
 Check each plugin's README for the Paseo version and anything else it needs.
+
+### From a registry
+
+Some plugins are also listed in a plugin registry:
+
+- The official [Paseo plugin registry](https://paseo.sh/plugins): install by the registry ID the plugin's README gives, such as `paseo plugin add sleeyax/discord-rich-presence`.
+- [Paseo Cafe](https://paseo.cafe), a community directory of Paseo plugins: copy the install command from the plugin's page.
 
 ### From source
 
@@ -93,6 +99,6 @@ Releases are automatic: [release-please](https://github.com/googleapis/release-p
 A `feat` bumps the minor version, a `fix` the patch version, and `chore` or `docs` release nothing.
 It keeps one release pull request open, and merging it is the release: versions, `CHANGELOG.md` files, tags and GitHub releases.
 
-A plugin's `version` in its `package.json` is what [Paseo Cafe](https://github.com/paseo-cafe/paseo-cafe) compares to offer an update, so installations only move when the version does.
+A plugin's `version` in its `package.json` is what [Paseo Cafe](#from-a-registry) compares to offer an update, so installations only move when the version does.
 release-please picks the package to bump from the files a commit touches, not its scope, so keep each commit inside one package.
 `claude-tty` and `claude-tty-acp` share one version.
