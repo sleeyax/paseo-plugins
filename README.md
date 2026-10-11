@@ -49,8 +49,13 @@ To run every change as soon as it lands on `main`, install from a clone instead:
    paseo plugin add "/absolute/path/to/paseo-plugins/plugins/discord-rich-presence"
    ```
 
-To update, `git pull`, repeat the build, and run `paseo plugin reload <id>`.
-The `update-plugins` [skill](#skills) does all of that for every plugin installed from the clone.
+To update:
+
+- Run `git pull`
+- Repeat the build steps
+- Run `paseo plugin reload <id>`.
+
+Alternatively, run the `update-plugins` [skill](#skills). It does all the update steps above for every plugin installed from the clone.
 
 ## Development
 
