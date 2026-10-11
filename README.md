@@ -97,4 +97,6 @@ Releases are automatic, so there is no version to bump or changelog to write by 
 [release-please](https://github.com/googleapis/release-please) reads the conventional commits on `main` and keeps a release pull request open; merging it releases.
 
 A `feat` releases a minor version, a `fix` a patch version, and `chore` or `docs` nothing.
+A breaking change, marked with `!` after the type (`feat!: ...`) or a `BREAKING CHANGE:` footer, releases a major version.
+To release a specific version instead, add a `Release-As: 1.0.0` footer to the commit.
 The package a commit releases is the one whose files it touches, so try to keep each commit inside one package.
