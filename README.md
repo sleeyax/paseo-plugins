@@ -17,8 +17,8 @@ My plugins for [Paseo](https://github.com/getpaseo/paseo).
 
 ## Installation
 
-Check each plugin's README for the Paseo version and anything else it needs.
-A plugin installed from GitHub or a registry updates with `paseo plugin update <id>`.
+Check each plugin's README for the Paseo version and anything else it may depend on.
+A plugin installed from GitHub or a registry can be updated with `paseo plugin update <id>`.
 
 ### From GitHub (recommended)
 
@@ -30,12 +30,12 @@ paseo plugin add github:sleeyax/paseo-plugins:plugins/discord-rich-presence
 
 Some plugins are also listed in a plugin registry:
 
-- The official [Paseo plugin registry](https://paseo.sh/plugins): install by the registry ID the plugin's README gives, such as `paseo plugin add sleeyax/discord-rich-presence`.
-- [Paseo Cafe](https://paseo.cafe), a community directory of Paseo plugins: copy the install command from the plugin's page.
+- [Paseo Community Plugins](https://paseo.sh/plugins): install by the registry ID the plugin's README gives, such as `paseo plugin add sleeyax/discord-rich-presence`.
+- [Paseo Cafe](https://paseo.cafe): copy the install command from the plugin's page.
 
 ### From source
 
-Installs above only update when a plugin releases a new version.
+The installation methods above only update when a plugin releases a new version.
 To run every change as soon as it lands on `main`, install from a clone instead:
 
 1. Clone this repository and install its dependencies:
