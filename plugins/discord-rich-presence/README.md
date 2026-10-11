@@ -99,7 +99,7 @@ Discord can take a few minutes to process new artwork.
 
 | Message | What to do |
 | --- | --- |
-| **Discord is not running — retrying…** while Discord is open | Run Discord as the same user as the Paseo daemon. The plugin looks for Discord's socket in `$XDG_RUNTIME_DIR`, then `$TMPDIR`, then `/tmp`. |
+| **Discord is not running — retrying…** while Discord is open | The plugin looks for Discord's socket only in the first of `$XDG_RUNTIME_DIR`, `$TMPDIR`, `$TMP`, `$TEMP` that is set in the daemon's environment, else in `/tmp`. Run the daemon as the same user as Discord, with the same `XDG_RUNTIME_DIR`. |
 | **Discord refused this application ID** | Check the ID in the Developer Portal. The plugin tries again only after you save a different ID, or turn the presence off and on. |
 | **Cannot read Paseo** | The plugin reads the daemon address from `PASEO_HOST`, `PASEO_LISTEN`, `$PASEO_HOME/paseo.pid`, then `daemon.listen` in `$PASEO_HOME/config.json`, and falls back to `127.0.0.1:6767`. If the daemon needs a password, set `PASEO_PASSWORD` in the daemon's environment. |
 | The badge or icon has no image | Check that each asset key matches its file name, then give Discord a few minutes. |
