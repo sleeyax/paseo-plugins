@@ -22,7 +22,15 @@ A running adapter keeps the code it started with, so a rebuilt `apps/claude-tty-
 
 ## Contracts with the adapter
 
-The plugin and `apps/claude-tty-acp` share these names with no type linking them, so change both sides in one commit: the `_claude_tty/tool_call` vendor method, the `_meta["claudeTty/backgroundCommand"]` mark, the `--settings-file` and `--answers-dir` flags, the `submit` and `reply-in-chat` option IDs, the tool name carried in a permission's `toolCall.title`, and the state directory name.
+The plugin and `apps/claude-tty-acp` share names and shapes with no type linking them, so change both sides in one commit.
+The plugin side of each is marked "Mirrors the adapter's own …"; they include:
+
+- the `_claude_tty/tool_call`, `_claude_tty/notice`, `_claude_tty/card_withdrawn` and `_claude_tty/model` vendor methods
+- the `_meta["claudeTty/backgroundCommand"]` mark and the `claudeDialog` input marker
+- the `--settings-file` and `--answers-dir` flags, and the snapshot shape `--settings-file` points at (`server/settings-snapshot.ts`)
+- the output of `--diagnose --json`, which `server/doctor.ts` parses
+- the `submit` and `reply-in-chat` option IDs, and the tool name carried in a permission's `toolCall.title`
+- the state directory name, its session and lock files (`shared/sessions.ts`), and Claude's config directory (`server/paths.ts`)
 
 ## Provider registration
 
