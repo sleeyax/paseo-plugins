@@ -55,3 +55,4 @@ The reload is the only compile check of the two bundles the daemon builds, so do
 
 - Check-offs (`inbox-check-offs.json`) are kept apart from the list preferences (`inbox-preferences.json`) because the client saves preferences whole, which would overwrite a check-off sent around it.
 - Build fixtures for calls that write (drafts, submits, discards) by hand from the API docs; recording them would publish to a real PR or MR.
+- Record read fixtures under `server/forge/fixtures/` only from public PRs and MRs with read-only calls, then trim every user to its public fields, take out every email, and drop anything from a private repository, since they are committed.
