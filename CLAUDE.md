@@ -53,8 +53,6 @@ Every plugin's README follows this template; sections marked optional are droppe
 ## License and attributions (optional)
 ```
 
-Where a plugin's settings live is documented once in the root README, not per plugin.
-
 ## Agent skills
 
 ### Issue tracker
