@@ -10,7 +10,7 @@ Requires:
 - Paseo 0.11 or newer
 - `pnpm` on the daemon's `PATH`
 - Either or both:
-  - [`gh`](https://cli.github.com/), logged in with `gh auth login`, to review GitHub pull requests
+  - [`gh`](https://cli.github.com/), logged in with `gh auth login`, to review pull requests on github.com; GitHub Enterprise is not supported
   - [`glab`](https://gitlab.com/gitlab-org/cli), logged in with `glab auth login`, to review GitLab merge requests on gitlab.com or a self-hosted GitLab
 
 ```sh
@@ -29,6 +29,8 @@ To install from source, see the [root README](../../README.md#from-source).
 3. Select **Start review**, or press Ctrl+Enter (Cmd+Enter on a Mac).
 
 The plugin prepares a workspace for each review and has a guide agent write the guide there.
+The workspace belongs to the Paseo project whose `origin` is the repository under review.
+When you have none, the plugin clones the repository once into `$PASEO_HOME/plugin-data/guided-review/clones/`, which then shows up as a Paseo project of its own.
 Nothing opens on its own, so you can start several and read them once they are ready.
 Select **Open** when a review is ready.
 
@@ -88,11 +90,15 @@ Select **Ask agent** instead of saving to ask the guide agent about the lines ra
 Nobody sees it until you finish the review.
 **Your drafts** lists them, including drafts you started on the web.
 
+On GitHub, comments on a concept or on highlighted text are the exception: they stay on your machine until you finish the review, and are then posted as separate comments on the pull request, before the review itself.
+On GitLab they are draft notes on the merge request as a whole, like any other draft.
+
 ### Finish the review
 
 Select **Finish review**, write the review body, and choose **Approve**, **Request changes**, or **Comment**.
 If commits were pushed since the guide was written, a warning says so before you submit.
 After a submit, the panel lists each step and whether it went through.
+On GitHub your review stays on the commit the guide explained, so a repository that dismisses stale approvals may not count an approval when commits were pushed since.
 
 **Discard review** deletes your drafts and the body.
 
@@ -119,6 +125,7 @@ The guide agent settings apply to guides written after you select **Use these fo
 | **The guide agent's answer did not match what was asked for** | Select **Try again**, or pick a stronger model under **Provider and model**. |
 | **GitLab did not keep the comment where it was put** | Comments on a whole file need GitLab 17.2 or newer. Comment on a line instead. |
 | **gh failed: … could not be resolved** when saving a draft | The PR moved on since the guide was written. Comment on the whole file instead. |
+| **GitLab did not record your request for changes: Reviewer not found** | Your drafts and body were published, but an older GitLab records a request for changes only from someone already listed as a reviewer. Add yourself as a reviewer on the merge request's page and request changes there. |
 | No **PR updated since this guide** warning after a push | The forge could not be reached. Check `paseo plugin logs guided-review`. |
 
 Run `paseo plugin logs guided-review` for more detail.
