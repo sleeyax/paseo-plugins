@@ -41,3 +41,20 @@ Every plugin's README follows the same template, so a new plugin starts from thi
 ```
 
 Where a plugin's settings file lives is documented once in the root README, not per plugin.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on sleeyax/paseo-plugins, managed with the `gh` CLI.
+See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default triage labels, each label string equal to its role name.
+See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Multi-context: a root `GLOSSARY-MAP.md` points at one `GLOSSARY.md` per plugin or app, and `docs/adr/` at the root holds workspace-wide decisions.
+See `docs/agents/domain.md`.
