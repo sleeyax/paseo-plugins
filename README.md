@@ -95,10 +95,8 @@ Each plugin's README has its package-level commands and anything else specific t
 
 ## Releasing a plugin
 
-Releases are automatic: [release-please](https://github.com/googleapis/release-please) cuts them from the conventional commits on `main`, so there is no version to bump or changelog to write by hand.
-A `feat` bumps the minor version, a `fix` the patch version, and `chore` or `docs` release nothing.
-It keeps one release pull request open, and merging it is the release: versions, `CHANGELOG.md` files, tags and GitHub releases.
+Releases are automatic, so there is no version to bump or changelog to write by hand.
+[release-please](https://github.com/googleapis/release-please) reads the conventional commits on `main` and keeps a release pull request open; merging it releases.
 
-A plugin's `version` in its `package.json` is what [Paseo Cafe](#from-a-registry) compares to offer an update, so installations only move when the version does.
-release-please picks the package to bump from the files a commit touches, not its scope, so keep each commit inside one package.
-`claude-tty` and `claude-tty-acp` share one version.
+- `feat` releases a minor version, `fix` a patch version, and `chore` or `docs` nothing.
+- The package a commit releases is the one whose files it touches, so keep each commit inside one package.
