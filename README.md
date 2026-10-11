@@ -17,15 +17,14 @@ My plugins for [Paseo](https://github.com/getpaseo/paseo).
 
 ## Installation
 
-Install a plugin by its directory in this repository:
+Check each plugin's README for the Paseo version and anything else it needs.
+A plugin installed from GitHub or a registry updates with `paseo plugin update <id>`.
+
+### From GitHub (recommended)
 
 ```sh
 paseo plugin add github:sleeyax/paseo-plugins:plugins/discord-rich-presence
 ```
-
-Update with `paseo plugin update <id>`.
-
-Check each plugin's README for the Paseo version and anything else it needs.
 
 ### From a registry
 
@@ -85,18 +84,17 @@ Each plugin's README has its package-level commands and anything else specific t
 
 ### Skills
 
-`skills/` holds agent skills for working on this repository, in the [Agent Skills](https://agentskills.io) format.
-`.claude/skills/` (Claude Code) and `.agents/skills/` (Codex, Cursor, OpenCode, GitHub Copilot) are committed symlinks into it, so edit the files under `skills/`.
+This repository comes with its own set of local skills to aid in development:
 
 | Skill                 | Description                                                                                                                                                                                                   |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `update-plugins`      | Rebuild the apps and reload the plugins this host has installed from this checkout.                                                                                                                           |
 | `adopt-paseo-release` | Review the Paseo releases since the last review and file an issue with what the plugins should adopt. Runs only when invoked by name: `/adopt-paseo-release` in Claude Code, `$adopt-paseo-release` in Codex. |
 
-## Releasing a plugin
+### Releasing a plugin
 
 Releases are automatic, so there is no version to bump or changelog to write by hand.
 [release-please](https://github.com/googleapis/release-please) reads the conventional commits on `main` and keeps a release pull request open; merging it releases.
 
 A `feat` releases a minor version, a `fix` a patch version, and `chore` or `docs` nothing.
-The package a commit releases is the one whose files it touches, so keep each commit inside one package.
+The package a commit releases is the one whose files it touches, so try to keep each commit inside one package.
