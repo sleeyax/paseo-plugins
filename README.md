@@ -28,11 +28,16 @@ Update with `paseo plugin update <id>`.
 
 Check each plugin's README for the Paseo version and anything else it needs.
 
-## Development
+### From source
+
+Installs above only update when a plugin releases a new version.
+To run every change as soon as it lands on `main`, install from a clone instead:
 
 1. Clone this repository and install its dependencies:
 
    ```sh
+   git clone https://github.com/sleeyax/paseo-plugins.git
+   cd paseo-plugins
    pnpm install
    ```
 
@@ -44,20 +49,27 @@ Check each plugin's README for the Paseo version and anything else it needs.
    pnpm --filter @paseo-plugins/claude-tty-acp build
    ```
 
-3. Install the plugin from your working copy:
+3. Install the plugin from the clone:
 
    ```sh
    paseo plugin add "/absolute/path/to/paseo-plugins/plugins/discord-rich-presence"
    ```
 
-4. After each change, reload the plugin, and read its logs if something broke:
+To update, `git pull`, repeat the build, and run `paseo plugin reload <id>`.
+The `update-plugins` [skill](#skills) does all of that for every plugin installed from the clone.
+
+## Development
+
+Install the plugin you are working on [from source](#from-source), then:
+
+1. After each change, reload the plugin, and read its logs if something broke:
 
    ```sh
    paseo plugin reload <id>
    paseo plugin logs <id>
    ```
 
-5. Typecheck and test every package from the repository root:
+2. Typecheck and test every package from the repository root:
 
    ```sh
    pnpm typecheck
@@ -76,15 +88,10 @@ Each plugin's README has its package-level commands and anything else specific t
 | `update-plugins`      | Rebuild the apps and reload the plugins this host has installed from this checkout.                                                                                                                           |
 | `adopt-paseo-release` | Review the Paseo releases since the last review and file an issue with what the plugins should adopt. Runs only when invoked by name: `/adopt-paseo-release` in Claude Code, `$adopt-paseo-release` in Codex. |
 
-To use a skill from another checkout, install it by name:
-
-```sh
-npx skills add sleeyax/paseo-plugins --skill update-plugins
-```
-
 ## Releasing a plugin
 
-[release-please](https://github.com/googleapis/release-please) releases from the conventional commits on `main`: a `feat` bumps the minor version, a `fix` the patch version, and `chore` or `docs` release nothing.
+Releases are automatic: [release-please](https://github.com/googleapis/release-please) cuts them from the conventional commits on `main`, so there is no version to bump or changelog to write by hand.
+A `feat` bumps the minor version, a `fix` the patch version, and `chore` or `docs` release nothing.
 It keeps one release pull request open, and merging it is the release: versions, `CHANGELOG.md` files, tags and GitHub releases.
 
 A plugin's `version` in its `package.json` is what [Paseo Cafe](https://github.com/paseo-cafe/paseo-cafe) compares to offer an update, so installations only move when the version does.
