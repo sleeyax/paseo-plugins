@@ -41,13 +41,7 @@ To run every change as soon as it lands on `main`, install from a clone instead:
    pnpm install
    ```
 
-2. Build what the plugin needs, if anything.
-   Paseo compiles a plugin's bundles itself, so most plugins need no build.
-   The `build` commands in a plugin's `paseo-plugin.json` list what does; today that is only the adapter `claude-tty` runs:
-
-   ```sh
-   pnpm --filter @paseo-plugins/claude-tty-acp build
-   ```
+2. Run the `build` commands in the plugin's `paseo-plugin.json` from its directory, if it has any.
 
 3. Install the plugin from the clone:
 
