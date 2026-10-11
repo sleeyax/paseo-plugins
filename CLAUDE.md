@@ -1,7 +1,8 @@
 # Working in this workspace
 
 A pnpm workspace of Paseo plugins under `plugins/`, and the apps they run under `apps/`.
-Paseo installs a plugin against its package directory, so `paseo-plugin.json`, `index.client.tsx` and `index.server.ts` sit at the package root, where the loader looks for exactly those names.
+Paseo installs a plugin against its package directory, so `paseo-plugin.json` and the runtime entries sit at the package root, where the loader looks for them.
+The entries are `index.client.tsx` (or `index.client.ts`) and `index.server.ts`, either or both.
 Every other module lives under `client/`, `server/` or `shared/`, and that directory decides which bundle it joins.
 
 Dependencies belong to the package that uses them, not the root, because the daemon's esbuild resolves from the plugin directory.
@@ -71,6 +72,11 @@ Design decisions are in [docs/adr](docs/adr).
 ## License and attributions (optional)
 ````
 
+## Repository skills
+
+The repository's own skills live in `skills/`.
+`.claude/skills/` and `.agents/skills/` hold one symlink per skill into it, so a new skill goes in `skills/` with a link in each, or only one harness sees it.
+
 ## Agent skills
 
 ### Issue tracker
@@ -85,5 +91,6 @@ See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Multi-context: a root `GLOSSARY-MAP.md` points at one `GLOSSARY.md` per plugin or app, and `docs/adr/` at the root holds workspace-wide decisions.
+Multi-context: each plugin and app is its own context whose decisions go in its own `docs/adr/`, and `docs/adr/` at the root holds workspace-wide decisions.
+No glossary exists yet; `/domain-modeling` creates `GLOSSARY-MAP.md` and a context's `GLOSSARY.md` once terms get settled.
 See `docs/agents/domain.md`.
