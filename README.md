@@ -98,5 +98,5 @@ Each plugin's README has its package-level commands and anything else specific t
 Releases are automatic, so there is no version to bump or changelog to write by hand.
 [release-please](https://github.com/googleapis/release-please) reads the conventional commits on `main` and keeps a release pull request open; merging it releases.
 
-- `feat` releases a minor version, `fix` a patch version, and `chore` or `docs` nothing.
-- The package a commit releases is the one whose files it touches, so keep each commit inside one package.
+A `feat` releases a minor version, a `fix` a patch version, and `chore` or `docs` nothing.
+The package a commit releases is the one whose files it touches, so keep each commit inside one package.
