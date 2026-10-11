@@ -9,8 +9,9 @@ Requires:
 
 - Paseo 0.11 or newer
 - `pnpm` on the daemon's `PATH`
-- [`gh`](https://cli.github.com/), logged in with `gh auth login`, to review GitHub pull requests
-- [`glab`](https://gitlab.com/gitlab-org/cli), logged in with `glab auth login`, to review GitLab merge requests on gitlab.com or a self-hosted GitLab
+- Either or both:
+  - [`gh`](https://cli.github.com/), logged in with `gh auth login`, to review GitHub pull requests
+  - [`glab`](https://gitlab.com/gitlab-org/cli), logged in with `glab auth login`, to review GitLab merge requests on gitlab.com or a self-hosted GitLab
 
 ```sh
 paseo plugin add github:sleeyax/paseo-plugins:plugins/guided-review
