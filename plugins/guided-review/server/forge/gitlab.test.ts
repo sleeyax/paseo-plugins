@@ -1234,6 +1234,53 @@ test("an MR reads by the viewer's own reviewer record, changed when the head com
   ]);
 });
 
+test("lists the viewer's own open MRs, drafts included, in the same query as the MRs they review", async () => {
+  const { forge, run } = forgeReplaying(LIST_REVIEWS);
+
+  const [host] = await forge.listChangeRequests();
+
+  assert.equal(run.calls.filter((call) => call.args[1] === "graphql").length, 1);
+  assert.match(REVIEW_LIST_QUERY, /authoredMergeRequests\(state: opened, first: 100, sort: UPDATED_DESC\)/);
+  assert.deepEqual(host?.authored, [
+    {
+      forge: "gitlab",
+      host: "gitlab.com",
+      project: "example-group/service",
+      number: 15,
+      url: "https://gitlab.com/example-group/service/-/merge_requests/15",
+      title: "Stream large uploads to storage",
+      author: "reviewer",
+      isDraft: false,
+      createdAt: "2026-10-01T08:00:00Z",
+      updatedAt: "2026-10-05T09:30:00Z",
+      headSha: "6".repeat(40),
+      additions: 210,
+      deletions: 44,
+      fileCount: 7,
+      ci: "success",
+      pendingDrafts: null,
+    },
+    {
+      forge: "gitlab",
+      host: "gitlab.com",
+      project: "example-group/sub/web",
+      number: 43,
+      url: "https://gitlab.com/example-group/sub/web/-/merge_requests/43",
+      title: "Draft: Resume an interrupted upload",
+      author: "reviewer",
+      isDraft: true,
+      createdAt: "2026-10-02T08:00:00Z",
+      updatedAt: "2026-10-02T08:10:00Z",
+      headSha: "7".repeat(40),
+      additions: 0,
+      deletions: 0,
+      fileCount: 0,
+      ci: null,
+      pendingDrafts: null,
+    },
+  ]);
+});
+
 test("a host glab is not logged in to, or one older than 19.2, comes back with its error and the others listed", async () => {
   const report = { exitCode: 1, stderr: fixture("auth-status-all-unreachable.stderr") + fixture("auth-status-all.stderr") };
   const { forge } = forgeReplaying([report, version("19.5.0-pre"), { stdout: fixture("review-list.json") }]);
@@ -1241,15 +1288,15 @@ test("a host glab is not logged in to, or one older than 19.2, comes back with i
   const hosts = await forge.listChangeRequests();
 
   assert.deepEqual(
-    hosts.map(({ host, error, requests }) => ({ host, error, count: requests.length })),
+    hosts.map(({ host, error, requests, authored }) => ({ host, error, counts: [requests.length, authored.length] })),
     [
       {
         host: "gitlab.example.invalid",
         error:
           'glab is not logged in to gitlab.example.invalid (API call failed: Get "https://gitlab.example.invalid/api/v4/user": dial tcp: lookup gitlab.example.invalid: no such host). Run `glab auth login --hostname gitlab.example.invalid` on the daemon\'s host.',
-        count: 0,
+        counts: [0, 0],
       },
-      { host: "gitlab.com", error: null, count: 5 },
+      { host: "gitlab.com", error: null, counts: [5, 2] },
     ],
   );
 
@@ -1259,7 +1306,7 @@ test("a host glab is not logged in to, or one older than 19.2, comes back with i
   ]);
 });
 
-test("a GraphQL answer with errors and no user is the host's error, and more MRs than a page mark it truncated", async () => {
+test("a GraphQL answer with errors and no user is the host's error, and more MRs than a page mark that list truncated", async () => {
   const failed = JSON.stringify({ data: { currentUser: null }, errors: [{ message: "Query has complexity of 301, which exceeds max complexity of 250" }] });
   const { forge } = forgeReplaying([AUTH_STATUS_ALL, version("19.5.0-pre"), { stdout: failed }]);
   assert.equal(
@@ -1271,6 +1318,11 @@ test("a GraphQL answer with errors and no user is the host's error, and more MRs
   more.data.currentUser.reviewRequestedMergeRequests.pageInfo.hasNextPage = true;
   const { forge: paged } = forgeReplaying([AUTH_STATUS_ALL, version("19.5.0-pre"), { stdout: JSON.stringify(more) }]);
   assert.deepEqual((await paged.listChangeRequests())[0]?.truncated, { assigned: true, authored: false });
+
+  const mine = JSON.parse(fixture("review-list.json"));
+  mine.data.currentUser.authoredMergeRequests.pageInfo.hasNextPage = true;
+  const { forge: pagedMine } = forgeReplaying([AUTH_STATUS_ALL, version("19.5.0-pre"), { stdout: JSON.stringify(mine) }]);
+  assert.deepEqual((await pagedMine.listChangeRequests())[0]?.truncated, { assigned: false, authored: true });
 });
 
 test("a host listed as logged in is not checked again before reading an MR on it", async () => {

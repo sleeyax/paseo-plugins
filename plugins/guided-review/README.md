@@ -42,7 +42,8 @@ Otherwise it leaves your branch alone and uses a new workspace.
 
 The start tab lists open pull requests and merge requests in two tabs.
 **Assigned to me** lists the ones you are a reviewer of, on github.com and on every GitLab host `glab` is logged in to.
-**Authored by me** lists your own on github.com, drafts included.
+**Authored by me** lists your own on the same hosts, drafts included.
+A merge request you wrote and review is on both tabs, with the one review you started from either.
 Each tab shows how many it lists, with a `+` when a host has more than one page.
 
 - Select **Review** to start a review, **Open** to open one, or **Continue** to reopen one whose workspace was closed.

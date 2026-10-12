@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Draft, DraftLocation, LineRef } from "../../shared/drafts.ts";
 import type { CommandRunner } from "../command-runner.ts";
 import type { Verdict } from "../../shared/submit.ts";
-import type { CiState, ReviewerState, ReviewRequest, ListedHost } from "../../shared/inbox.ts";
+import type { CiState, ListedChangeRequest, ListedHost, ReviewerState, ReviewRequest } from "../../shared/inbox.ts";
 import { createCli, type Cli } from "./cli.ts";
 import { GITHUB_HOST } from "./github.ts";
 import { CLONE_TIMEOUT_MS, COMMIT_READS_AT_ONCE, mapAtMost, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, userOf } from "./common.ts";
@@ -200,9 +200,17 @@ function isAtLeast(version: string, [needMajor, needMinor]: readonly [number, nu
 /** Every MR on one page: GitLab caps a GraphQL page at 100. */
 const REVIEW_LIST_SIZE = 100;
 
+/** What either list asks of an MR. The first commit is the head, newest first. */
+const LISTED_MERGE_REQUEST_FIELDS = `webUrl title draft createdAt updatedAt diffHeadSha
+        author { username }
+        diffStatsSummary { additions deletions fileCount }
+        headPipeline { status }
+        commits(first: 1) { nodes { sha committedDate } }`;
+
 /**
  * The open MRs the viewer is a reviewer of, with their own reviewer record among the MR's reviewers,
- * since GitLab has no field for the viewer's alone. The first commit is the head, newest first.
+ * since GitLab has no field for the viewer's alone, and the open MRs the viewer authored.
+ * Both lists are one query, so a host fails for both at once.
  */
 export const REVIEW_LIST_QUERY = `query GuidedReviewInbox {
   currentUser {
@@ -210,18 +218,50 @@ export const REVIEW_LIST_QUERY = `query GuidedReviewInbox {
     reviewRequestedMergeRequests(state: opened, first: ${REVIEW_LIST_SIZE}, sort: UPDATED_DESC) {
       pageInfo { hasNextPage }
       nodes {
-        webUrl title draft createdAt updatedAt diffHeadSha
-        author { username }
-        diffStatsSummary { additions deletions fileCount }
-        headPipeline { status }
-        commits(first: 1) { nodes { sha committedDate } }
+        ${LISTED_MERGE_REQUEST_FIELDS}
         reviewers { nodes { username mergeRequestInteraction { reviewState approved updatedAt } } }
+      }
+    }
+    authoredMergeRequests(state: opened, first: ${REVIEW_LIST_SIZE}, sort: UPDATED_DESC) {
+      pageInfo { hasNextPage }
+      nodes {
+        ${LISTED_MERGE_REQUEST_FIELDS}
       }
     }
   }
 }`;
 
 const GITLAB_REVIEW_STATES = ["UNREVIEWED", "REVIEW_STARTED", "REVIEWED", "REQUESTED_CHANGES", "APPROVED", "UNAPPROVED"] as const;
+
+const ListedMergeRequest = z.object({
+  webUrl: z.string(),
+  title: z.string(),
+  draft: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  diffHeadSha: z.string().nullable(),
+  author: z.object({ username: z.string() }).nullable(),
+  diffStatsSummary: z.object({ additions: z.number(), deletions: z.number(), fileCount: z.number() }).nullable(),
+  headPipeline: z.object({ status: z.string() }).nullable(),
+  commits: z.object({ nodes: z.array(z.object({ sha: z.string(), committedDate: z.string().nullable() })) }).nullable(),
+});
+
+const ReviewedMergeRequest = ListedMergeRequest.extend({
+  reviewers: z.object({
+    nodes: z.array(
+      z.object({
+        username: z.string(),
+        mergeRequestInteraction: z
+          .object({ reviewState: z.enum(GITLAB_REVIEW_STATES).nullable(), approved: z.boolean(), updatedAt: z.string().nullable() })
+          .nullable(),
+      }),
+    ),
+  }),
+});
+
+function pageOf<Node extends z.ZodType>(node: Node) {
+  return z.object({ pageInfo: z.object({ hasNextPage: z.boolean() }), nodes: z.array(node) });
+}
 
 /** GraphQL reports a failure as HTTP 200 with `errors`, and `data` null where it could not answer. */
 const ReviewListResponse = z.object({
@@ -230,33 +270,8 @@ const ReviewListResponse = z.object({
       currentUser: z
         .object({
           username: z.string(),
-          reviewRequestedMergeRequests: z.object({
-            pageInfo: z.object({ hasNextPage: z.boolean() }),
-            nodes: z.array(
-              z.object({
-                webUrl: z.string(),
-                title: z.string(),
-                draft: z.boolean(),
-                createdAt: z.string(),
-                updatedAt: z.string(),
-                diffHeadSha: z.string().nullable(),
-                author: z.object({ username: z.string() }).nullable(),
-                diffStatsSummary: z.object({ additions: z.number(), deletions: z.number(), fileCount: z.number() }).nullable(),
-                headPipeline: z.object({ status: z.string() }).nullable(),
-                commits: z.object({ nodes: z.array(z.object({ sha: z.string(), committedDate: z.string().nullable() })) }).nullable(),
-                reviewers: z.object({
-                  nodes: z.array(
-                    z.object({
-                      username: z.string(),
-                      mergeRequestInteraction: z
-                        .object({ reviewState: z.enum(GITLAB_REVIEW_STATES).nullable(), approved: z.boolean(), updatedAt: z.string().nullable() })
-                        .nullable(),
-                    }),
-                  ),
-                }),
-              }),
-            ),
-          }),
+          reviewRequestedMergeRequests: pageOf(ReviewedMergeRequest),
+          authoredMergeRequests: pageOf(ListedMergeRequest),
         })
         .nullable(),
     })
@@ -264,7 +279,8 @@ const ReviewListResponse = z.object({
   errors: z.array(z.object({ message: z.string() })).nullish(),
 });
 
-type ListedMergeRequest = NonNullable<NonNullable<z.output<typeof ReviewListResponse>["data"]>["currentUser"]>["reviewRequestedMergeRequests"]["nodes"][number];
+type ListedMergeRequest = z.output<typeof ListedMergeRequest>;
+type ReviewedMergeRequest = z.output<typeof ReviewedMergeRequest>;
 
 const LISTED_STATES: Record<(typeof GITLAB_REVIEW_STATES)[number], ReviewerState> = {
   UNREVIEWED: "requested",
@@ -293,9 +309,9 @@ const CI_STATES: Record<string, CiState> = {
  * the commit a review was of, so a review older than the head commit counts as changed since; one
  * GitLab took an approval back from was pushed to, and one still unreviewed may have been asked again.
  */
-function reviewRequestOf(mr: ListedMergeRequest, viewer: string): ReviewRequest | null {
-  const ref = parseMergeRequestUrl(mr.webUrl);
-  if (ref === null) return null;
+function reviewRequestOf(mr: ReviewedMergeRequest, viewer: string): ReviewRequest | null {
+  const listed = listedOf(mr);
+  if (listed === null) return null;
   const own = mr.reviewers.nodes.find((reviewer) => reviewer.username.toLowerCase() === viewer.toLowerCase())?.mergeRequestInteraction;
   const reviewState = own?.reviewState ?? "UNREVIEWED";
   const head = mr.commits?.nodes[0];
@@ -305,6 +321,13 @@ function reviewRequestOf(mr: ListedMergeRequest, viewer: string): ReviewRequest 
   else if (state !== "requested" && own?.updatedAt && head?.committedDate) {
     changedSinceReview = Date.parse(head.committedDate) > Date.parse(own.updatedAt);
   }
+  return { ...listed, state, viaTeam: null, changedSinceReview };
+}
+
+/** GitLab's listing cannot count the viewer's drafts, which take a call per MR. */
+function listedOf(mr: ListedMergeRequest): ListedChangeRequest | null {
+  const ref = parseMergeRequestUrl(mr.webUrl);
+  if (ref === null) return null;
   return {
     forge: "gitlab",
     host: ref.host,
@@ -316,14 +339,11 @@ function reviewRequestOf(mr: ListedMergeRequest, viewer: string): ReviewRequest 
     isDraft: mr.draft,
     createdAt: mr.createdAt,
     updatedAt: mr.updatedAt,
-    headSha: mr.diffHeadSha ?? head?.sha ?? "",
+    headSha: mr.diffHeadSha ?? mr.commits?.nodes[0]?.sha ?? "",
     additions: mr.diffStatsSummary?.additions ?? 0,
     deletions: mr.diffStatsSummary?.deletions ?? 0,
     fileCount: mr.diffStatsSummary?.fileCount ?? 0,
     ci: (mr.headPipeline && CI_STATES[mr.headPipeline.status]) ?? null,
-    state,
-    viaTeam: null,
-    changedSinceReview,
     pendingDrafts: null,
   };
 }
@@ -442,13 +462,13 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
     if (!user) {
       throw new ForgeError(`GitLab on ${host} did not list your reviews: ${response.errors?.[0]?.message ?? "no current user"}.`);
     }
-    const { nodes, pageInfo } = user.reviewRequestedMergeRequests;
+    const { reviewRequestedMergeRequests: assigned, authoredMergeRequests: authored } = user;
     return {
       forge: "gitlab",
       host,
-      requests: nodes.map((mr) => reviewRequestOf(mr, user.username)).filter((request) => request !== null),
-      authored: [],
-      truncated: { assigned: pageInfo.hasNextPage, authored: false },
+      requests: assigned.nodes.map((mr) => reviewRequestOf(mr, user.username)).filter((request) => request !== null),
+      authored: authored.nodes.map(listedOf).filter((mine) => mine !== null),
+      truncated: { assigned: assigned.pageInfo.hasNextPage, authored: authored.pageInfo.hasNextPage },
     };
   };
 
