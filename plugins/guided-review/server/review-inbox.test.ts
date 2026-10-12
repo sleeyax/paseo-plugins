@@ -116,17 +116,26 @@ test("a change request of the viewer's reviewed here carries its review, its gui
   assert.equal(headMoved(pushed!, pushed!.local!), true);
 });
 
-test("a change request listed on both tabs shares one review here", async (t) => {
+test("an MR the viewer authored and reviews is listed on both tabs with one review here, its guide and its drafts counted once", async (t) => {
   const { gitlab, service } = await withForges(t);
   await startReview(service, GITLAB_URL);
   gitlab.drafts.set(GITLAB_URL, [{ id: "1", body: "Why the retry cap?", location: { kind: "general" } }]);
+  const listDrafts = gitlab.listDrafts.bind(gitlab);
+  let counted = 0;
+  gitlab.listDrafts = async (ref) => {
+    counted += 1;
+    return listDrafts(ref);
+  };
 
   gitlab.listedHosts = [listed("gitlab", [request(GITLAB_URL)], { authored: [authored(GITLAB_URL)] })];
   const inbox = await service.inbox();
 
   assert.equal(inbox.authored[0]?.reviewId, GITLAB_ID);
+  assert.equal(inbox.items[0]?.reviewId, GITLAB_ID);
+  assert.equal(inbox.authored[0]?.local?.guide, "ready");
   assert.deepEqual(inbox.authored[0]?.local, inbox.items[0]?.local);
   assert.deepEqual([inbox.items[0]?.pendingDrafts, inbox.authored[0]?.pendingDrafts], [1, 1]);
+  assert.equal(counted, 1);
 });
 
 test("a change request reviewed here carries its review, its guide's state and whether the forge's head moved past it", async (t) => {

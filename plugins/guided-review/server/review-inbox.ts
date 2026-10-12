@@ -46,11 +46,12 @@ export class ReviewInbox {
   async list(): Promise<Inbox> {
     const listed = (await Promise.all(this.#forges.map((forge) => forge.listChangeRequests()))).flat();
     const checkedOff = await this.#checkOffs.follow(listed);
+    const countDrafts = this.#draftCounter();
     const items = await Promise.all(
-      listed.flatMap((host) => host.requests).map(async (request) => ({ ...(await this.#item(request)), checkedOff: checkedOff.assigned.has(request.url) })),
+      listed.flatMap((host) => host.requests).map(async (request) => ({ ...(await this.#item(request, countDrafts)), checkedOff: checkedOff.assigned.has(request.url) })),
     );
     const authored = await Promise.all(
-      listed.flatMap((host) => host.authored).map(async (mine) => ({ ...(await this.#authoredItem(mine)), checkedOff: checkedOff.authored.has(mine.url) })),
+      listed.flatMap((host) => host.authored).map(async (mine) => ({ ...(await this.#authoredItem(mine, countDrafts)), checkedOff: checkedOff.authored.has(mine.url) })),
     );
     return { hosts: listed.map(({ requests: _, authored: __, ...host }) => host), items, authored };
   }
@@ -70,23 +71,23 @@ export class ReviewInbox {
     };
   }
 
-  async #item(request: ReviewRequest): Promise<Omit<InboxItem, "checkedOff">> {
+  async #item(request: ReviewRequest, countDrafts: DraftCounter): Promise<Omit<InboxItem, "checkedOff">> {
     const { reviewId, local, record } = await this.#joined(request);
     if (record === null) return { ...request, reviewId, local };
     const reviewed = request.forge === "gitlab" && request.state !== "requested" && record.submittedHeadSha !== undefined;
     return {
       ...request,
-      pendingDrafts: await this.#pendingDrafts(request, record),
+      pendingDrafts: await this.#pendingDrafts(request, record, countDrafts),
       changedSinceReview: reviewed ? record.submittedHeadSha !== request.headSha : request.changedSinceReview,
       reviewId,
       local,
     };
   }
 
-  async #authoredItem(mine: AuthoredChangeRequest): Promise<Omit<AuthoredInboxItem, "checkedOff">> {
+  async #authoredItem(mine: AuthoredChangeRequest, countDrafts: DraftCounter): Promise<Omit<AuthoredInboxItem, "checkedOff">> {
     const { reviewId, local, record } = await this.#joined(mine);
     if (record === null) return { ...mine, reviewId, local };
-    return { ...mine, pendingDrafts: await this.#pendingDrafts(mine, record), reviewId, local };
+    return { ...mine, pendingDrafts: await this.#pendingDrafts(mine, record, countDrafts), reviewId, local };
   }
 
   /** The review started here of a listed change request, which is one review whichever tab lists it. */
@@ -97,10 +98,23 @@ export class ReviewInbox {
   }
 
   /** The viewer's unpublished comments, counting the ones kept here, which the forge's listing cannot see. */
-  async #pendingDrafts(listed: ListedChangeRequest, record: ReviewRecord): Promise<number | null> {
-    if (listed.forge === "gitlab") return this.#countDrafts(record.ref);
+  async #pendingDrafts(listed: ListedChangeRequest, record: ReviewRecord, countDrafts: DraftCounter): Promise<number | null> {
+    if (listed.forge === "gitlab") return countDrafts(record);
     const paragraphs = (await this.#store.getDrafts(record.id)).paragraphs.length;
     return listed.pendingDrafts === null ? null : listed.pendingDrafts + paragraphs;
+  }
+
+  /** Counts each review's drafts once however many tabs list it, since GitLab takes a call per MR. */
+  #draftCounter(): DraftCounter {
+    const counts = new Map<string, Promise<number | null>>();
+    return (record) => {
+      let count = counts.get(record.id);
+      if (count === undefined) {
+        count = this.#countDrafts(record.ref);
+        counts.set(record.id, count);
+      }
+      return count;
+    };
   }
 
   async #countDrafts(ref: ChangeRequestRef): Promise<number | null> {
@@ -114,6 +128,8 @@ export class ReviewInbox {
   }
 
 }
+
+type DraftCounter = (record: ReviewRecord) => Promise<number | null>;
 
 function idOf({ forge, host, project, number, url }: ListedChangeRequest): string | null {
   try {
