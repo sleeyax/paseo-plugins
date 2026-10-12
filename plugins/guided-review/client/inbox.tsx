@@ -518,7 +518,7 @@ const STATUS_HINTS: Record<ReviewStatus, string> = {
   commented: "Reviews without an approval or a change request",
   "changes-requested": "A reviewer's latest review asks for changes",
   approved: "Approved, with no change request outstanding",
-  "approval-reset": "An approval taken back by a push",
+  "approval-reset": "An approval taken back by a push, or on GitLab by its reviewer",
 };
 
 /** Where the author's reviewers stand, with whether one reviewed since their last push. */

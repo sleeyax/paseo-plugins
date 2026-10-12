@@ -9,7 +9,7 @@ export const ReviewerStateSchema = z.enum(["requested", "commented", "changes-re
 
 /**
  * Where the author's change request stands with its reviewers, combined from each one's latest review, in the same words on both forges.
- * `approval-reset` is an approval taken back by a push.
+ * `approval-reset` is an approval taken back by a push; on GitLab, a reviewer revoking their approval reads the same.
  */
 export const ReviewStatusSchema = z.enum(["unreviewed", "waiting", "commented", "changes-requested", "approved", "approval-reset"]);
 
