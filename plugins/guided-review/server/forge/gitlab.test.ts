@@ -1297,18 +1297,19 @@ test("lists the viewer's own open MRs, drafts included, with where their reviewe
 type Interaction = { reviewState: string; approved: boolean; updatedAt: string };
 
 /** The authored MR !15 as GitLab lists it, with these reviewer records and approvers in place of the fixture's. */
-async function authored15(mr: { reviewers?: Record<string, Interaction>; approvedBy?: string[]; committedDate?: string | null }) {
+async function authored15(mr: { reviewers?: Record<string, Interaction>; approvedBy?: string[]; pushedAt?: string | null }) {
   const answer = JSON.parse(fixture("review-list.json"));
   const node = answer.data.currentUser.authoredMergeRequests.nodes[0];
   node.reviewers.nodes = Object.entries(mr.reviewers ?? {}).map(([username, mergeRequestInteraction]) => ({ username, mergeRequestInteraction }));
   node.approvedBy.nodes = (mr.approvedBy ?? []).map((username) => ({ username }));
-  if (mr.committedDate !== undefined) node.commits.nodes[0].committedDate = mr.committedDate;
+  if (mr.pushedAt !== undefined) node.mergeRequestDiffs.nodes = mr.pushedAt === null ? [] : [{ createdAt: mr.pushedAt }];
   const { forge } = forgeReplaying([AUTH_STATUS_ALL, version("19.5.0-pre"), { stdout: JSON.stringify(answer) }]);
   return (await forge.listChangeRequests())[0]!.authored[0]!;
 }
 
-/** The fixture's head commit of !15 is dated 2026-10-05T09:00. */
+/** The fixture's head commit of !15 is dated 2026-10-05T09:00 and was pushed at 09:20. */
 const BEFORE_HEAD = "2026-10-04T12:00:00Z";
+const BEFORE_PUSH = "2026-10-05T09:10:00Z";
 const AFTER_HEAD = "2026-10-05T11:00:00Z";
 const interaction = (reviewState: string, updatedAt: string): Interaction => ({ reviewState, approved: reviewState === "APPROVED", updatedAt });
 
@@ -1331,7 +1332,7 @@ test("reviewers asked and none answered is waiting, and a review without a verdi
   assert.equal(waiting.reviewedSinceLastPush, false);
   assert.equal(waiting.latestReviewAt, null);
   assert.equal(commented.status, "commented");
-  assert.equal(commented.reviewedSinceLastPush, false, "the review is older than the head commit");
+  assert.equal(commented.reviewedSinceLastPush, false, "the review is older than the head");
   assert.equal(commented.latestReviewAt, BEFORE_HEAD);
 });
 
@@ -1343,8 +1344,14 @@ test("the author's own reviewer record and approval are not a review of their MR
   assert.equal(own.latestReviewAt, null);
 });
 
-test("whether a review came after the push is unknown when GitLab gives no date for the head commit", async () => {
-  const undated = await authored15({ reviewers: { designer: interaction("REQUESTED_CHANGES", AFTER_HEAD) }, committedDate: null });
+test("a review between the head commit and its push is not one since the push", async () => {
+  const beforePush = await authored15({ reviewers: { designer: interaction("REQUESTED_CHANGES", BEFORE_PUSH) } });
+
+  assert.equal(beforePush.reviewedSinceLastPush, false);
+});
+
+test("whether a review came after the push is unknown when GitLab gives no version of the head", async () => {
+  const undated = await authored15({ reviewers: { designer: interaction("REQUESTED_CHANGES", AFTER_HEAD) }, pushedAt: null });
 
   assert.equal(undated.status, "changes-requested");
   assert.equal(undated.reviewedSinceLastPush, null);

@@ -231,6 +231,7 @@ export const REVIEW_LIST_QUERY = `query GuidedReviewInbox {
         ${LISTED_MERGE_REQUEST_FIELDS}
         ${REVIEWER_FIELDS}
         approvedBy { nodes { username } }
+        mergeRequestDiffs(first: 1) { nodes { createdAt } }
       }
     }
   }
@@ -266,6 +267,8 @@ const ReviewedMergeRequest = ListedMergeRequest.extend({
 
 const AuthoredMergeRequest = ReviewedMergeRequest.extend({
   approvedBy: z.object({ nodes: z.array(z.object({ username: z.string() })) }),
+  /** The MR's diff versions, newest first, so the first is the head's push. */
+  mergeRequestDiffs: z.object({ nodes: z.array(z.object({ createdAt: z.string() })) }).nullable(),
 });
 
 function pageOf<Node extends z.ZodType>(node: Node) {
@@ -346,7 +349,7 @@ function sameUser(a: string, b: string): boolean {
 /**
  * The viewer's own MR with where each reviewer stands, and anyone who approved without being asked.
  * GitLab gives the same state to an approval reset by a push and one its reviewer took back, so both read as reset.
- * It keeps no record of the commit a review was of, so a review after the head commit's date counts as one since the push.
+ * It keeps no record of the commit a review was of, so a review after the head's push counts as one since the push.
  */
 function authoredOf(mr: AuthoredMergeRequest): AuthoredChangeRequest | null {
   const listed = listedOf(mr);
@@ -360,12 +363,12 @@ function authoredOf(mr: AuthoredMergeRequest): AuthoredChangeRequest | null {
     const at = reviewer.mergeRequestInteraction?.updatedAt;
     return at && REVIEWED_STATES.has(reviewerStateOf(reviewer.mergeRequestInteraction)) ? [at] : [];
   });
-  const headAt = mr.commits?.nodes[0]?.committedDate;
+  const pushedAt = mr.mergeRequestDiffs?.nodes[0]?.createdAt;
   return {
     ...listed,
     status: reviewStatusOf(reviewers),
     reviewers,
-    reviewedSinceLastPush: reviewedAt.length === 0 ? false : headAt ? reviewedAt.some((at) => Date.parse(at) > Date.parse(headAt)) : null,
+    reviewedSinceLastPush: reviewedAt.length === 0 ? false : pushedAt ? reviewedAt.some((at) => Date.parse(at) > Date.parse(pushedAt)) : null,
     latestReviewAt: latestOf(reviewedAt),
   };
 }
