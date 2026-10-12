@@ -80,6 +80,8 @@ type TabView<Item extends Row, State extends string, Column extends string> = {
   columns: readonly Column[];
   /** The columns the tab can fill; one it cannot is neither offered nor shown, whatever the preferences say. */
   specs: Partial<Record<Column, ColumnSpec<Item>>>;
+  /** The columns a card puts on its tinted line, in the order it puts them. */
+  tinted: readonly Column[];
   /** Null while the tab has no states to filter by. */
   states: StatesSetup<State> | null;
   searchHint: string;
@@ -265,7 +267,7 @@ function TabSection<Item extends Row, State extends string, Column extends strin
                 ) : shape === "cards" ? (
                   <View style={{ gap: spacing[2] }}>
                     {items.map((item) => (
-                      <Card key={item.url} colors={colors} item={item} specs={view.specs} columns={columns} starts={starts} />
+                      <Card key={item.url} colors={colors} item={item} specs={view.specs} columns={columns} tinted={view.tinted} starts={starts} />
                     ))}
                   </View>
                 ) : null}
@@ -616,7 +618,7 @@ type ColumnWidth = { width: number } | { flex: number; min: number };
 
 /**
  * `label` names the column in the chooser, and heads it unless `header` says otherwise.
- * A card puts the `besideTitle` column before the title, every `line` on the line under it, and every `tint` on the tinted line below that.
+ * A card puts the `besideTitle` column before the title, every `line` on the line under it, and every `tint` on the tinted line below that, in the tab's `tinted` order.
  */
 type ColumnSpec<Item> = {
   label: string;
@@ -707,6 +709,7 @@ const ASSIGNED_VIEW: TabView<InboxItem, ReviewerState, AssignedColumn> = {
   rules: ASSIGNED_RULES,
   columns: ASSIGNED_COLUMNS,
   specs: ASSIGNED_SPECS,
+  tinted: ["state", "local", "ci"],
   states: {
     all: ReviewerStateSchema.options,
     label: statesLabel,
@@ -724,6 +727,7 @@ const AUTHORED_VIEW: TabView<AuthoredInboxItem, ReviewStatus, AuthoredColumn> = 
   rules: AUTHORED_RULES,
   columns: AUTHORED_COLUMNS,
   specs: AUTHORED_SPECS,
+  tinted: ["state", "reviewers", "local", "ci"],
   states: {
     all: ReviewStatusSchema.options,
     label: statusesLabel,
@@ -1006,12 +1010,14 @@ function Card<Item extends Row, Column extends string>({
   item,
   specs,
   columns,
+  tinted: tintedColumns,
   starts,
 }: {
   colors: Colors;
   item: Item;
   specs: Partial<Record<Column, ColumnSpec<Item>>>;
   columns: readonly Column[];
+  tinted: readonly Column[];
   starts: ReviewStarts;
 }) {
   const now = new Date();
@@ -1022,7 +1028,7 @@ function Card<Item extends Row, Column extends string>({
   });
   const beside = shown.find((spec) => spec.besideTitle);
   const meta = shown.flatMap((spec) => (spec.line === undefined ? [] : [spec.line(item, now)]));
-  const tinted = shown.flatMap((spec) => spec.tint?.(item) ?? []);
+  const tinted = tintedColumns.filter((column) => columns.includes(column)).flatMap((column) => specs[column]?.tint?.(item) ?? []);
 
   return (
     <View style={{ padding: spacing[3], gap: spacing[1], borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, opacity: dimmed(item) ? DIMMED : 1 }}>
