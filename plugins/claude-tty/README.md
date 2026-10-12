@@ -119,6 +119,6 @@ Design decisions are in [docs/adr](docs/adr).
 
 ## License and attributions
 
-The provider icon is Clawd, the mascot Claude Code prints when it starts, redrawn from its block characters.
-Claude, Claude Code and Clawd belong to Anthropic, and this plugin is not affiliated with or endorsed by Anthropic.
+The provider icon puts a terminal badge on Claude's spark, the same mark Paseo shows for its built-in Claude provider.
+Claude, Claude Code and the spark belong to Anthropic, and this plugin is not affiliated with or endorsed by Anthropic.
 The repository's licence grants no right to them.
