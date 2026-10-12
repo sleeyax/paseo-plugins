@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
@@ -17,7 +17,7 @@ const GITLAB_ID = "gitlab/gitlab.com/acme/uploader/7";
 const HEAD = "b".repeat(40);
 const PUSHED = "d".repeat(40);
 
-type Host = { github: FakeForge; gitlab: FakeForge; workspaces: FakeWorkspaces; guideAgents: FakeGuideAgents; service: ReviewService; restart: () => ReviewService };
+type Host = { data: string; github: FakeForge; gitlab: FakeForge; workspaces: FakeWorkspaces; guideAgents: FakeGuideAgents; service: ReviewService; restart: () => ReviewService };
 
 async function withForges(t: TestContext): Promise<Host> {
   const data = await mkdtemp(path.join(os.tmpdir(), "guided-review-inbox-"));
@@ -32,7 +32,7 @@ async function withForges(t: TestContext): Promise<Host> {
   const guideAgents = fakeGuideAgents();
   guideAgents.answer = () => sampleGuideReply();
   const restart = () => new ReviewService({ forges: [github, gitlab], workspaces, guideAgents, dataDirectory: data });
-  return { github, gitlab, workspaces, guideAgents, service: restart(), restart };
+  return { data, github, gitlab, workspaces, guideAgents, service: restart(), restart };
 }
 
 async function startReview(service: ReviewService, url: string) {
@@ -250,4 +250,34 @@ test("a check-off goes once a host listed in full no longer has it, and stays wh
   await service.inbox();
   gitlab.reviewRequests = [listed("gitlab", [request(GITLAB_URL)])];
   assert.deepEqual(await checkedOff(service), []);
+});
+
+test("a check-off kept before the list had tabs holds on the Assigned tab", async (t) => {
+  const { data, gitlab, service } = await withForges(t);
+  gitlab.reviewRequests = [listed("gitlab", [request(GITLAB_URL)])];
+  const file = path.join(data, "inbox-check-offs.json");
+  await writeFile(file, JSON.stringify({ [GITLAB_URL]: { headSha: HEAD, state: "requested" } }));
+
+  assert.deepEqual(await checkedOff(service), [GITLAB_URL]);
+
+  await service.setCheckedOff({ url: GITHUB_URL, checkOff: { headSha: HEAD, state: "requested" } });
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")), {
+    assigned: { [GITLAB_URL]: { headSha: HEAD, state: "requested" }, [GITHUB_URL]: { headSha: HEAD, state: "requested" } },
+    authored: {},
+  });
+});
+
+test("a check-off on the Authored tab leaves the Assigned row alone, and outlasts the Assigned tab's check-offs", async (t) => {
+  const { data, gitlab, service } = await withForges(t);
+  gitlab.reviewRequests = [listed("gitlab", [request(GITLAB_URL)])];
+  const file = path.join(data, "inbox-check-offs.json");
+  const authored = { [GITLAB_URL]: { status: "waiting", latestReviewAt: null } };
+  await writeFile(file, JSON.stringify({ assigned: {}, authored }));
+
+  assert.deepEqual(await checkedOff(service), []);
+
+  await service.setCheckedOff({ url: GITLAB_URL, checkOff: { headSha: HEAD, state: "requested" } });
+  gitlab.reviewRequests = [listed("gitlab", [request(GITLAB_URL, { headSha: PUSHED })])];
+  assert.deepEqual(await checkedOff(service), [], "came back on Assigned");
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")).authored, authored);
 });

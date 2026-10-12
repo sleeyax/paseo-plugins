@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_INBOX_PREFERENCES, type InboxPreferences } from "../shared/inbox-preferences.ts";
+import { DEFAULT_INBOX_PREFERENCES, type AssignedPreferences } from "../shared/inbox-preferences.ts";
 import type { InboxItem } from "../shared/inbox.ts";
 import { age, attentionCount, countLabel, hiddenCheckedOff, matchesSearch, needsAttention, statesLabel, visibleItems } from "./inbox-filter.ts";
 
@@ -32,7 +32,7 @@ function item(number: number, overrides: Partial<InboxItem> = {}): InboxItem {
   };
 }
 
-const ALL: InboxPreferences = { ...DEFAULT_INBOX_PREFERENCES, states: ["requested", "commented", "changes-requested", "approved", "unapproved"] };
+const ALL: AssignedPreferences = { ...DEFAULT_INBOX_PREFERENCES.assigned, states: ["requested", "commented", "changes-requested", "approved", "unapproved"] };
 
 function numbers(items: InboxItem[]): number[] {
   return items.map((entry) => entry.number);
@@ -45,7 +45,7 @@ test("by default the newest update comes first and what the reviewer approved is
     item(3, { updatedAt: "2026-09-02T00:00:00Z" }),
   ];
 
-  assert.deepEqual(numbers(visibleItems(items, DEFAULT_INBOX_PREFERENCES, "")), [3, 1]);
+  assert.deepEqual(numbers(visibleItems(items, DEFAULT_INBOX_PREFERENCES.assigned, "")), [3, 1]);
   assert.deepEqual(numbers(visibleItems(items, ALL, "")), [2, 3, 1]);
 });
 

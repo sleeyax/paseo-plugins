@@ -1,4 +1,4 @@
-import { DEFAULT_INBOX_PREFERENCES, type InboxPreferences, type InboxSortKey } from "../shared/inbox-preferences.ts";
+import { DEFAULT_INBOX_PREFERENCES, type AssignedPreferences, type InboxSortKey } from "../shared/inbox-preferences.ts";
 import { ReviewerStateSchema, type InboxItem, type ReviewerState } from "../shared/inbox.ts";
 import { numberLabel } from "../shared/reference.ts";
 
@@ -30,7 +30,7 @@ const NONE_HELD: ReadonlySet<string> = new Set();
  * The items the list shows, filtered as the preferences say and by the search, in their sort order; ties go to the latest update.
  * A `held` row is shown whether or not the check-off filter would take it, so a row just checked off or unchecked stays put.
  */
-export function visibleItems(items: readonly InboxItem[], preferences: InboxPreferences, query: string, held = NONE_HELD): InboxItem[] {
+export function visibleItems(items: readonly InboxItem[], preferences: AssignedPreferences, query: string, held = NONE_HELD): InboxItem[] {
   const value = SORT_VALUES[preferences.sort.key];
   const direction = preferences.sort.descending ? -1 : 1;
   return items
@@ -39,12 +39,12 @@ export function visibleItems(items: readonly InboxItem[], preferences: InboxPref
 }
 
 /** How many checked-off items the list leaves out that every other filter and the search would show. */
-export function hiddenCheckedOff(items: readonly InboxItem[], preferences: InboxPreferences, query: string, held = NONE_HELD): number {
+export function hiddenCheckedOff(items: readonly InboxItem[], preferences: AssignedPreferences, query: string, held = NONE_HELD): number {
   return items.filter((item) => item.checkedOff && !held.has(item.url) && !passesCheckOff(item, preferences) && matchesFilters(item, preferences, query)).length;
 }
 
 /** The list's default filters with only what needs the reviewer's attention kept, whatever the reviewer last set. */
-const ATTENTION_FILTERS: InboxPreferences = { ...DEFAULT_INBOX_PREFERENCES, needsAttention: true };
+const ATTENTION_FILTERS: AssignedPreferences = { ...DEFAULT_INBOX_PREFERENCES.assigned, needsAttention: true };
 
 /** How many items need the reviewer's attention: the sidebar's count. */
 export function attentionCount(items: readonly InboxItem[]): number {
@@ -52,7 +52,7 @@ export function attentionCount(items: readonly InboxItem[]): number {
 }
 
 /** Whether the check-off filter shows the item, which a held row is not asked. */
-export function passesCheckOff(item: InboxItem, preferences: InboxPreferences): boolean {
+export function passesCheckOff(item: InboxItem, preferences: AssignedPreferences): boolean {
   switch (preferences.checkedOff) {
     case "hide":
       return !item.checkedOff;
@@ -63,7 +63,7 @@ export function passesCheckOff(item: InboxItem, preferences: InboxPreferences): 
   }
 }
 
-function matchesFilters(item: InboxItem, preferences: InboxPreferences, query: string): boolean {
+function matchesFilters(item: InboxItem, preferences: AssignedPreferences, query: string): boolean {
   return (
     (preferences.provider === "all" || item.forge === preferences.provider) &&
     preferences.states.includes(item.state) &&

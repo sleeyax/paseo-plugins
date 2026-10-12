@@ -7,6 +7,12 @@ import { ReviewHeaderSchema, START_PHASES } from "./review-header.ts";
  */
 export const ReviewerStateSchema = z.enum(["requested", "commented", "changes-requested", "approved", "unapproved"]);
 
+/**
+ * Where the author's change request stands with its reviewers, combined from each one's latest review, in the same words on both forges.
+ * `approval-reset` is an approval taken back by a push.
+ */
+export const ReviewStatusSchema = z.enum(["unreviewed", "waiting", "commented", "changes-requested", "approved", "approval-reset"]);
+
 /** The head's CI as one word; null when it has none, or one in a state neither of these is, like a cancelled pipeline. */
 export const CiStateSchema = z.enum(["success", "failure", "pending"]);
 
@@ -42,6 +48,7 @@ export const ReviewRequestSchema = z.object({
 });
 
 export type ReviewerState = z.output<typeof ReviewerStateSchema>;
+export type ReviewStatus = z.output<typeof ReviewStatusSchema>;
 export type CiState = z.output<typeof CiStateSchema>;
 export type ReviewRequest = z.output<typeof ReviewRequestSchema>;
 
@@ -83,6 +90,9 @@ export const InboxItemSchema = ReviewRequestSchema.extend({
 /** What the reviewer saw of a change request when they checked it off. */
 export const CheckOffSchema = z.object({ headSha: z.string(), state: ReviewerStateSchema });
 
+/** What the author saw of their change request when they checked it off: where it stood with its reviewers, and when the newest review arrived. */
+export const AuthoredCheckOffSchema = z.object({ status: ReviewStatusSchema, latestReviewAt: z.string().nullable() });
+
 /** Every host's review requests, each joined with the review started here, if any. */
 export const InboxSchema = z.object({
   hosts: z.array(ReviewRequestHostSchema.omit({ requests: true })),
@@ -91,6 +101,7 @@ export const InboxSchema = z.object({
 
 export type LocalReview = z.output<typeof LocalReviewSchema>;
 export type CheckOff = z.output<typeof CheckOffSchema>;
+export type AuthoredCheckOff = z.output<typeof AuthoredCheckOffSchema>;
 export type InboxItem = z.output<typeof InboxItemSchema>;
 export type Inbox = z.output<typeof InboxSchema>;
 

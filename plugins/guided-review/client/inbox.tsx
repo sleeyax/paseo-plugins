@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import React, { useContext, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import * as contracts from "../shared/contracts.ts";
-import { CHECK_OFF_FILTERS, INBOX_COLUMNS, type CheckOffFilter, type InboxColumn, type InboxPreferences, type InboxSortKey } from "../shared/inbox-preferences.ts";
+import { ASSIGNED_COLUMNS, CHECK_OFF_FILTERS, type AssignedColumn, type AssignedPreferences, type CheckOffFilter, type InboxSortKey } from "../shared/inbox-preferences.ts";
 import { headMoved, ReviewerStateSchema, type Inbox, type InboxItem, type LocalReview, type ReviewerState } from "../shared/inbox.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { Button } from "./button.tsx";
@@ -27,13 +27,13 @@ export function ReviewInbox({ colors, compact, openPanel }: { colors: Colors; co
   const getInbox = useRpc(contracts.getInbox);
   const inbox = useQuery({ queryKey: INBOX_QUERY_KEY, queryFn: () => getInbox({}), refetchOnWindowFocus: false });
   const starts = useReviewStarts(openPanel, inbox.data?.items ?? []);
-  const { preferences, change: changePreferences, error } = useInboxPreferences();
+  const { preferences, change: changePreferences, error } = useInboxPreferences("assigned");
   const checkOff = useCheckOff();
   const [query, setSearch] = useState("");
   const [width, setWidth] = useState<number | null>(null);
   const [choosing, setChoosing] = useState<"columns" | "states" | null>(null);
 
-  const change = (update: Partial<InboxPreferences>) => {
+  const change = (update: Partial<AssignedPreferences>) => {
     checkOff.release();
     changePreferences(update);
   };
@@ -103,7 +103,7 @@ export function ReviewInbox({ colors, compact, openPanel }: { colors: Colors; co
   );
 }
 
-const COLUMN_HINTS: Partial<Record<InboxColumn, string>> = {
+const COLUMN_HINTS: Partial<Record<AssignedColumn, string>> = {
   checked: "Set a review aside here until it is pushed to or you are asked again",
   title: "Always shown",
   state: "Where you stand, and whether it changed since your review",
@@ -120,16 +120,16 @@ function ColumnChooser({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  columns: readonly InboxColumn[];
-  change: (update: Partial<InboxPreferences>) => void;
+  columns: readonly AssignedColumn[];
+  change: (update: Partial<AssignedPreferences>) => void;
 }) {
-  const toggle = (column: InboxColumn, shown: boolean) =>
-    change({ columns: INBOX_COLUMNS.filter((candidate) => (candidate === column ? shown : columns.includes(candidate))) });
+  const toggle = (column: AssignedColumn, shown: boolean) =>
+    change({ columns: ASSIGNED_COLUMNS.filter((candidate) => (candidate === column ? shown : columns.includes(candidate))) });
   return (
     <Modal title="Columns" open={open} onOpenChange={onOpenChange}>
       <Modal.Content>
         <SettingsCard>
-          {INBOX_COLUMNS.map((column) => (
+          {ASSIGNED_COLUMNS.map((column) => (
             <SettingsSwitch
               key={column}
               label={COLUMNS[column].label}
@@ -155,7 +155,7 @@ function StateChooser({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   states: readonly ReviewerState[];
-  change: (update: Partial<InboxPreferences>) => void;
+  change: (update: Partial<AssignedPreferences>) => void;
 }) {
   const all = ReviewerStateSchema.options;
   const toggle = (state: ReviewerState, shown: boolean) =>
@@ -189,8 +189,8 @@ function Toolbar({
   setQuery,
 }: {
   colors: Colors;
-  preferences: InboxPreferences;
-  change: (update: Partial<InboxPreferences>) => void;
+  preferences: AssignedPreferences;
+  change: (update: Partial<AssignedPreferences>) => void;
   query: string;
   setQuery: (query: string) => void;
 }) {
@@ -358,7 +358,7 @@ type ColumnWidth = { width: number } | { flex: number; min: number };
 /** `label` names the column in the chooser, and heads it unless `header` says otherwise. */
 type ColumnSpec = { label: string; header?: string; size: ColumnWidth; sort?: InboxSortKey; cell: (item: InboxItem, colors: Colors, now: Date) => React.ReactNode };
 
-const COLUMNS: Record<InboxColumn, ColumnSpec> = {
+const COLUMNS: Record<AssignedColumn, ColumnSpec> = {
   checked: { label: "Checked off", header: "", size: { width: 20 }, cell: (item, colors) => <CheckOffBox colors={colors} item={item} /> },
   change: {
     label: "PR/MR",
@@ -398,7 +398,7 @@ function columnStyle(size: ColumnWidth) {
 }
 
 /** The narrowest the table can be with these columns before its cells crowd; anything narrower gets cards. */
-function tableWidth(columns: readonly InboxColumn[]): number {
+function tableWidth(columns: readonly AssignedColumn[]): number {
   const cells = columns.reduce((total, column) => {
     const { size } = COLUMNS[column];
     return total + ("width" in size ? size.width : size.min);
@@ -579,8 +579,8 @@ function Table({
 }: {
   colors: Colors;
   items: InboxItem[];
-  preferences: InboxPreferences;
-  change: (update: Partial<InboxPreferences>) => void;
+  preferences: AssignedPreferences;
+  change: (update: Partial<AssignedPreferences>) => void;
   starts: ReviewStarts;
 }) {
   const now = new Date();
@@ -648,10 +648,10 @@ function Table({
 }
 
 /** A row stacked for a narrow screen: the title, then whichever of the other columns are shown, as lines. */
-function Card({ colors, item, columns, starts }: { colors: Colors; item: InboxItem; columns: readonly InboxColumn[]; starts: ReviewStarts }) {
+function Card({ colors, item, columns, starts }: { colors: Colors; item: InboxItem; columns: readonly AssignedColumn[]; starts: ReviewStarts }) {
   const now = new Date();
   const { dimmed } = useContext(CheckOffContext);
-  const shown = (column: InboxColumn) => columns.includes(column);
+  const shown = (column: AssignedColumn) => columns.includes(column);
   const meta = [
     ...(shown("change") ? [item.project] : []),
     ...(shown("author") ? [item.author] : []),

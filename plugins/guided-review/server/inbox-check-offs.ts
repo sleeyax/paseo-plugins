@@ -1,12 +1,23 @@
 import path from "node:path";
-import { CheckOffSchema, type CheckOff, type ReviewerState, type ReviewRequest, type ReviewRequestHost } from "../shared/inbox.ts";
+import type { z } from "zod";
+import {
+  AuthoredCheckOffSchema,
+  CheckOffSchema,
+  type AuthoredCheckOff,
+  type CheckOff,
+  type ReviewerState,
+  type ReviewRequest,
+  type ReviewRequestHost,
+} from "../shared/inbox.ts";
+import { byTab } from "./inbox-tabs.ts";
 import { readJson, writeJson } from "./json-file.ts";
 import { oneAtATimePer } from "./one-at-a-time.ts";
 
 const FILE = "inbox-check-offs.json";
 
-/** Check-offs by the change request's URL. */
-type CheckOffs = Record<string, CheckOff>;
+/** Each tab's check-offs by the change request's URL, kept apart so a check-off on one tab leaves the other alone. */
+type CheckOffs = { assigned: AssignedCheckOffs; authored: Record<string, AuthoredCheckOff> };
+type AssignedCheckOffs = Record<string, CheckOff>;
 
 /** The states only the other side brings about: being asked again, or an approval taken back. */
 const RETURNING_STATES: readonly ReviewerState[] = ["requested", "unapproved"];
@@ -25,25 +36,20 @@ export class InboxCheckOffsFile {
 
   async set(url: string, checkOff: CheckOff | null): Promise<void> {
     await this.#change((checkOffs) => {
-      const { [url]: _, ...rest } = checkOffs;
-      return checkOff === null ? rest : { ...rest, [url]: checkOff };
+      const { [url]: _, ...rest } = checkOffs.assigned;
+      return { ...checkOffs, assigned: checkOff === null ? rest : { ...rest, [url]: checkOff } };
     });
   }
 
   /** Follows a listing of every host, and answers the URLs still checked off. */
   async follow(hosts: readonly ReviewRequestHost[]): Promise<Set<string>> {
-    return new Set(Object.keys(await this.#change((checkOffs) => followListing(checkOffs, hosts))));
+    const followed = await this.#change((checkOffs) => ({ ...checkOffs, assigned: followListing(checkOffs.assigned, hosts) }));
+    return new Set(Object.keys(followed.assigned));
   }
 
   async #read(): Promise<CheckOffs> {
-    const stored = await readJson<unknown>(this.#file);
-    if (typeof stored !== "object" || stored === null) return {};
-    const checkOffs: CheckOffs = {};
-    for (const [url, value] of Object.entries(stored)) {
-      const parsed = CheckOffSchema.safeParse(value);
-      if (parsed.success) checkOffs[url] = parsed.data;
-    }
-    return checkOffs;
+    const stored = byTab(await readJson<unknown>(this.#file));
+    return { assigned: byUrl(stored.assigned, CheckOffSchema), authored: byUrl(stored.authored, AuthoredCheckOffSchema) };
   }
 
   async #change(update: (checkOffs: CheckOffs) => CheckOffs): Promise<CheckOffs> {
@@ -60,10 +66,10 @@ export class InboxCheckOffsFile {
  * Drops the check-offs whose change request came back, and those a host listed in full no longer has.
  * The rest keep the state the reviewer is now in, so one they moved on themselves, by commenting, still comes back when they are asked again.
  */
-function followListing(checkOffs: CheckOffs, hosts: readonly ReviewRequestHost[]): CheckOffs {
+function followListing(checkOffs: AssignedCheckOffs, hosts: readonly ReviewRequestHost[]): AssignedCheckOffs {
   const requests = new Map(hosts.flatMap((host) => host.requests.map((request) => [request.url, request] as const)));
   const complete = new Set<string | null>(hosts.filter((host) => host.error === null && !host.truncated).map((host) => host.host));
-  const followed: CheckOffs = {};
+  const followed: AssignedCheckOffs = {};
   for (const [url, checkOff] of Object.entries(checkOffs)) {
     const request = requests.get(url);
     if (request === undefined) {
@@ -78,6 +84,17 @@ function followListing(checkOffs: CheckOffs, hosts: readonly ReviewRequestHost[]
 function cameBack(checkOff: CheckOff, request: ReviewRequest): boolean {
   const pushed = request.headSha !== "" && request.headSha !== checkOff.headSha;
   return pushed || (RETURNING_STATES.includes(request.state) && request.state !== checkOff.state);
+}
+
+/** One tab's check-offs as the file holds them, leaving out any the plugin no longer reads. */
+function byUrl<T>(stored: unknown, schema: z.ZodType<T>): Record<string, T> {
+  if (typeof stored !== "object" || stored === null) return {};
+  const checkOffs: Record<string, T> = {};
+  for (const [url, value] of Object.entries(stored)) {
+    const parsed = schema.safeParse(value);
+    if (parsed.success) checkOffs[url] = parsed.data;
+  }
+  return checkOffs;
 }
 
 function hostOf(url: string): string | null {
