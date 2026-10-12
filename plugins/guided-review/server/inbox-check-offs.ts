@@ -102,7 +102,7 @@ function assignedStillOff(checkOff: CheckOff, request: ReviewRequest): CheckOff 
 
 /**
  * An authored check-off comes back on any news from its reviewers, never on the author's own push.
- * Any other newest review time counts, not only a later one, since a GitLab approval reset can lower it or clear it.
+ * Any change to the newest review time counts, since a GitLab approval reset can lower it or clear it.
  */
 function authoredStillOff(checkOff: AuthoredCheckOff, request: AuthoredChangeRequest): AuthoredCheckOff | null {
   return request.status === checkOff.status && request.latestReviewAt === checkOff.latestReviewAt ? checkOff : null;

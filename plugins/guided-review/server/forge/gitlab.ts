@@ -200,7 +200,10 @@ function isAtLeast(version: string, [needMajor, needMinor]: readonly [number, nu
 /** Every MR on one page: GitLab caps a GraphQL page at 100. */
 const REVIEW_LIST_SIZE = 100;
 
-/** What either list asks of an MR. The first commit is the head, newest first. */
+/**
+ * What either list asks of an MR.
+ * The first commit is the head, newest first.
+ */
 const LISTED_MERGE_REQUEST_FIELDS = `webUrl title draft createdAt updatedAt diffHeadSha
         author { username }
         diffStatsSummary { additions deletions fileCount }
@@ -210,10 +213,9 @@ const LISTED_MERGE_REQUEST_FIELDS = `webUrl title draft createdAt updatedAt diff
 const REVIEWER_FIELDS = "reviewers { nodes { username mergeRequestInteraction { reviewState approved updatedAt } } }";
 
 /**
- * The open MRs the viewer is a reviewer of, with their own reviewer record among the MR's reviewers,
- * since GitLab has no field for the viewer's alone, and the open MRs the viewer authored, with every
- * reviewer's record and whoever approved without being one.
- * Both lists are one query, so a host fails for both at once; gitlab.com scores it 159 of the 250 it allows a signed-in user.
+ * The open MRs the viewer is a reviewer of, with their own reviewer record among the MR's reviewers, since GitLab has no field for the viewer's alone.
+ * The open MRs the viewer authored, with every reviewer's record and whoever approved without being one.
+ * Both lists are one query, so a host fails for both at once, and the query has to stay under the complexity GitLab allows a signed-in user.
  */
 export const REVIEW_LIST_QUERY = `query GuidedReviewInbox {
   currentUser {
@@ -348,7 +350,7 @@ function sameUser(a: string, b: string): boolean {
 
 /**
  * The viewer's own MR with where each reviewer stands, and anyone who approved without being asked.
- * GitLab gives the same state to an approval reset by a push and one its reviewer took back, so both read as reset.
+ * GitLab gives the same state to an approval taken back by a push and one its reviewer revoked, so both read as an approval reset.
  * It keeps no record of the commit a review was of, so a review after the head's push counts as one since the push.
  */
 function authoredOf(mr: AuthoredMergeRequest): AuthoredChangeRequest | null {

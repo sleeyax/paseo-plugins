@@ -170,10 +170,7 @@ export const STATUS_NAMES: Record<ReviewStatus, string> = {
   "approval-reset": "approval reset",
 };
 
-/**
- * Which states the list shows, naming whichever side is shorter: `States: requested and commented`,
- * or `States: all but approved`.
- */
+/** Which states the list shows, naming whichever side is shorter: `States: requested and commented`, or `States: all but approved`. */
 export function statesLabel(states: readonly ReviewerState[]): string {
   return shownLabel(states, ReviewerStateSchema.options, STATE_NAMES);
 }

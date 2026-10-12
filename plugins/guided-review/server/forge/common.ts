@@ -38,7 +38,7 @@ export function userOf(author: { login: string; name?: string | null | undefined
 }
 
 /**
- * Where an authored change request stands from each reviewer's latest state, by the same rule on both forges rather than either's merge verdict.
+ * Where an authored change request stands from each reviewer's latest state, by the same rule on both forges.
  * A change request beats any approval, and an approval still standing beats one taken back.
  */
 export function reviewStatusOf(reviewers: readonly Reviewer[]): ReviewStatus {

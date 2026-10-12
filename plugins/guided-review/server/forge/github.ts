@@ -343,10 +343,9 @@ const SUBMIT_LABELS: Record<Verdict, string> = {
 };
 
 /**
- * GitHub drops a review request once the reviewer reviews, so what they are a reviewer of is two
- * searches: the requests outstanding, team requests included, and the ones they answered. Pages are
- * kept at half a GraphQL page, because a full one of these timed out as a 502.
- * What the viewer authored is a third search, of the same size.
+ * GitHub drops a review request once the reviewer reviews, so what they are a reviewer of is two searches: the requests outstanding, team requests included, and the ones they answered.
+ * What the viewer authored is a third search.
+ * Pages are kept at half a GraphQL page, because a full one of these timed out as a 502.
  * `reviewed-by` also finds reviews nobody asked for, so `wasAskedToReview` keeps only those asked of the viewer.
  */
 export const REVIEW_SEARCHES = {
@@ -361,8 +360,8 @@ const AUTHORED_REVIEWERS = 20;
 
 /**
  * What every listed PR is read with.
- * A pending review is visible only to its author, so the first one is the viewer's, and its comments
- * are their drafts. A PR author can be a deleted account, which GitHub gives as null.
+ * A pending review is visible only to its author, so the first one is the viewer's, and its comments are their drafts.
+ * A PR author can be a deleted account, which GitHub gives as null.
  */
 const LISTED_PULL_REQUEST_FIELDS = `number url title isDraft createdAt updatedAt headRefOid additions deletions changedFiles
         author { login }
