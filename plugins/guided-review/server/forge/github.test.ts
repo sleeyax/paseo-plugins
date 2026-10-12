@@ -955,13 +955,21 @@ test("reviewers asked and none answered is waiting, and a review without a verdi
   assert.equal(commented.latestReviewAt, "2026-10-04T10:00:00Z");
 });
 
-test("a reviewer asked again is waited on, whatever they said before, and their review no longer counts as since the push", async () => {
-  const again = await authored31({ asked: ["bob"], reviews: [review("PRR_b", "bob", "CHANGES_REQUESTED")] });
+test("a reviewer asked again is waited on, and their review no longer counts as since the push", async () => {
+  const again = await authored31({ asked: ["alice"], reviews: [review("PRR_a", "alice", "APPROVED")] });
 
   assert.equal(again.status, "waiting");
-  assert.deepEqual(again.reviewers, [{ name: "bob", state: "requested" }]);
+  assert.deepEqual(again.reviewers, [{ name: "alice", state: "requested" }]);
   assert.equal(again.reviewedSinceLastPush, false);
   assert.equal(again.latestReviewAt, "2026-10-06T15:00:00Z");
+});
+
+test("a reviewer asked again after requesting changes still holds them, and their review counts as since the push", async () => {
+  const again = await authored31({ asked: ["bob"], reviews: [review("PRR_b", "bob", "CHANGES_REQUESTED")] });
+
+  assert.equal(again.status, "changes-requested");
+  assert.deepEqual(again.reviewers, [{ name: "bob", state: "changes-requested" }]);
+  assert.equal(again.reviewedSinceLastPush, true);
 });
 
 test("only GitHub's own attachment URLs are attachments", () => {

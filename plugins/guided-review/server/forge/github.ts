@@ -526,7 +526,7 @@ function reviewRequestOf(pr: SearchedPullRequest, requested: boolean): ReviewReq
 
 /**
  * The viewer's own PR with where each reviewer stands.
- * A reviewer asked again is `requested` whatever they said before, as on GitLab, where asking again resets their state.
+ * A reviewer asked again is `requested`, as on GitLab, where asking again resets their state, unless they requested changes: a blocking review is never hidden.
  * The author's own reviews are replies to threads, not reviews of their PR, so they are left out.
  */
 function authoredOf(pr: AuthoredPullRequest): AuthoredChangeRequest | null {
@@ -547,14 +547,16 @@ function authoredOf(pr: AuthoredPullRequest): AuthoredChangeRequest | null {
     const state = review.state === "DISMISSED" && resetByPush.has(review.id) ? "unapproved" : REVIEWER_STATES[review.state];
     states.set(userOf(review.author).login, state);
   }
-  for (const name of asked) states.set(name, "requested");
+  for (const name of asked) {
+    if (states.get(name) !== "changes-requested") states.set(name, "requested");
+  }
   const reviewers = [...states].map(([name, state]) => ({ name, state }));
   return {
     ...listed,
     status: reviewStatusOf(reviewers),
     reviewers,
     reviewedSinceLastPush: reviews.some(
-      (review) => review.state !== "DISMISSED" && !asked.has(userOf(review.author).login) && review.commit?.oid === pr.headRefOid,
+      (review) => review.state !== "DISMISSED" && states.get(userOf(review.author).login) !== "requested" && review.commit?.oid === pr.headRefOid,
     ),
     latestReviewAt: latestOf(reviews.flatMap((review) => (review.submittedAt === null ? [] : [review.submittedAt]))),
   };
