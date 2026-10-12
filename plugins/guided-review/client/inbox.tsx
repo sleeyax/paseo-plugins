@@ -94,7 +94,7 @@ type TabView<Item extends Row, State extends string, Column extends string> = {
 export function ReviewInbox({ colors, compact, openPanel }: { colors: Colors; compact: boolean; openPanel: (workspaceId: string) => void }) {
   const getInbox = useRpc(contracts.getInbox);
   const inbox = useQuery({ queryKey: INBOX_QUERY_KEY, queryFn: () => getInbox({}), refetchOnWindowFocus: false });
-  const starts = useReviewStarts(openPanel, [...(inbox.data?.items ?? []), ...(inbox.data?.authored ?? [])]);
+  const starts = useReviewStarts(openPanel, [...(inbox.data?.assigned ?? []), ...(inbox.data?.authored ?? [])]);
   const assigned = useInboxPreferences("assigned");
   const authored = useInboxPreferences("authored");
   const checkOffs = { assigned: useCheckOff(ASSIGNED_CHECK_OFF), authored: useCheckOff(AUTHORED_CHECK_OFF) };
@@ -127,7 +127,7 @@ export function ReviewInbox({ colors, compact, openPanel }: { colors: Colors; co
   return (
     <View onLayout={onVisibleWidth(setWidth)}>
       {tab === "assigned" ? (
-        <TabSection key={tab} {...shared} view={ASSIGNED_VIEW} listed={inbox.data?.items} preferences={assigned} checkOff={checkOffs.assigned} />
+        <TabSection key={tab} {...shared} view={ASSIGNED_VIEW} listed={inbox.data?.assigned} preferences={assigned} checkOff={checkOffs.assigned} />
       ) : (
         <TabSection key={tab} {...shared} view={AUTHORED_VIEW} listed={inbox.data?.authored} preferences={authored} checkOff={checkOffs.authored} />
       )}

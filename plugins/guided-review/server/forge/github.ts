@@ -5,7 +5,7 @@ import { createCli } from "./cli.ts";
 import type { Draft, DraftLocation } from "../../shared/drafts.ts";
 import type { AuthoredChangeRequest, CiState, ListedChangeRequest, ListedHost, ReviewerState, ReviewRequest } from "../../shared/inbox.ts";
 import type { Verdict } from "../../shared/submit.ts";
-import { CLONE_TIMEOUT_MS, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, latestOf, reviewStatusOf, userOf } from "./common.ts";
+import { CLONE_TIMEOUT_MS, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, latestOf, reviewStatusOf, unlistedHost, userOf } from "./common.ts";
 import { SubmitSteps } from "./submit-steps.ts";
 import {
   commitsSinceIn,
@@ -874,27 +874,35 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
     },
 
     async listChangeRequests(): Promise<ListedHost[]> {
-      const search = <T extends z.ZodType>(response: T, query: string, search: string) =>
+      const search = <T extends z.ZodType>(response: T, query: string, terms: string) =>
         gh.json(response, ["api", "graphql", "--hostname", GITHUB_HOST, "--input", "-"], {
-          input: JSON.stringify({ query, variables: { query: search } }),
+          input: JSON.stringify({ query, variables: { query: terms } }),
         });
-      const cut = (...answers: { data: { search: { issueCount: number; nodes: unknown[] } } }[]) =>
+      const hasMore = (...answers: { data: { search: { issueCount: number; nodes: unknown[] } } }[]) =>
         answers.some(({ data }) => data.search.issueCount > data.search.nodes.length);
       try {
-        const [requested, reviewed, mine] = await Promise.all([
+        const [requested, reviewed, authored] = await Promise.all([
           search(ReviewSearchResponse, REVIEW_SEARCH_QUERY, REVIEW_SEARCHES.requested),
           search(ReviewSearchResponse, REVIEW_SEARCH_QUERY, REVIEW_SEARCHES.reviewed),
           search(AuthoredSearchResponse, AUTHORED_SEARCH_QUERY, REVIEW_SEARCHES.authored),
         ]);
-        const requests = [
+        const assigned = [
           ...requested.data.search.nodes.map((pr) => reviewRequestOf(pr, true)),
           ...reviewed.data.search.nodes.filter((pr) => wasAskedToReview(pr, reviewed.data.viewer.login)).map((pr) => reviewRequestOf(pr, false)),
         ].filter((request) => request !== null);
-        const authored = mine.data.search.nodes.map(authoredOf).filter((listed) => listed !== null);
-        return [{ forge: "github", host: GITHUB_HOST, requests, authored, truncated: { assigned: cut(requested, reviewed), authored: cut(mine) }, error: null }];
+        return [
+          {
+            forge: "github",
+            host: GITHUB_HOST,
+            assigned,
+            authored: authored.data.search.nodes.map(authoredOf).filter((request) => request !== null),
+            truncated: { assigned: hasMore(requested, reviewed), authored: hasMore(authored) },
+            error: null,
+          },
+        ];
       } catch (error) {
         if (!(error instanceof ForgeError)) throw error;
-        return [{ forge: "github", host: GITHUB_HOST, requests: [], authored: [], truncated: { assigned: false, authored: false }, error: error.message }];
+        return [unlistedHost("github", GITHUB_HOST, error.message)];
       }
     },
   };

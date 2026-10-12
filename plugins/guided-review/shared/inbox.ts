@@ -83,11 +83,11 @@ export type AuthoredChangeRequest = z.output<typeof AuthoredChangeRequestSchema>
 export const ListedHostSchema = z.object({
   forge: z.enum(["github", "gitlab"]),
   host: z.string(),
-  /** What the viewer is asked to review: the Assigned tab. */
-  requests: z.array(ReviewRequestSchema),
-  /** What the viewer authored: the Authored tab. */
+  /** What the viewer is asked to review. */
+  assigned: z.array(ReviewRequestSchema),
+  /** What the viewer authored. */
   authored: z.array(AuthoredChangeRequestSchema),
-  /** Which of the host's lists has more than was listed, by the tab it is on. */
+  /** Which of the host's lists has more than was listed. */
   truncated: z.object({ assigned: z.boolean(), authored: z.boolean() }),
   /** Why the host could not be listed, as a sentence; both its lists are then empty. */
   error: z.string().nullable(),
@@ -135,10 +135,8 @@ export const CheckOffChangeSchema = z.discriminatedUnion("tab", [
 
 /** Every host's review requests and the viewer's own change requests, each joined with the review started here, if any. */
 export const InboxSchema = z.object({
-  hosts: z.array(ListedHostSchema.omit({ requests: true, authored: true })),
-  /** The Assigned tab. */
-  items: z.array(InboxItemSchema),
-  /** The Authored tab. */
+  hosts: z.array(ListedHostSchema.omit({ assigned: true, authored: true })),
+  assigned: z.array(InboxItemSchema),
   authored: z.array(AuthoredInboxItemSchema),
 });
 

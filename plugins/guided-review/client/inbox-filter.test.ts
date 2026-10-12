@@ -223,11 +223,11 @@ test("checking a change request off marks it on that tab only, though the same o
   const both = inboxOf([item(7, { url }), item(8)], [mine(7, { url })]);
 
   const assigned = withCheckedOff(both, "assigned", url, true);
-  assert.deepEqual([assigned.items.map((entry) => entry.checkedOff), assigned.authored.map((entry) => entry.checkedOff)], [[true, false], [false]]);
+  assert.deepEqual([assigned.assigned.map((entry) => entry.checkedOff), assigned.authored.map((entry) => entry.checkedOff)], [[true, false], [false]]);
   const authored = withCheckedOff(assigned, "authored", url, true);
-  assert.deepEqual([authored.items.map((entry) => entry.checkedOff), authored.authored.map((entry) => entry.checkedOff)], [[true, false], [true]]);
+  assert.deepEqual([authored.assigned.map((entry) => entry.checkedOff), authored.authored.map((entry) => entry.checkedOff)], [[true, false], [true]]);
   const unchecked = withCheckedOff(authored, "assigned", url, false);
-  assert.deepEqual([unchecked.items.map((entry) => entry.checkedOff), unchecked.authored.map((entry) => entry.checkedOff)], [[false, false], [true]]);
+  assert.deepEqual([unchecked.assigned.map((entry) => entry.checkedOff), unchecked.authored.map((entry) => entry.checkedOff)], [[false, false], [true]]);
 });
 
 test("the search on Authored needs every word in the title, project, reviewers or number, not the viewer's own name", () => {
@@ -245,8 +245,8 @@ test("the search on Authored needs every word in the title, project, reviewers o
   for (const query of ["me", "#12", "uploader"]) assert.equal(matchesSearch(AUTHORED_RULES, mr, query), false, query);
 });
 
-function inboxOf(items: InboxItem[], authored: AuthoredInboxItem[] = [], hosts: Inbox["hosts"] = []): Inbox {
-  return { hosts, items, authored };
+function inboxOf(assigned: InboxItem[], authored: AuthoredInboxItem[] = [], hosts: Inbox["hosts"] = []): Inbox {
+  return { hosts, assigned, authored };
 }
 
 function host(name: string, truncated: Partial<Record<"assigned" | "authored", boolean>> = {}): Inbox["hosts"][number] {

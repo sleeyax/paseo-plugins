@@ -1,4 +1,5 @@
 import type { AuthoredChangeRequest, AuthoredInboxItem, Inbox, InboxItem, ListedChangeRequest, LocalReview, ReviewRequest } from "../shared/inbox.ts";
+import type { InboxTab } from "../shared/inbox-preferences.ts";
 import type { ChangeRequestRef, Forge } from "./forge/port.ts";
 import { awaitsScope, type GuideGenerations } from "./guide-generation.ts";
 import type { InboxCheckOffsFile } from "./inbox-check-offs.ts";
@@ -19,10 +20,8 @@ export type ReviewInboxOptions = {
 /**
  * The review requests of every forge and the viewer's own change requests, joined with the reviews started here and what the viewer checked off on each tab: the start screen's list.
  * Each forge answers per host, so one that cannot be listed leaves the rest listed.
- *
- * GitLab's listing cannot count drafts, which take a call per MR, so they are counted only for the
- * MRs reviewed here; and its guess at a push since the last review is replaced by the head a review
- * from here was published at, which is exact.
+ * GitLab's listing cannot count drafts, which take a call per MR, so they are counted only for the MRs reviewed here.
+ * Its guess at a push since the last review is replaced by the head a review from here was published at, which is exact.
  */
 export class ReviewInbox {
   readonly #forges: readonly Forge[];
@@ -47,13 +46,13 @@ export class ReviewInbox {
     const listed = (await Promise.all(this.#forges.map((forge) => forge.listChangeRequests()))).flat();
     const checkedOff = await this.#checkOffs.follow(listed);
     const countDrafts = this.#draftCounter();
-    const items = await Promise.all(
-      listed.flatMap((host) => host.requests).map(async (request) => ({ ...(await this.#item(request, countDrafts)), checkedOff: checkedOff.assigned.has(request.url) })),
-    );
-    const authored = await Promise.all(
-      listed.flatMap((host) => host.authored).map(async (mine) => ({ ...(await this.#authoredItem(mine, countDrafts)), checkedOff: checkedOff.authored.has(mine.url) })),
-    );
-    return { hosts: listed.map(({ requests: _, authored: __, ...host }) => host), items, authored };
+    const joinAll = <Request extends ListedChangeRequest, Item>(tab: InboxTab, requests: Request[], join: (request: Request) => Promise<Item>) =>
+      Promise.all(requests.map(async (request) => ({ ...(await join(request)), checkedOff: checkedOff[tab].has(request.url) })));
+    return {
+      hosts: listed.map(({ assigned: _, authored: __, ...host }) => host),
+      assigned: await joinAll("assigned", listed.flatMap((host) => host.assigned), (request) => this.#item(request, countDrafts)),
+      authored: await joinAll("authored", listed.flatMap((host) => host.authored), (request) => this.#authoredItem(request, countDrafts)),
+    };
   }
 
   /** What this plugin has of the review `reviewId` names: null when it was never started here. */
@@ -84,10 +83,10 @@ export class ReviewInbox {
     };
   }
 
-  async #authoredItem(mine: AuthoredChangeRequest, countDrafts: DraftCounter): Promise<Omit<AuthoredInboxItem, "checkedOff">> {
-    const { reviewId, local, record } = await this.#joined(mine);
-    if (record === null) return { ...mine, reviewId, local };
-    return { ...mine, pendingDrafts: await this.#pendingDrafts(mine, record, countDrafts), reviewId, local };
+  async #authoredItem(request: AuthoredChangeRequest, countDrafts: DraftCounter): Promise<Omit<AuthoredInboxItem, "checkedOff">> {
+    const { reviewId, local, record } = await this.#joined(request);
+    if (record === null) return { ...request, reviewId, local };
+    return { ...request, pendingDrafts: await this.#pendingDrafts(request, record, countDrafts), reviewId, local };
   }
 
   /** The review started here of a listed change request, which is one review whichever tab lists it. */
@@ -104,7 +103,7 @@ export class ReviewInbox {
     return listed.pendingDrafts === null ? null : listed.pendingDrafts + paragraphs;
   }
 
-  /** Counts each review's drafts once however many tabs list it, since GitLab takes a call per MR. */
+  /** Counts each review's drafts once however many tabs list it. */
   #draftCounter(): DraftCounter {
     const counts = new Map<string, Promise<number | null>>();
     return (record) => {

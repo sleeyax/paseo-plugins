@@ -47,7 +47,7 @@ export class InboxCheckOffsFile {
   /** Follows a listing of every host, and answers the URLs still checked off on each tab. */
   async follow(hosts: readonly ListedHost[]): Promise<Record<InboxTab, Set<string>>> {
     const followed = await this.#change((checkOffs) => ({
-      assigned: followListing(checkOffs.assigned, hosts, "assigned", (host) => host.requests, assignedStillOff),
+      assigned: followListing(checkOffs.assigned, hosts, "assigned", (host) => host.assigned, assignedStillOff),
       authored: followListing(checkOffs.authored, hosts, "authored", (host) => host.authored, authoredStillOff),
     }));
     return { assigned: new Set(Object.keys(followed.assigned)), authored: new Set(Object.keys(followed.authored)) };
@@ -104,8 +104,8 @@ function assignedStillOff(checkOff: CheckOff, request: ReviewRequest): CheckOff 
  * An authored check-off comes back on any news from its reviewers, never on the author's own push.
  * Any other newest review time counts, not only a later one, since a GitLab approval reset can lower it or clear it.
  */
-function authoredStillOff(checkOff: AuthoredCheckOff, mine: AuthoredChangeRequest): AuthoredCheckOff | null {
-  return mine.status === checkOff.status && mine.latestReviewAt === checkOff.latestReviewAt ? checkOff : null;
+function authoredStillOff(checkOff: AuthoredCheckOff, request: AuthoredChangeRequest): AuthoredCheckOff | null {
+  return request.status === checkOff.status && request.latestReviewAt === checkOff.latestReviewAt ? checkOff : null;
 }
 
 /** One tab's check-offs as the file holds them, leaving out any the plugin no longer reads. */

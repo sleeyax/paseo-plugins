@@ -1,7 +1,7 @@
-import type { Reviewer, ReviewStatus } from "../../shared/inbox.ts";
+import type { ListedHost, Reviewer, ReviewStatus } from "../../shared/inbox.ts";
 import type { ForgeUser } from "./port.ts";
 
-/** What both forge adapters share: the caps on what they read, how an author with no account reads, and how reviewers' states combine. */
+/** What both forge adapters share: the caps on what they read, how an author with no account reads, how reviewers' states combine, and how a host that could not be listed reads. */
 
 /** Cloning a large repository is the one call that can take minutes. */
 export const CLONE_TIMEOUT_MS = 10 * 60_000;
@@ -53,4 +53,9 @@ export function reviewStatusOf(reviewers: readonly Reviewer[]): ReviewStatus {
 /** The latest of some ISO times, as the forge wrote it; null for none. */
 export function latestOf(times: readonly string[]): string | null {
   return times.reduce<string | null>((latest, at) => (latest === null || Date.parse(at) > Date.parse(latest) ? at : latest), null);
+}
+
+/** A host that could not be listed, with why. */
+export function unlistedHost(forge: ListedHost["forge"], host: string, error: string): ListedHost {
+  return { forge, host, assigned: [], authored: [], truncated: { assigned: false, authored: false }, error };
 }

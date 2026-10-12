@@ -6,7 +6,7 @@ import type { Verdict } from "../../shared/submit.ts";
 import type { AuthoredChangeRequest, CiState, ListedChangeRequest, ListedHost, ReviewerState, ReviewRequest } from "../../shared/inbox.ts";
 import { createCli, type Cli } from "./cli.ts";
 import { GITHUB_HOST } from "./github.ts";
-import { CLONE_TIMEOUT_MS, COMMIT_READS_AT_ONCE, mapAtMost, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, latestOf, reviewStatusOf, userOf } from "./common.ts";
+import { CLONE_TIMEOUT_MS, COMMIT_READS_AT_ONCE, mapAtMost, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, latestOf, reviewStatusOf, unlistedHost, userOf } from "./common.ts";
 import { SubmitSteps } from "./submit-steps.ts";
 import {
   commitsSinceIn,
@@ -376,7 +376,6 @@ function authoredOf(mr: AuthoredMergeRequest): AuthoredChangeRequest | null {
 /** The states a reviewer reaches by reviewing, rather than by being asked or by GitLab taking an approval back. */
 const REVIEWED_STATES: ReadonlySet<ReviewerState> = new Set(["commented", "changes-requested", "approved"]);
 
-/** GitLab's listing cannot count the viewer's drafts, which take a call per MR. */
 function listedOf(mr: ListedMergeRequest): ListedChangeRequest | null {
   const ref = parseMergeRequestUrl(mr.webUrl);
   if (ref === null) return null;
@@ -518,8 +517,8 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
     return {
       forge: "gitlab",
       host,
-      requests: assigned.nodes.map((mr) => reviewRequestOf(mr, user.username)).filter((request) => request !== null),
-      authored: authored.nodes.map(authoredOf).filter((mine) => mine !== null),
+      assigned: assigned.nodes.map((mr) => reviewRequestOf(mr, user.username)).filter((request) => request !== null),
+      authored: authored.nodes.map(authoredOf).filter((request) => request !== null),
       truncated: { assigned: assigned.pageInfo.hasNextPage, authored: authored.pageInfo.hasNextPage },
     };
   };
@@ -906,17 +905,16 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       const statuses = parseAuthStatus(await glab.report(["auth", "status", "--all"]));
       return Promise.all(
         statuses.map(async ({ host, loggedIn, problem }): Promise<ListedHost> => {
-          const listed = { forge: "gitlab" as const, host, requests: [], authored: [], truncated: { assigned: false, authored: false } };
           if (!loggedIn) {
             const reason = problem === null ? "" : ` (${problem})`;
-            return { ...listed, error: `glab is not logged in to ${host}${reason}. Run \`glab auth login --hostname ${host}\` on the daemon's host.` };
+            return unlistedHost("gitlab", host, `glab is not logged in to ${host}${reason}. Run \`glab auth login --hostname ${host}\` on the daemon's host.`);
           }
           hosts.set(host, Promise.resolve());
           try {
             return { ...(await listingOn(host)), error: null };
           } catch (error) {
             if (!(error instanceof ForgeError)) throw error;
-            return { ...listed, error: error.message };
+            return unlistedHost("gitlab", host, error.message);
           }
         }),
       );

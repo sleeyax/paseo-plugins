@@ -1196,7 +1196,7 @@ test("lists the open MRs the viewer reviews on each host glab is logged in to, a
   const [host] = hosts;
   assert.equal(host?.error, null);
   assert.deepEqual(host?.truncated, { assigned: false, authored: false });
-  assert.deepEqual(host?.requests[0], {
+  assert.deepEqual(host?.assigned[0], {
     forge: "gitlab",
     host: "gitlab.com",
     project: "example-group/service",
@@ -1223,7 +1223,7 @@ test("an MR reads by the viewer's own reviewer record, changed when the head com
   const { forge } = forgeReplaying(LIST_REVIEWS);
 
   const [host] = await forge.listChangeRequests();
-  const summary = host?.requests.map(({ number, state, changedSinceReview, ci, author, isDraft }) => ({ number, state, changedSinceReview, ci, author, isDraft }));
+  const summary = host?.assigned.map(({ number, state, changedSinceReview, ci, author, isDraft }) => ({ number, state, changedSinceReview, ci, author, isDraft }));
 
   assert.deepEqual(summary, [
     { number: 12, state: "requested", changedSinceReview: null, ci: "failure", author: "author", isDraft: false },
@@ -1365,7 +1365,7 @@ test("a host glab is not logged in to, or one older than 19.2, comes back with i
   const hosts = await forge.listChangeRequests();
 
   assert.deepEqual(
-    hosts.map(({ host, error, requests, authored }) => ({ host, error, counts: [requests.length, authored.length] })),
+    hosts.map(({ host, error, assigned, authored }) => ({ host, error, counts: [assigned.length, authored.length] })),
     [
       {
         host: "gitlab.example.invalid",
@@ -1379,7 +1379,7 @@ test("a host glab is not logged in to, or one older than 19.2, comes back with i
 
   const { forge: old } = forgeReplaying([AUTH_STATUS_ALL, version("18.11.2-ee")]);
   assert.deepEqual(await old.listChangeRequests(), [
-    { forge: "gitlab", host: "gitlab.com", requests: [], authored: [], truncated: { assigned: false, authored: false }, error: "gitlab.com runs GitLab 18.11.2-ee; listing your reviews needs 19.2 or newer." },
+    { forge: "gitlab", host: "gitlab.com", assigned: [], authored: [], truncated: { assigned: false, authored: false }, error: "gitlab.com runs GitLab 18.11.2-ee; listing your reviews needs 19.2 or newer." },
   ]);
 });
 

@@ -113,7 +113,7 @@ const ATTENTION_FILTERS: AssignedPreferences = { ...DEFAULT_INBOX_PREFERENCES.as
 
 /** How many review requests need the reviewer's attention: the sidebar's count, which leaves their own change requests out. */
 export function attentionCount(inbox: Inbox): number {
-  return inbox.items.filter((item) => matchesFilters(ASSIGNED_RULES, item, ATTENTION_FILTERS, "") && passesCheckOff(item, ATTENTION_FILTERS)).length;
+  return inbox.assigned.filter((item) => matchesFilters(ASSIGNED_RULES, item, ATTENTION_FILTERS, "") && passesCheckOff(item, ATTENTION_FILTERS)).length;
 }
 
 /** Whether the check-off filter shows the item, which a held row is not asked. */
@@ -140,21 +140,16 @@ function matchesFilters<Item extends ListedItem, State extends string>(rules: Ta
 
 const TAB_TITLES: Record<InboxTab, string> = { assigned: "Assigned to me", authored: "Authored by me" };
 
-function listedOn(inbox: Inbox, tab: InboxTab): readonly ListedItem[] {
-  return tab === "assigned" ? inbox.items : inbox.authored;
-}
-
 /** A tab's name with how many it lists, a `+` when a host listed only part of it, and no number until it is listed. */
 export function tabLabel(tab: InboxTab, inbox: Inbox | undefined): string {
   if (inbox === undefined) return TAB_TITLES[tab];
   const partial = inbox.hosts.some((host) => host.truncated[tab]);
-  return `${TAB_TITLES[tab]} · ${listedOn(inbox, tab).length}${partial ? "+" : ""}`;
+  return `${TAB_TITLES[tab]} · ${inbox[tab].length}${partial ? "+" : ""}`;
 }
 
 /** The inbox with the change request at `url` checked off or not on `tab`, leaving the same one on the other tab as it was. */
 export function withCheckedOff(inbox: Inbox, tab: InboxTab, url: string, checkedOff: boolean): Inbox {
-  const mark = <Item extends ListedItem>(items: Item[]) => items.map((item) => (item.url === url ? { ...item, checkedOff } : item));
-  return tab === "assigned" ? { ...inbox, items: mark(inbox.items) } : { ...inbox, authored: mark(inbox.authored) };
+  return { ...inbox, [tab]: inbox[tab].map((item) => (item.url === url ? { ...item, checkedOff } : item)) };
 }
 
 /** Each reviewer state as a sentence names it mid-way. */

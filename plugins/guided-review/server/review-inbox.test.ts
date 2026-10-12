@@ -73,8 +73,8 @@ function authored(url: string, overrides: Partial<AuthoredChangeRequest> = {}): 
 
 const COMPLETE = { assigned: false, authored: false };
 
-function listed(forge: "github" | "gitlab", requests: ReviewRequest[], extra: Partial<ListedHost> = {}): ListedHost {
-  return { forge, host: forge === "github" ? "github.com" : "gitlab.com", requests, authored: [], truncated: COMPLETE, error: null, ...extra };
+function listed(forge: "github" | "gitlab", assigned: ReviewRequest[], extra: Partial<ListedHost> = {}): ListedHost {
+  return { forge, host: forge === "github" ? "github.com" : "gitlab.com", assigned, authored: [], truncated: COMPLETE, error: null, ...extra };
 }
 
 test("lists every forge's review requests and the viewer's own change requests with their hosts, and none started here has a local review", async (t) => {
@@ -93,7 +93,7 @@ test("lists every forge's review requests and the viewer's own change requests w
     { forge: "gitlab", host: "gitlab.com", truncated: { assigned: false, authored: true }, error: null },
     { forge: "gitlab", host: "gitlab.example.com", truncated: COMPLETE, error: "glab is not logged in to gitlab.example.com." },
   ]);
-  assert.deepEqual(inbox.items, [
+  assert.deepEqual(inbox.assigned, [
     { ...request(GITHUB_URL), reviewId: GITHUB_ID, local: null, checkedOff: false },
     { ...request(GITLAB_URL), reviewId: GITLAB_ID, local: null, checkedOff: false },
   ]);
@@ -131,10 +131,10 @@ test("an MR the viewer authored and reviews is listed on both tabs with one revi
   const inbox = await service.inbox();
 
   assert.equal(inbox.authored[0]?.reviewId, GITLAB_ID);
-  assert.equal(inbox.items[0]?.reviewId, GITLAB_ID);
+  assert.equal(inbox.assigned[0]?.reviewId, GITLAB_ID);
   assert.equal(inbox.authored[0]?.local?.guide, "ready");
-  assert.deepEqual(inbox.authored[0]?.local, inbox.items[0]?.local);
-  assert.deepEqual([inbox.items[0]?.pendingDrafts, inbox.authored[0]?.pendingDrafts], [1, 1]);
+  assert.deepEqual(inbox.authored[0]?.local, inbox.assigned[0]?.local);
+  assert.deepEqual([inbox.assigned[0]?.pendingDrafts, inbox.authored[0]?.pendingDrafts], [1, 1]);
   assert.equal(counted, 1);
 });
 
@@ -143,13 +143,13 @@ test("a change request reviewed here carries its review, its guide's state and w
   await startReview(service, GITHUB_URL);
 
   github.listedHosts = [listed("github", [request(GITHUB_URL)])];
-  const [item] = (await service.inbox()).items;
+  const [item] = (await service.inbox()).assigned;
   assert.equal(item?.local?.header?.headSha, HEAD);
   assert.deepEqual({ ...item?.local, header: null }, { header: null, preparing: null, guide: "ready", workspaceId: "wks_0000000000000001" });
   assert.equal(headMoved(item!, item!.local!), false);
 
   github.listedHosts = [listed("github", [request(GITHUB_URL, { headSha: PUSHED })])];
-  const [pushed] = (await service.inbox()).items;
+  const [pushed] = (await service.inbox()).assigned;
   assert.equal(headMoved(pushed!, pushed!.local!), true);
 });
 
@@ -159,7 +159,7 @@ test("a start that failed before the change request was read lists as failed, wi
   await startReview(service, GITHUB_URL);
 
   github.listedHosts = [listed("github", [request(GITHUB_URL)])];
-  const local = (await service.inbox()).items[0]?.local;
+  const local = (await service.inbox()).assigned[0]?.local;
   assert.equal(local?.preparing?.phase, "failed");
   assert.match(local?.preparing?.message ?? "", /^Could not read /);
   assert.deepEqual({ ...local, preparing: null }, { header: null, preparing: null, guide: "none", workspaceId: null });
@@ -171,7 +171,7 @@ test("a review whose workspace was archived has no workspace to open, and the li
   workspaces.archive("wks_0000000000000001");
 
   github.listedHosts = [listed("github", [request(GITHUB_URL)])];
-  const listedLocal = (await service.inbox()).items[0]?.local;
+  const listedLocal = (await service.inbox()).assigned[0]?.local;
   assert.equal(listedLocal?.workspaceId, null);
   assert.deepEqual(await service.localReviews({ reviewIds: [GITHUB_ID, GITLAB_ID] }), {
     reviews: [
@@ -208,7 +208,7 @@ test("on GitLab the drafts are counted for an MR reviewed here only, and a faile
   ]);
   gitlab.listedHosts = [listed("gitlab", [request(GITLAB_URL), request(other, { number: 8 })])];
 
-  const items = (await service.inbox()).items;
+  const items = (await service.inbox()).assigned;
   assert.deepEqual(
     items.map((item) => item.pendingDrafts),
     [2, null],
@@ -217,7 +217,7 @@ test("on GitLab the drafts are counted for an MR reviewed here only, and a faile
   gitlab.listDrafts = async () => {
     throw new ForgeError("glab failed: 500 Internal Server Error");
   };
-  assert.equal((await service.inbox()).items[0]?.pendingDrafts, null);
+  assert.equal((await service.inbox()).assigned[0]?.pendingDrafts, null);
 });
 
 test("a GitLab review published from here says whether the head moved since, over the listing's guess", async (t) => {
@@ -226,24 +226,24 @@ test("a GitLab review published from here says whether the head moved since, ove
   const reviewId = "gitlab/gitlab.com/acme/uploader/7";
 
   gitlab.listedHosts = [listed("gitlab", [request(GITLAB_URL, { state: "commented", changedSinceReview: null })])];
-  assert.equal((await service.inbox()).items[0]?.changedSinceReview, null, "nothing published from here yet");
+  assert.equal((await service.inbox()).assigned[0]?.changedSinceReview, null, "nothing published from here yet");
 
   const submitted = await service.submit({ reviewId, headSha: HEAD, forgeHeadSha: HEAD, verdict: "comment", body: "Reads well." });
   assert.equal(submitted.status, "submitted");
 
   gitlab.listedHosts = [listed("gitlab", [request(GITLAB_URL, { state: "commented", changedSinceReview: true })])];
-  assert.equal((await service.inbox()).items[0]?.changedSinceReview, false, "the head is still the one reviewed");
+  assert.equal((await service.inbox()).assigned[0]?.changedSinceReview, false, "the head is still the one reviewed");
 
   gitlab.listedHosts = [listed("gitlab", [request(GITLAB_URL, { state: "commented", headSha: PUSHED, changedSinceReview: false })])];
-  assert.equal((await service.inbox()).items[0]?.changedSinceReview, true, "pushed since");
+  assert.equal((await service.inbox()).assigned[0]?.changedSinceReview, true, "pushed since");
 
   gitlab.listedHosts = [listed("gitlab", [request(GITLAB_URL, { state: "requested", changedSinceReview: null })])];
-  assert.equal((await service.inbox()).items[0]?.changedSinceReview, null, "asked again, which the listing says");
+  assert.equal((await service.inbox()).assigned[0]?.changedSinceReview, null, "asked again, which the listing says");
 });
 
 async function checkedOff(service: ReviewService, tab: "assigned" | "authored" = "assigned"): Promise<string[]> {
   const inbox = await service.inbox();
-  return (tab === "assigned" ? inbox.items : inbox.authored).filter((item) => item.checkedOff).map((item) => item.url);
+  return inbox[tab].filter((item) => item.checkedOff).map((item) => item.url);
 }
 
 test("a check-off holds while the change request stands still, survives a restart and is undone by unchecking", async (t) => {
@@ -341,7 +341,7 @@ test("a check-off on one tab leaves the same MR on the other tab alone, and come
   };
   const tabs = async () => {
     const inbox = await service.inbox();
-    return [inbox.items[0]?.checkedOff, inbox.authored[0]?.checkedOff];
+    return [inbox.assigned[0]?.checkedOff, inbox.authored[0]?.checkedOff];
   };
   onBothTabs();
 

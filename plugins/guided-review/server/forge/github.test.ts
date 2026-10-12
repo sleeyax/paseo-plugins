@@ -749,9 +749,9 @@ test("lists what the viewer is asked to review, what they reviewed and what they
   assert.equal(host?.host, "github.com");
   assert.equal(host?.error, null);
   assert.deepEqual(host?.truncated, { assigned: false, authored: false });
-  assert.equal(host?.requests.length, 7);
+  assert.equal(host?.assigned.length, 7);
 
-  assert.deepEqual(host?.requests[0], {
+  assert.deepEqual(host?.assigned[0], {
     forge: "github",
     host: "github.com",
     project: "sleeyax/paseo-plugins",
@@ -778,7 +778,7 @@ test("a PR the viewer is asked to review again reads as requested and changed, w
   const { forge } = forgeReplaying(searches());
 
   const [host] = await forge.listChangeRequests();
-  const again = host?.requests.find((request) => request.number === 7);
+  const again = host?.assigned.find((request) => request.number === 7);
 
   assert.equal(again?.author, "ghost");
   assert.equal(again?.isDraft, true);
@@ -793,7 +793,7 @@ test("a PR the viewer reviewed and is not asked again reads by their review, cha
   const { forge } = forgeReplaying(searches());
 
   const [host] = await forge.listChangeRequests();
-  const byUrl = (url: string) => host?.requests.find((request) => request.url === url);
+  const byUrl = (url: string) => host?.assigned.find((request) => request.url === url);
 
   const commented = byUrl("https://github.com/themouette/claude-vm/pull/96");
   assert.equal(commented?.state, "commented");
@@ -807,7 +807,7 @@ test("a PR the viewer reviewed without being asked, by name or through a team, i
   const { forge } = forgeReplaying(searches());
 
   const [host] = await forge.listChangeRequests();
-  const urls = host?.requests.map((request) => request.url);
+  const urls = host?.assigned.map((request) => request.url);
 
   assert.ok(!urls?.includes("https://github.com/magisterquis/connectproxy/pull/2"));
   assert.ok(!urls?.includes("https://github.com/sickcodes/Docker-OSX/pull/819"));
@@ -834,7 +834,7 @@ test("a search gh cannot run comes back as the host's error once, with both list
   const error = {
     forge: "github",
     host: "github.com",
-    requests: [],
+    assigned: [],
     authored: [],
     truncated: { assigned: false, authored: false },
     error: "gh failed: To get started with GitHub CLI, please run:  gh auth login",
