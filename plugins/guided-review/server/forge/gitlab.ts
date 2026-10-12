@@ -447,7 +447,8 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       forge: "gitlab",
       host,
       requests: nodes.map((mr) => reviewRequestOf(mr, user.username)).filter((request) => request !== null),
-      truncated: pageInfo.hasNextPage,
+      authored: [],
+      truncated: { assigned: pageInfo.hasNextPage, authored: false },
     };
   };
 
@@ -833,7 +834,7 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       const statuses = parseAuthStatus(await glab.report(["auth", "status", "--all"]));
       return Promise.all(
         statuses.map(async ({ host, loggedIn, problem }): Promise<ListedHost> => {
-          const listed = { forge: "gitlab" as const, host, requests: [], truncated: false };
+          const listed = { forge: "gitlab" as const, host, requests: [], authored: [], truncated: { assigned: false, authored: false } };
           if (!loggedIn) {
             const reason = problem === null ? "" : ` (${problem})`;
             return { ...listed, error: `glab is not logged in to ${host}${reason}. Run \`glab auth login --hostname ${host}\` on the daemon's host.` };

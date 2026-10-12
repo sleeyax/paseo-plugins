@@ -5,6 +5,7 @@ import test from "node:test";
 import { fakeCommandRunner, type FakeCommandRunner, type ScriptedResult } from "../fake-command-runner.ts";
 import {
   ADD_THREAD_MUTATION,
+  AUTHORED_SEARCH_QUERY,
   COMMIT_PULL_REQUESTS_QUERY,
   createGitHubForge,
   MAX_COMPARE_FILES,
@@ -716,8 +717,17 @@ test("a discussion on the pull request is a comment on its conversation, as GitH
   assert.deepEqual(run.calls[0]?.args, ["api", "--hostname", "github.com", "--method", "POST", "repos/sleeyax/paseo-plugins/issues/105/comments", "--input", "-"]);
 });
 
-test("lists what the viewer is asked to review and what they reviewed, as two searches on github.com", async () => {
-  const { forge, run } = forgeReplaying([{ stdout: fixture("review-search-requested.json") }, { stdout: fixture("review-search-reviewed.json") }]);
+/** A listing's three searches as gh answers them, in the order they go out: asked to review, reviewed, authored. */
+function searches(answers: { requested?: ScriptedResult; reviewed?: ScriptedResult; authored?: ScriptedResult } = {}): ScriptedResult[] {
+  return [
+    answers.requested ?? { stdout: fixture("review-search-requested.json") },
+    answers.reviewed ?? { stdout: fixture("review-search-reviewed.json") },
+    answers.authored ?? { stdout: fixture("review-search-authored.json") },
+  ];
+}
+
+test("lists what the viewer is asked to review, what they reviewed and what they authored, as three searches on github.com", async () => {
+  const { forge, run } = forgeReplaying(searches());
 
   const [host, ...others] = await forge.listChangeRequests();
 
@@ -727,16 +737,18 @@ test("lists what the viewer is asked to review and what they reviewed, as two se
     [
       ["api", "graphql", "--hostname", "github.com", "--input", "-"],
       ["api", "graphql", "--hostname", "github.com", "--input", "-"],
+      ["api", "graphql", "--hostname", "github.com", "--input", "-"],
     ],
   );
   assert.deepEqual(graphqlCalls(run), [
     { query: REVIEW_SEARCH_QUERY, variables: { query: REVIEW_SEARCHES.requested } },
     { query: REVIEW_SEARCH_QUERY, variables: { query: REVIEW_SEARCHES.reviewed } },
+    { query: AUTHORED_SEARCH_QUERY, variables: { query: REVIEW_SEARCHES.authored } },
   ]);
   assert.equal(host?.forge, "github");
   assert.equal(host?.host, "github.com");
   assert.equal(host?.error, null);
-  assert.equal(host?.truncated, false);
+  assert.deepEqual(host?.truncated, { assigned: false, authored: false });
   assert.equal(host?.requests.length, 7);
 
   assert.deepEqual(host?.requests[0], {
@@ -763,7 +775,7 @@ test("lists what the viewer is asked to review and what they reviewed, as two se
 });
 
 test("a PR the viewer is asked to review again reads as requested and changed, with the team it was asked of", async () => {
-  const { forge } = forgeReplaying([{ stdout: fixture("review-search-requested.json") }, { stdout: fixture("review-search-reviewed.json") }]);
+  const { forge } = forgeReplaying(searches());
 
   const [host] = await forge.listChangeRequests();
   const again = host?.requests.find((request) => request.number === 7);
@@ -778,7 +790,7 @@ test("a PR the viewer is asked to review again reads as requested and changed, w
 });
 
 test("a PR the viewer reviewed and is not asked again reads by their review, changed when the head moved past it", async () => {
-  const { forge } = forgeReplaying([{ stdout: fixture("review-search-requested.json") }, { stdout: fixture("review-search-reviewed.json") }]);
+  const { forge } = forgeReplaying(searches());
 
   const [host] = await forge.listChangeRequests();
   const byUrl = (url: string) => host?.requests.find((request) => request.url === url);
@@ -792,7 +804,7 @@ test("a PR the viewer reviewed and is not asked again reads by their review, cha
 });
 
 test("a PR the viewer reviewed without being asked, by name or through a team, is left out", async () => {
-  const { forge } = forgeReplaying([{ stdout: fixture("review-search-requested.json") }, { stdout: fixture("review-search-reviewed.json") }]);
+  const { forge } = forgeReplaying(searches());
 
   const [host] = await forge.listChangeRequests();
   const urls = host?.requests.map((request) => request.url);
@@ -803,26 +815,75 @@ test("a PR the viewer reviewed without being asked, by name or through a team, i
   assert.ok(urls?.includes("https://github.com/stretchr/testify/pull/1467"));
 });
 
-test("a search with more results than it returned marks the host as truncated", async () => {
-  const requested = JSON.parse(fixture("review-search-requested.json"));
-  requested.data.search.issueCount = 120;
-  const { forge } = forgeReplaying([{ stdout: JSON.stringify(requested) }, { stdout: fixture("review-search-reviewed.json") }]);
+test("a search with more results than it returned marks its list on the host as truncated", async () => {
+  const more = (name: string) => {
+    const answer = JSON.parse(fixture(name));
+    answer.data.search.issueCount = 120;
+    return { stdout: JSON.stringify(answer) };
+  };
 
-  const [host] = await forge.listChangeRequests();
+  const [assigned] = await forgeReplaying(searches({ requested: more("review-search-requested.json") })).forge.listChangeRequests();
+  const [authored] = await forgeReplaying(searches({ authored: more("review-search-authored.json") })).forge.listChangeRequests();
 
-  assert.equal(host?.truncated, true);
+  assert.deepEqual(assigned?.truncated, { assigned: true, authored: false });
+  assert.deepEqual(authored?.truncated, { assigned: false, authored: true });
 });
 
-test("a search gh cannot run comes back as the host's error rather than a throw", async () => {
-  const { forge } = forgeReplaying([
-    { exitCode: 4, stderr: "To get started with GitHub CLI, please run:  gh auth login\n" },
-    { stdout: fixture("review-search-reviewed.json") },
-  ]);
+test("a search gh cannot run comes back as the host's error once, with both lists empty, rather than a throw", async () => {
+  const failed = { exitCode: 4, stderr: "To get started with GitHub CLI, please run:  gh auth login\n" };
+  const error = {
+    forge: "github",
+    host: "github.com",
+    requests: [],
+    authored: [],
+    truncated: { assigned: false, authored: false },
+    error: "gh failed: To get started with GitHub CLI, please run:  gh auth login",
+  };
 
-  const hosts = await forge.listChangeRequests();
+  assert.deepEqual(await forgeReplaying(searches({ requested: failed })).forge.listChangeRequests(), [error]);
+  assert.deepEqual(await forgeReplaying(searches({ authored: failed })).forge.listChangeRequests(), [error]);
+});
 
-  assert.deepEqual(hosts, [
-    { forge: "github", host: "github.com", requests: [], truncated: false, error: "gh failed: To get started with GitHub CLI, please run:  gh auth login" },
+test("the viewer's own open PRs list as authored, drafts included, with their own pending drafts", async () => {
+  const [host] = await forgeReplaying(searches()).forge.listChangeRequests();
+
+  assert.deepEqual(host?.authored, [
+    {
+      forge: "github",
+      host: "github.com",
+      project: "example-org/uploader",
+      number: 31,
+      url: "https://github.com/example-org/uploader/pull/31",
+      title: "Resume uploads after a dropped connection",
+      author: "sleeyax",
+      isDraft: false,
+      createdAt: "2026-10-01T08:30:00Z",
+      updatedAt: "2026-10-06T16:45:12Z",
+      headSha: "3c9e0b7a1f2d4e6c8b0a9f8e7d6c5b4a39281706",
+      additions: 128,
+      deletions: 14,
+      fileCount: 5,
+      ci: "failure",
+      pendingDrafts: 1,
+    },
+    {
+      forge: "github",
+      host: "github.com",
+      project: "example-org/docs",
+      number: 4,
+      url: "https://github.com/example-org/docs/pull/4",
+      title: "Describe the retry settings",
+      author: "sleeyax",
+      isDraft: true,
+      createdAt: "2026-10-05T11:00:00Z",
+      updatedAt: "2026-10-05T11:20:00Z",
+      headSha: "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+      additions: 6,
+      deletions: 0,
+      fileCount: 1,
+      ci: null,
+      pendingDrafts: 0,
+    },
   ]);
 });
 

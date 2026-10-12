@@ -3,7 +3,7 @@ import type { CommandRunner } from "../command-runner.ts";
 import { oneAtATimePer } from "../one-at-a-time.ts";
 import { createCli } from "./cli.ts";
 import type { Draft, DraftLocation } from "../../shared/drafts.ts";
-import type { CiState, ReviewerState, ReviewRequest, ListedHost } from "../../shared/inbox.ts";
+import type { AuthoredChangeRequest, CiState, ListedChangeRequest, ListedHost, ReviewerState, ReviewRequest } from "../../shared/inbox.ts";
 import type { Verdict } from "../../shared/submit.ts";
 import { CLONE_TIMEOUT_MS, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, userOf } from "./common.ts";
 import { SubmitSteps } from "./submit-steps.ts";
@@ -346,31 +346,36 @@ const SUBMIT_LABELS: Record<Verdict, string> = {
  * GitHub drops a review request once the reviewer reviews, so what they are a reviewer of is two
  * searches: the requests outstanding, team requests included, and the ones they answered. Pages are
  * kept at half a GraphQL page, because a full one of these timed out as a 502.
+ * What the viewer authored is a third search, of the same size.
  * `reviewed-by` also finds reviews nobody asked for, so `wasAskedToReview` keeps only those asked of the viewer.
  */
 export const REVIEW_SEARCHES = {
   requested: "is:pr is:open review-requested:@me archived:false",
   reviewed: "is:pr is:open reviewed-by:@me -author:@me -review-requested:@me archived:false",
+  authored: "is:pr is:open author:@me archived:false",
 } as const;
 const REVIEW_SEARCH_SIZE = 50;
 const REVIEW_REQUEST_EVENTS = 20;
 
 /**
+ * What every listed PR is read with.
  * A pending review is visible only to its author, so the first one is the viewer's, and its comments
  * are their drafts. A PR author can be a deleted account, which GitHub gives as null.
  */
+const LISTED_PULL_REQUEST_FIELDS = `number url title isDraft createdAt updatedAt headRefOid additions deletions changedFiles
+        author { login }
+        statusCheckRollup { state }
+        reviews(states: PENDING, first: 1) { nodes { viewerDidAuthor comments { totalCount } } }`;
+
 export const REVIEW_SEARCH_QUERY = `query GuidedReviewInbox($query: String!) {
   viewer { login }
   search(type: ISSUE, query: $query, first: ${REVIEW_SEARCH_SIZE}) {
     issueCount
     nodes {
       ... on PullRequest {
-        number url title isDraft createdAt updatedAt headRefOid additions deletions changedFiles
-        author { login }
-        statusCheckRollup { state }
+        ${LISTED_PULL_REQUEST_FIELDS}
         viewerLatestReview { state commit { oid } }
         viewerLatestReviewRequest { requestedReviewer { __typename ... on Team { combinedSlug } } }
-        reviews(states: PENDING, first: 1) { nodes { viewerDidAuthor comments { totalCount } } }
         timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], first: ${REVIEW_REQUEST_EVENTS}) {
           nodes { ... on ReviewRequestedEvent { requestedReviewer { __typename ... on User { login } } } }
         }
@@ -379,25 +384,40 @@ export const REVIEW_SEARCH_QUERY = `query GuidedReviewInbox($query: String!) {
   }
 }`;
 
+export const AUTHORED_SEARCH_QUERY = `query GuidedReviewAuthored($query: String!) {
+  search(type: ISSUE, query: $query, first: ${REVIEW_SEARCH_SIZE}) {
+    issueCount
+    nodes {
+      ... on PullRequest {
+        ${LISTED_PULL_REQUEST_FIELDS}
+      }
+    }
+  }
+}`;
+
+const ListedPullRequest = z.object({
+  number: z.number(),
+  url: z.string(),
+  title: z.string(),
+  isDraft: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  headRefOid: z.string(),
+  additions: z.number(),
+  deletions: z.number(),
+  changedFiles: z.number(),
+  author: z.object({ login: z.string() }).nullable(),
+  statusCheckRollup: z.object({ state: z.enum(["EXPECTED", "ERROR", "FAILURE", "PENDING", "SUCCESS"]) }).nullable(),
+  reviews: z.object({ nodes: z.array(z.object({ viewerDidAuthor: z.boolean(), comments: z.object({ totalCount: z.number() }) })) }),
+});
+
 const ReviewSearchResponse = z.object({
   data: z.object({
     viewer: z.object({ login: z.string() }),
     search: z.object({
       issueCount: z.number(),
       nodes: z.array(
-        z.object({
-          number: z.number(),
-          url: z.string(),
-          title: z.string(),
-          isDraft: z.boolean(),
-          createdAt: z.string(),
-          updatedAt: z.string(),
-          headRefOid: z.string(),
-          additions: z.number(),
-          deletions: z.number(),
-          changedFiles: z.number(),
-          author: z.object({ login: z.string() }).nullable(),
-          statusCheckRollup: z.object({ state: z.enum(["EXPECTED", "ERROR", "FAILURE", "PENDING", "SUCCESS"]) }).nullable(),
+        ListedPullRequest.extend({
           viewerLatestReview: z
             .object({
               state: z.enum(["PENDING", "COMMENTED", "APPROVED", "CHANGES_REQUESTED", "DISMISSED"]),
@@ -407,7 +427,6 @@ const ReviewSearchResponse = z.object({
           viewerLatestReviewRequest: z
             .object({ requestedReviewer: z.object({ __typename: z.string(), combinedSlug: z.string().optional() }).nullable() })
             .nullable(),
-          reviews: z.object({ nodes: z.array(z.object({ viewerDidAuthor: z.boolean(), comments: z.object({ totalCount: z.number() }) })) }),
           timelineItems: z.object({
             nodes: z.array(z.object({ requestedReviewer: z.object({ __typename: z.string(), login: z.string().optional() }).nullable() })),
           }),
@@ -417,9 +436,14 @@ const ReviewSearchResponse = z.object({
   }),
 });
 
+const AuthoredSearchResponse = z.object({
+  data: z.object({ search: z.object({ issueCount: z.number(), nodes: z.array(ListedPullRequest) }) }),
+});
+
+type ListedPullRequest = z.output<typeof ListedPullRequest>;
 type SearchedPullRequest = z.output<typeof ReviewSearchResponse>["data"]["search"]["nodes"][number];
 
-const CI_STATES: Record<NonNullable<SearchedPullRequest["statusCheckRollup"]>["state"], CiState> = {
+const CI_STATES: Record<NonNullable<ListedPullRequest["statusCheckRollup"]>["state"], CiState> = {
   SUCCESS: "success",
   FAILURE: "failure",
   ERROR: "failure",
@@ -449,10 +473,21 @@ function wasAskedToReview(pr: SearchedPullRequest, login: string): boolean {
  * dismissed review is still one they wrote, and a pending one is not written yet.
  */
 function reviewRequestOf(pr: SearchedPullRequest, requested: boolean): ReviewRequest | null {
-  const ref = parsePullRequestUrl(pr.url);
-  if (ref === null) return null;
+  const listed = listedOf(pr);
+  if (listed === null) return null;
   const review = pr.viewerLatestReview?.state === "PENDING" ? null : pr.viewerLatestReview;
   const team = pr.viewerLatestReviewRequest?.requestedReviewer;
+  return {
+    ...listed,
+    state: requested || review === null ? "requested" : REVIEWER_STATES[review.state],
+    viaTeam: requested && team?.__typename === "Team" ? (team.combinedSlug ?? null) : null,
+    changedSinceReview: review === null ? null : requested || review.commit?.oid !== pr.headRefOid,
+  };
+}
+
+function listedOf(pr: ListedPullRequest): ListedChangeRequest | null {
+  const ref = parsePullRequestUrl(pr.url);
+  if (ref === null) return null;
   return {
     forge: "github",
     host: ref.host,
@@ -469,9 +504,6 @@ function reviewRequestOf(pr: SearchedPullRequest, requested: boolean): ReviewReq
     deletions: pr.deletions,
     fileCount: pr.changedFiles,
     ci: pr.statusCheckRollup ? CI_STATES[pr.statusCheckRollup.state] : null,
-    state: requested || review === null ? "requested" : REVIEWER_STATES[review.state],
-    viaTeam: requested && team?.__typename === "Team" ? (team.combinedSlug ?? null) : null,
-    changedSinceReview: review === null ? null : requested || review.commit?.oid !== pr.headRefOid,
     pendingDrafts: pr.reviews.nodes.find((pending) => pending.viewerDidAuthor)?.comments.totalCount ?? 0,
   };
 }
@@ -749,21 +781,27 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
     },
 
     async listChangeRequests(): Promise<ListedHost[]> {
-      const search = (query: string) =>
-        gh.json(ReviewSearchResponse, ["api", "graphql", "--hostname", GITHUB_HOST, "--input", "-"], {
-          input: JSON.stringify({ query: REVIEW_SEARCH_QUERY, variables: { query } }),
+      const search = <T extends z.ZodType>(response: T, query: string, search: string) =>
+        gh.json(response, ["api", "graphql", "--hostname", GITHUB_HOST, "--input", "-"], {
+          input: JSON.stringify({ query, variables: { query: search } }),
         });
+      const cut = (...answers: { data: { search: { issueCount: number; nodes: unknown[] } } }[]) =>
+        answers.some(({ data }) => data.search.issueCount > data.search.nodes.length);
       try {
-        const [requested, reviewed] = await Promise.all([search(REVIEW_SEARCHES.requested), search(REVIEW_SEARCHES.reviewed)]);
+        const [requested, reviewed, mine] = await Promise.all([
+          search(ReviewSearchResponse, REVIEW_SEARCH_QUERY, REVIEW_SEARCHES.requested),
+          search(ReviewSearchResponse, REVIEW_SEARCH_QUERY, REVIEW_SEARCHES.reviewed),
+          search(AuthoredSearchResponse, AUTHORED_SEARCH_QUERY, REVIEW_SEARCHES.authored),
+        ]);
         const requests = [
           ...requested.data.search.nodes.map((pr) => reviewRequestOf(pr, true)),
           ...reviewed.data.search.nodes.filter((pr) => wasAskedToReview(pr, reviewed.data.viewer.login)).map((pr) => reviewRequestOf(pr, false)),
         ].filter((request) => request !== null);
-        const truncated = [requested, reviewed].some(({ data }) => data.search.issueCount > data.search.nodes.length);
-        return [{ forge: "github", host: GITHUB_HOST, requests, truncated, error: null }];
+        const authored: AuthoredChangeRequest[] = mine.data.search.nodes.map(listedOf).filter((listed) => listed !== null);
+        return [{ forge: "github", host: GITHUB_HOST, requests, authored, truncated: { assigned: cut(requested, reviewed), authored: cut(mine) }, error: null }];
       } catch (error) {
         if (!(error instanceof ForgeError)) throw error;
-        return [{ forge: "github", host: GITHUB_HOST, requests: [], truncated: false, error: error.message }];
+        return [{ forge: "github", host: GITHUB_HOST, requests: [], authored: [], truncated: { assigned: false, authored: false }, error: error.message }];
       }
     },
   };

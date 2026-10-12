@@ -9,6 +9,7 @@ import {
   type ReviewRequest,
   type ListedHost,
 } from "../shared/inbox.ts";
+import type { InboxTab } from "../shared/inbox-preferences.ts";
 import { byTab } from "./inbox-tabs.ts";
 import { readJson, writeJson } from "./json-file.ts";
 import { oneAtATimePer } from "./one-at-a-time.ts";
@@ -41,10 +42,10 @@ export class InboxCheckOffsFile {
     });
   }
 
-  /** Follows a listing of every host, and answers the URLs still checked off. */
-  async follow(hosts: readonly ListedHost[]): Promise<Set<string>> {
+  /** Follows a listing of every host, and answers the URLs still checked off on each tab. */
+  async follow(hosts: readonly ListedHost[]): Promise<Record<InboxTab, Set<string>>> {
     const followed = await this.#change((checkOffs) => ({ ...checkOffs, assigned: followListing(checkOffs.assigned, hosts) }));
-    return new Set(Object.keys(followed.assigned));
+    return { assigned: new Set(Object.keys(followed.assigned)), authored: new Set(Object.keys(followed.authored)) };
   }
 
   async #read(): Promise<CheckOffs> {
@@ -68,7 +69,7 @@ export class InboxCheckOffsFile {
  */
 function followListing(checkOffs: AssignedCheckOffs, hosts: readonly ListedHost[]): AssignedCheckOffs {
   const requests = new Map(hosts.flatMap((host) => host.requests.map((request) => [request.url, request] as const)));
-  const complete = new Set<string | null>(hosts.filter((host) => host.error === null && !host.truncated).map((host) => host.host));
+  const complete = new Set<string | null>(hosts.filter((host) => host.error === null && !host.truncated.assigned).map((host) => host.host));
   const followed: AssignedCheckOffs = {};
   for (const [url, checkOff] of Object.entries(checkOffs)) {
     const request = requests.get(url);

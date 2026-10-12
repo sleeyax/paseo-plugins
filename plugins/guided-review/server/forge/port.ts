@@ -95,8 +95,8 @@ export interface Forge {
   discardReview(ref: ChangeRequestRef): Promise<void>;
 
   /**
-   * The open change requests the current user is a reviewer of, on every host of this forge the CLI
-   * is logged in to. A host that cannot be listed comes back with its error rather than throwing.
+   * The open change requests the current user is a reviewer of, and those they authored, on every host of this forge the CLI is logged in to.
+   * A host that cannot be listed comes back with its error rather than throwing.
    */
   listChangeRequests(): Promise<ListedHost[]>;
 }

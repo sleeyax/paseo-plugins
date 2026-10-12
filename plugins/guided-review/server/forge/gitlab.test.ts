@@ -1195,7 +1195,7 @@ test("lists the open MRs the viewer reviews on each host glab is logged in to, a
   assert.equal(hosts.length, 1);
   const [host] = hosts;
   assert.equal(host?.error, null);
-  assert.equal(host?.truncated, false);
+  assert.deepEqual(host?.truncated, { assigned: false, authored: false });
   assert.deepEqual(host?.requests[0], {
     forge: "gitlab",
     host: "gitlab.com",
@@ -1255,7 +1255,7 @@ test("a host glab is not logged in to, or one older than 19.2, comes back with i
 
   const { forge: old } = forgeReplaying([AUTH_STATUS_ALL, version("18.11.2-ee")]);
   assert.deepEqual(await old.listChangeRequests(), [
-    { forge: "gitlab", host: "gitlab.com", requests: [], truncated: false, error: "gitlab.com runs GitLab 18.11.2-ee; listing your reviews needs 19.2 or newer." },
+    { forge: "gitlab", host: "gitlab.com", requests: [], authored: [], truncated: { assigned: false, authored: false }, error: "gitlab.com runs GitLab 18.11.2-ee; listing your reviews needs 19.2 or newer." },
   ]);
 });
 
@@ -1270,7 +1270,7 @@ test("a GraphQL answer with errors and no user is the host's error, and more MRs
   const more = JSON.parse(fixture("review-list.json"));
   more.data.currentUser.reviewRequestedMergeRequests.pageInfo.hasNextPage = true;
   const { forge: paged } = forgeReplaying([AUTH_STATUS_ALL, version("19.5.0-pre"), { stdout: JSON.stringify(more) }]);
-  assert.equal((await paged.listChangeRequests())[0]?.truncated, true);
+  assert.deepEqual((await paged.listChangeRequests())[0]?.truncated, { assigned: true, authored: false });
 });
 
 test("a host listed as logged in is not checked again before reading an MR on it", async () => {

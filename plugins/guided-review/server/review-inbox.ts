@@ -1,4 +1,4 @@
-import type { Inbox, InboxItem, LocalReview, ReviewRequest } from "../shared/inbox.ts";
+import type { AuthoredChangeRequest, AuthoredInboxItem, Inbox, InboxItem, ListedChangeRequest, LocalReview, ReviewRequest } from "../shared/inbox.ts";
 import type { ChangeRequestRef, Forge } from "./forge/port.ts";
 import { awaitsScope, type GuideGenerations } from "./guide-generation.ts";
 import type { InboxCheckOffsFile } from "./inbox-check-offs.ts";
@@ -17,7 +17,7 @@ export type ReviewInboxOptions = {
 };
 
 /**
- * The review requests of every forge, joined with the reviews started here and what the reviewer checked off: the start screen's list.
+ * The review requests of every forge and the viewer's own change requests, joined with the reviews started here and what the viewer checked off on each tab: the start screen's list.
  * Each forge answers per host, so one that cannot be listed leaves the rest listed.
  *
  * GitLab's listing cannot count drafts, which take a call per MR, so they are counted only for the
@@ -45,10 +45,14 @@ export class ReviewInbox {
 
   async list(): Promise<Inbox> {
     const listed = (await Promise.all(this.#forges.map((forge) => forge.listChangeRequests()))).flat();
-    const requests = listed.flatMap((host) => host.requests);
     const checkedOff = await this.#checkOffs.follow(listed);
-    const items = await Promise.all(requests.map(async (request) => ({ ...(await this.#item(request)), checkedOff: checkedOff.has(request.url) })));
-    return { hosts: listed.map(({ requests: _, ...host }) => host), items };
+    const items = await Promise.all(
+      listed.flatMap((host) => host.requests).map(async (request) => ({ ...(await this.#item(request)), checkedOff: checkedOff.assigned.has(request.url) })),
+    );
+    const authored = await Promise.all(
+      listed.flatMap((host) => host.authored).map(async (mine) => ({ ...(await this.#authoredItem(mine)), checkedOff: checkedOff.authored.has(mine.url) })),
+    );
+    return { hosts: listed.map(({ requests: _, authored: __, ...host }) => host), items, authored };
   }
 
   /** What this plugin has of the review `reviewId` names: null when it was never started here. */
@@ -67,24 +71,36 @@ export class ReviewInbox {
   }
 
   async #item(request: ReviewRequest): Promise<Omit<InboxItem, "checkedOff">> {
-    const reviewId = idOf(request);
-    const local = reviewId === null ? null : await this.local(reviewId);
-    const record = reviewId === null ? null : await this.#store.get(reviewId);
+    const { reviewId, local, record } = await this.#joined(request);
     if (record === null) return { ...request, reviewId, local };
-    return { ...request, ...(await this.#fromReview(request, record)), reviewId, local };
+    const reviewed = request.forge === "gitlab" && request.state !== "requested" && record.submittedHeadSha !== undefined;
+    return {
+      ...request,
+      pendingDrafts: await this.#pendingDrafts(request, record),
+      changedSinceReview: reviewed ? record.submittedHeadSha !== request.headSha : request.changedSinceReview,
+      reviewId,
+      local,
+    };
   }
 
-  /** What the review started here knows better than the forge's listing. */
-  async #fromReview(request: ReviewRequest, record: ReviewRecord): Promise<Pick<ReviewRequest, "pendingDrafts" | "changedSinceReview">> {
+  async #authoredItem(mine: AuthoredChangeRequest): Promise<Omit<AuthoredInboxItem, "checkedOff">> {
+    const { reviewId, local, record } = await this.#joined(mine);
+    if (record === null) return { ...mine, reviewId, local };
+    return { ...mine, pendingDrafts: await this.#pendingDrafts(mine, record), reviewId, local };
+  }
+
+  /** The review started here of a listed change request, which is one review whichever tab lists it. */
+  async #joined(listed: ListedChangeRequest): Promise<{ reviewId: string | null; local: LocalReview | null; record: ReviewRecord | null }> {
+    const reviewId = idOf(listed);
+    if (reviewId === null) return { reviewId, local: null, record: null };
+    return { reviewId, local: await this.local(reviewId), record: await this.#store.get(reviewId) };
+  }
+
+  /** The viewer's unpublished comments, counting the ones kept here, which the forge's listing cannot see. */
+  async #pendingDrafts(listed: ListedChangeRequest, record: ReviewRecord): Promise<number | null> {
+    if (listed.forge === "gitlab") return this.#countDrafts(record.ref);
     const paragraphs = (await this.#store.getDrafts(record.id)).paragraphs.length;
-    if (request.forge === "github") {
-      return { pendingDrafts: request.pendingDrafts === null ? null : request.pendingDrafts + paragraphs, changedSinceReview: request.changedSinceReview };
-    }
-    const reviewed = request.state !== "requested" && record.submittedHeadSha !== undefined;
-    return {
-      pendingDrafts: await this.#countDrafts(record.ref),
-      changedSinceReview: reviewed ? record.submittedHeadSha !== request.headSha : request.changedSinceReview,
-    };
+    return listed.pendingDrafts === null ? null : listed.pendingDrafts + paragraphs;
   }
 
   async #countDrafts(ref: ChangeRequestRef): Promise<number | null> {
@@ -99,7 +115,7 @@ export class ReviewInbox {
 
 }
 
-function idOf({ forge, host, project, number, url }: ReviewRequest): string | null {
+function idOf({ forge, host, project, number, url }: ListedChangeRequest): string | null {
   try {
     return reviewIdOf({ forge, host, project, number, url });
   } catch {

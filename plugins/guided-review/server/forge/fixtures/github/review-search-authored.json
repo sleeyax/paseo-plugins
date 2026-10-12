@@ -1,0 +1,56 @@
+{
+  "data": {
+    "search": {
+      "issueCount": 2,
+      "nodes": [
+        {
+          "number": 31,
+          "url": "https://github.com/example-org/uploader/pull/31",
+          "title": "Resume uploads after a dropped connection",
+          "isDraft": false,
+          "createdAt": "2026-10-01T08:30:00Z",
+          "updatedAt": "2026-10-06T16:45:12Z",
+          "headRefOid": "3c9e0b7a1f2d4e6c8b0a9f8e7d6c5b4a39281706",
+          "additions": 128,
+          "deletions": 14,
+          "changedFiles": 5,
+          "author": {
+            "login": "sleeyax"
+          },
+          "statusCheckRollup": {
+            "state": "FAILURE"
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "viewerDidAuthor": true,
+                "comments": {
+                  "totalCount": 1
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 4,
+          "url": "https://github.com/example-org/docs/pull/4",
+          "title": "Describe the retry settings",
+          "isDraft": true,
+          "createdAt": "2026-10-05T11:00:00Z",
+          "updatedAt": "2026-10-05T11:20:00Z",
+          "headRefOid": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+          "additions": 6,
+          "deletions": 0,
+          "changedFiles": 1,
+          "author": {
+            "login": "sleeyax"
+          },
+          "statusCheckRollup": null,
+          "reviews": {
+            "nodes": []
+          }
+        }
+      ]
+    }
+  }
+}

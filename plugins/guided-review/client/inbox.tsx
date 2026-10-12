@@ -276,7 +276,7 @@ function Note({ colors, text, tone }: { colors: Colors; text: string; tone?: "da
 function HostNotes({ colors, hosts }: { colors: Colors; hosts: Inbox["hosts"] }) {
   const notes = hosts.flatMap((host): { key: string; tone?: "danger"; text: string }[] => {
     if (host.error !== null) return [{ key: host.host, tone: "danger", text: `${host.host}: ${host.error}` }];
-    if (host.truncated) return [{ key: host.host, text: `${host.host} has more than this lists; only the first page is shown.` }];
+    if (host.truncated.assigned) return [{ key: host.host, text: `${host.host} has more than this lists; only the first page is shown.` }];
     return [];
   });
   if (notes.length === 0) return null;
