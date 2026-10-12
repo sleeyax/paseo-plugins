@@ -21,10 +21,9 @@ export type ListFilters<State extends string> = Pick<AssignedPreferences, "provi
 
 /** How a tab reads its rows. */
 export type TabRules<Item extends ListedItem, State extends string> = {
-  /** Where a row stands, as the States filter reads it; null while the tab has no states to filter by, so the filter is not offered. */
-  state: ((item: Item) => State) | null;
-  /** Whether a row needs the viewer's attention; null while the tab cannot tell, so the filter is not offered. */
-  needsAttention: ((item: Item) => boolean) | null;
+  /** Where a row stands, as the States filter reads it. */
+  state(item: Item): State;
+  needsAttention(item: Item): boolean;
   /** What the search looks in, besides the number as the forge writes it. */
   searched(item: Item): string[];
   /** What a row is called, one and many. */
@@ -131,9 +130,9 @@ export function passesCheckOff(item: ListedItem, preferences: Pick<ListFilters<s
 function matchesFilters<Item extends ListedItem, State extends string>(rules: TabRules<Item, State>, item: Item, preferences: ListFilters<State>, query: string): boolean {
   return (
     (preferences.provider === "all" || item.forge === preferences.provider) &&
-    (rules.state === null || preferences.states.includes(rules.state(item))) &&
+    preferences.states.includes(rules.state(item)) &&
     (!preferences.hideDrafts || !item.isDraft) &&
-    (!preferences.needsAttention || rules.needsAttention === null || rules.needsAttention(item)) &&
+    (!preferences.needsAttention || rules.needsAttention(item)) &&
     matchesSearch(rules, item, query)
   );
 }

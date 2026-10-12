@@ -3,7 +3,6 @@ import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-quer
 import { createContext, useState } from "react";
 import * as contracts from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
-import type { InboxTab } from "../shared/inbox-preferences.ts";
 import type { AuthoredInboxItem, CheckOffChange, Inbox, InboxItem } from "../shared/inbox.ts";
 import { withCheckedOff, type ListedItem } from "./inbox-filter.ts";
 
@@ -11,17 +10,19 @@ export const INBOX_QUERY_KEY = [PLUGIN_ID, "inbox"];
 const MUTATION_KEY = [PLUGIN_ID, "check-off"];
 
 /** What a tab's check-off records of its row, so the server can tell when it came back. */
-export type CheckOffRule<Item extends ListedItem> = { tab: InboxTab; change(item: Item, checkedOff: boolean): CheckOffChange };
+export type CheckOffRule<Item extends ListedItem> = (item: Item, checkedOff: boolean) => CheckOffChange;
 
-export const ASSIGNED_CHECK_OFF: CheckOffRule<InboxItem> = {
+export const ASSIGNED_CHECK_OFF: CheckOffRule<InboxItem> = (item, checkedOff) => ({
   tab: "assigned",
-  change: (item, checkedOff) => ({ tab: "assigned", url: item.url, checkOff: checkedOff ? { headSha: item.headSha, state: item.state } : null }),
-};
+  url: item.url,
+  checkOff: checkedOff ? { headSha: item.headSha, state: item.state } : null,
+});
 
-export const AUTHORED_CHECK_OFF: CheckOffRule<AuthoredInboxItem> = {
+export const AUTHORED_CHECK_OFF: CheckOffRule<AuthoredInboxItem> = (item, checkedOff) => ({
   tab: "authored",
-  change: (item, checkedOff) => ({ tab: "authored", url: item.url, checkOff: checkedOff ? { status: item.status, latestReviewAt: item.latestReviewAt } : null }),
-};
+  url: item.url,
+  checkOff: checkedOff ? { status: item.status, latestReviewAt: item.latestReviewAt } : null,
+});
 
 export type CheckOffControl<Item extends ListedItem> = {
   toggle(item: Item): void;
@@ -43,13 +44,13 @@ export function useCheckOff<Item extends ListedItem>(rule: CheckOffRule<Item>): 
   const queryClient = useQueryClient();
   const [held, setHeld] = useState<ReadonlySet<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
-  const mark = (url: string, checkedOff: boolean) =>
-    queryClient.setQueryData<Inbox>(INBOX_QUERY_KEY, (inbox) => inbox && withCheckedOff(inbox, rule.tab, url, checkedOff));
+  const mark = ({ tab, url }: CheckOffChange, checkedOff: boolean) =>
+    queryClient.setQueryData<Inbox>(INBOX_QUERY_KEY, (inbox) => inbox && withCheckedOff(inbox, tab, url, checkedOff));
   const save = useMutation({
     mutationKey: MUTATION_KEY,
     mutationFn: setCheckedOff,
-    onError: (failure, { url, checkOff }) => {
-      mark(url, checkOff === null);
+    onError: (failure, change) => {
+      mark(change, change.checkOff === null);
       setError(failure instanceof Error ? failure.message : String(failure));
     },
   });
@@ -58,11 +59,12 @@ export function useCheckOff<Item extends ListedItem>(rule: CheckOffRule<Item>): 
   return {
     toggle(item) {
       const checkedOff = !item.checkedOff;
+      const change = rule(item, checkedOff);
       void queryClient.cancelQueries({ queryKey: INBOX_QUERY_KEY });
-      mark(item.url, checkedOff);
+      mark(change, checkedOff);
       setHeld((rows) => new Set(rows).add(item.url));
       setError(null);
-      save.mutate(rule.change(item, checkedOff));
+      save.mutate(change);
     },
     held,
     release: () => setHeld(new Set()),

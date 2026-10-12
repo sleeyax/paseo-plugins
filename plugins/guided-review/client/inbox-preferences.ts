@@ -4,9 +4,9 @@ import * as contracts from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import { DEFAULT_INBOX_PREFERENCES, type InboxPreferences, type InboxTab } from "../shared/inbox-preferences.ts";
 
-export type InboxPreferencesControl<Tab extends InboxTab> = {
-  preferences: InboxPreferences[Tab];
-  change(update: Partial<InboxPreferences[Tab]>): void;
+export type InboxPreferencesControl<Preferences> = {
+  preferences: Preferences;
+  change(update: Partial<Preferences>): void;
   /** Why the latest change could not be kept, as a sentence. */
   error: string | null;
 };
@@ -17,7 +17,7 @@ const QUERY_KEY = [PLUGIN_ID, "inbox-preferences"];
  * One tab's filters, sort and columns as the daemon keeps them.
  * A change shows at once and is saved behind it, with the other tab's, whole; the answer is not read back, since a slower answer to an earlier save would undo a later change.
  */
-export function useInboxPreferences<Tab extends InboxTab>(tab: Tab): InboxPreferencesControl<Tab> {
+export function useInboxPreferences<Tab extends InboxTab>(tab: Tab): InboxPreferencesControl<InboxPreferences[Tab]> {
   const getPreferences = useRpc(contracts.getInboxPreferences);
   const savePreferences = useRpc(contracts.saveInboxPreferences);
   const queryClient = useQueryClient();

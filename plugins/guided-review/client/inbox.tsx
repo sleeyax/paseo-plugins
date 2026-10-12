@@ -47,7 +47,7 @@ import {
   type ListFilters,
   type TabRules,
 } from "./inbox-filter.ts";
-import { useInboxPreferences } from "./inbox-preferences.ts";
+import { useInboxPreferences, type InboxPreferencesControl } from "./inbox-preferences.ts";
 import { NewReview } from "./new-review.tsx";
 import { describePreparing, describeProgress } from "./start-progress.ts";
 import { useReviewStarts, type Pasted, type ReviewStarts } from "./start-review.ts";
@@ -78,12 +78,10 @@ type TabView<Item extends Row, State extends string, Column extends string> = {
   rules: TabRules<Item, State>;
   /** Every column the tab can have, in the order it shows them. */
   columns: readonly Column[];
-  /** The columns the tab can fill; one it cannot is neither offered nor shown, whatever the preferences say. */
-  specs: Partial<Record<Column, ColumnSpec<Item>>>;
+  specs: Record<Column, ColumnSpec<Item>>;
   /** The columns a card puts on its tinted line, in the order it puts them. */
   tinted: readonly Column[];
-  /** Null while the tab has no states to filter by. */
-  states: StatesSetup<State> | null;
+  states: StatesSetup<State>;
   searchHint: string;
   listing: string;
   failure: string;
@@ -201,7 +199,7 @@ function TabSection<Item extends Row, State extends string, Column extends strin
   tabs: React.ReactNode;
   view: TabView<Item, State, Column>;
   listed: readonly Item[] | undefined;
-  preferences: { preferences: TabPreferences<State, Column>; change(update: Partial<TabPreferences<State, Column>>): void; error: string | null };
+  preferences: InboxPreferencesControl<TabPreferences<State, Column>>;
   checkOff: CheckOffControl<Item>;
 }) {
   const { preferences, error } = control;
@@ -213,9 +211,8 @@ function TabSection<Item extends Row, State extends string, Column extends strin
     control.change(update);
   };
   const items = visibleItems(view.rules, listed, preferences, query, held).map((item) => ({ ...item, local: starts.local(item.reviewId, item.local) }));
-  const columns = preferences.columns.filter((column) => view.specs[column] !== undefined);
   // Until the list has been measured it is not drawn, rather than as cards for a frame.
-  const shape = compact ? "cards" : width === null ? null : width >= tableWidth(view.specs, columns) ? "table" : "cards";
+  const shape = compact ? "cards" : width === null ? null : width >= tableWidth(view.specs, preferences.columns) ? "table" : "cards";
   const rows = {
     toggle: (row: ListedItem) => {
       const item = listed.find((entry) => entry.url === row.url);
@@ -232,7 +229,7 @@ function TabSection<Item extends Row, State extends string, Column extends strin
           <View style={{ flexDirection: "row", gap: spacing[2] }}>
             <NewReview colors={colors} starts={starts} />
             <Button colors={colors} small label="Columns" onPress={() => setChoosing("columns")} />
-            {view.states !== null ? <Button colors={colors} small label={view.states.label(preferences.states)} onPress={() => setChoosing("states")} /> : null}
+            <Button colors={colors} small label={view.states.label(preferences.states)} onPress={() => setChoosing("states")} />
             <Button colors={colors} small label={inbox.isFetching ? "Refreshing…" : "Refresh"} disabled={inbox.isFetching || checkOff.saving} onPress={refresh} />
           </View>
         }
@@ -246,7 +243,6 @@ function TabSection<Item extends Row, State extends string, Column extends strin
             query={query}
             setQuery={setQuery}
             searchHint={view.searchHint}
-            attention={view.rules.needsAttention !== null}
           />
           {error !== null ? <Note colors={colors} tone="danger" text={`Could not keep these filters for next time: ${error}`} /> : null}
           {checkOff.error !== null ? <Note colors={colors} tone="danger" text={`Could not keep that check-off: ${checkOff.error}`} /> : null}
@@ -263,11 +259,11 @@ function TabSection<Item extends Row, State extends string, Column extends strin
               <View style={{ gap: spacing[2] }}>
                 <Note colors={colors} text={countLabel(items.length, listed.length, hiddenCheckedOff(view.rules, listed, preferences, query, held), view.rules.noun)} />
                 {shape === "table" ? (
-                  <Table colors={colors} items={items} specs={view.specs} columns={columns} preferences={preferences} change={change} starts={starts} />
+                  <Table colors={colors} items={items} specs={view.specs} columns={preferences.columns} preferences={preferences} change={change} starts={starts} />
                 ) : shape === "cards" ? (
                   <View style={{ gap: spacing[2] }}>
                     {items.map((item) => (
-                      <Card key={item.url} colors={colors} item={item} specs={view.specs} columns={columns} tinted={view.tinted} starts={starts} />
+                      <Card key={item.url} colors={colors} item={item} specs={view.specs} columns={preferences.columns} tinted={view.tinted} starts={starts} />
                     ))}
                   </View>
                 ) : null}
@@ -284,15 +280,7 @@ function TabSection<Item extends Row, State extends string, Column extends strin
         columns={preferences.columns}
         change={change}
       />
-      {view.states !== null ? (
-        <StateChooser
-          open={choosing === "states"}
-          onOpenChange={(open) => setChoosing(open ? "states" : null)}
-          setup={view.states}
-          states={preferences.states}
-          change={change}
-        />
-      ) : null}
+      <StateChooser open={choosing === "states"} onOpenChange={(open) => setChoosing(open ? "states" : null)} setup={view.states} states={preferences.states} change={change} />
     </>
   );
 }
@@ -309,7 +297,7 @@ function ColumnChooser<Item extends Row, Column extends string>({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   all: readonly Column[];
-  specs: Partial<Record<Column, ColumnSpec<Item>>>;
+  specs: Record<Column, ColumnSpec<Item>>;
   columns: readonly Column[];
   change: (update: { columns: Column[] }) => void;
 }) {
@@ -318,19 +306,18 @@ function ColumnChooser<Item extends Row, Column extends string>({
     <Modal title="Columns" open={open} onOpenChange={onOpenChange}>
       <Modal.Content>
         <SettingsCard>
-          {all.flatMap((column) => {
-            const spec = specs[column];
-            if (spec === undefined) return [];
-            return [
+          {all.map((column) => {
+            const { label, hint } = specs[column];
+            return (
               <SettingsSwitch
                 key={column}
-                label={spec.label}
-                {...(spec.hint === undefined ? {} : { hint: spec.hint })}
+                label={label}
+                {...(hint === undefined ? {} : { hint })}
                 value={column === "title" || columns.includes(column)}
                 disabled={column === "title"}
                 onValueChange={(shown) => toggle(column, shown)}
-              />,
-            ];
+              />
+            );
           })}
         </SettingsCard>
       </Modal.Content>
@@ -385,7 +372,6 @@ function Toolbar<State extends string>({
   query,
   setQuery,
   searchHint,
-  attention,
 }: {
   colors: Colors;
   preferences: ListFilters<State>;
@@ -393,8 +379,6 @@ function Toolbar<State extends string>({
   query: string;
   setQuery: (query: string) => void;
   searchHint: string;
-  /** Whether the tab can tell what needs the viewer's attention. */
-  attention: boolean;
 }) {
   return (
     <View style={{ gap: spacing[2] }}>
@@ -428,9 +412,7 @@ function Toolbar<State extends string>({
           />
         ))}
         <Divider colors={colors} />
-        {attention ? (
-          <Chip colors={colors} label="Needs my attention" selected={preferences.needsAttention} onPress={() => change({ needsAttention: !preferences.needsAttention })} />
-        ) : null}
+        <Chip colors={colors} label="Needs my attention" selected={preferences.needsAttention} onPress={() => change({ needsAttention: !preferences.needsAttention })} />
         <Chip colors={colors} label="Hide drafts" selected={preferences.hideDrafts} onPress={() => change({ hideDrafts: !preferences.hideDrafts })} />
         <Divider colors={colors} />
         {CHECK_OFF_FILTERS.map((checkedOff) => (
@@ -499,6 +481,10 @@ function HostNotes({ colors, hosts, tab }: { colors: Colors; hosts: Inbox["hosts
 
 type Tinted = { text: string; color: keyof Colors };
 
+function capitalised(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /** Where the reviewer stands, with whether it moved on since their review. */
 function stateOf(item: InboxItem): Tinted {
   const since = item.changedSinceReview === true;
@@ -537,8 +523,7 @@ const STATUS_HINTS: Record<ReviewStatus, string> = {
 
 /** Where the author's reviewers stand, with whether one reviewed since their last push. */
 function statusOf(item: AuthoredInboxItem): Tinted {
-  const name = STATUS_NAMES[item.status];
-  const text = name.charAt(0).toUpperCase() + name.slice(1);
+  const text = capitalised(STATUS_NAMES[item.status]);
   if (item.reviewedSinceLastPush === true) return { text: `${text} · reviewed since your last push`, color: "statusWarning" };
   return { text, color: STATUS_TINTS[item.status] };
 }
@@ -713,7 +698,7 @@ const ASSIGNED_VIEW: TabView<InboxItem, ReviewerState, AssignedColumn> = {
   states: {
     all: ReviewerStateSchema.options,
     label: statesLabel,
-    name: (state) => STATE_NAMES[state].charAt(0).toUpperCase() + STATE_NAMES[state].slice(1),
+    name: (state) => capitalised(STATE_NAMES[state]),
     hint: (state) => (state === "unapproved" ? "GitLab only" : undefined),
   },
   searchHint: "Search by title, project, author or number",
@@ -731,7 +716,7 @@ const AUTHORED_VIEW: TabView<AuthoredInboxItem, ReviewStatus, AuthoredColumn> = 
   states: {
     all: ReviewStatusSchema.options,
     label: statusesLabel,
-    name: (status) => STATUS_NAMES[status].charAt(0).toUpperCase() + STATUS_NAMES[status].slice(1),
+    name: (status) => capitalised(STATUS_NAMES[status]),
     hint: (status) => STATUS_HINTS[status],
   },
   searchHint: "Search by title, project, reviewer or number",
@@ -748,10 +733,10 @@ function columnStyle(size: ColumnWidth) {
 }
 
 /** The narrowest the table can be with these columns before its cells crowd; anything narrower gets cards. */
-function tableWidth<Item, Column extends string>(specs: Partial<Record<Column, ColumnSpec<Item>>>, columns: readonly Column[]): number {
+function tableWidth<Item, Column extends string>(specs: Record<Column, ColumnSpec<Item>>, columns: readonly Column[]): number {
   const cells = columns.reduce((total, column) => {
-    const size = specs[column]?.size;
-    return total + (size === undefined ? 0 : "width" in size ? size.width : size.min);
+    const { size } = specs[column];
+    return total + ("width" in size ? size.width : size.min);
   }, 0);
   return cells + ACTIONS_WIDTH + CELL_GAP * columns.length + spacing[3] * 2 + 2;
 }
@@ -931,7 +916,7 @@ function Table<Item extends Row, Column extends string>({
 }: {
   colors: Colors;
   items: Item[];
-  specs: Partial<Record<Column, ColumnSpec<Item>>>;
+  specs: Record<Column, ColumnSpec<Item>>;
   columns: readonly Column[];
   preferences: Pick<ListFilters<string>, "sort">;
   change: (update: Pick<ListFilters<string>, "sort">) => void;
@@ -939,10 +924,7 @@ function Table<Item extends Row, Column extends string>({
 }) {
   const now = new Date();
   const { dimmed } = useContext(CheckOffContext);
-  const columns = shown.flatMap((id) => {
-    const spec = specs[id];
-    return spec === undefined ? [] : [{ id, ...spec }];
-  });
+  const columns = shown.map((id) => ({ id, ...specs[id] }));
   const sortBy = (key: InboxSortKey) =>
     change({ sort: { key, descending: preferences.sort.key === key ? !preferences.sort.descending : true } });
 
@@ -1015,20 +997,17 @@ function Card<Item extends Row, Column extends string>({
 }: {
   colors: Colors;
   item: Item;
-  specs: Partial<Record<Column, ColumnSpec<Item>>>;
+  specs: Record<Column, ColumnSpec<Item>>;
   columns: readonly Column[];
   tinted: readonly Column[];
   starts: ReviewStarts;
 }) {
   const now = new Date();
   const { dimmed } = useContext(CheckOffContext);
-  const shown = columns.flatMap((column) => {
-    const spec = specs[column];
-    return spec === undefined ? [] : [spec];
-  });
+  const shown = columns.map((column) => specs[column]);
   const beside = shown.find((spec) => spec.besideTitle);
   const meta = shown.flatMap((spec) => (spec.line === undefined ? [] : [spec.line(item, now)]));
-  const tinted = tintedColumns.filter((column) => columns.includes(column)).flatMap((column) => specs[column]?.tint?.(item) ?? []);
+  const tinted = tintedColumns.filter((column) => columns.includes(column)).flatMap((column) => specs[column].tint?.(item) ?? []);
 
   return (
     <View style={{ padding: spacing[3], gap: spacing[1], borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, opacity: dimmed(item) ? DIMMED : 1 }}>
