@@ -844,7 +844,7 @@ test("a search gh cannot run comes back as the host's error once, with both list
   assert.deepEqual(await forgeReplaying(searches({ authored: failed })).forge.listChangeRequests(), [error]);
 });
 
-test("the viewer's own open PRs list as authored, drafts included, with their own pending drafts", async () => {
+test("the viewer's own open PRs list as authored, drafts included, with their own pending drafts and where their reviewers stand", async () => {
   const [host] = await forgeReplaying(searches()).forge.listChangeRequests();
 
   assert.deepEqual(host?.authored, [
@@ -865,6 +865,14 @@ test("the viewer's own open PRs list as authored, drafts included, with their ow
       fileCount: 5,
       ci: "failure",
       pendingDrafts: 1,
+      status: "changes-requested",
+      reviewers: [
+        { name: "alice", state: "approved" },
+        { name: "bob", state: "changes-requested" },
+        { name: "example-org/backend", state: "requested" },
+      ],
+      reviewedSinceLastPush: true,
+      latestReviewAt: "2026-10-06T15:02:40Z",
     },
     {
       forge: "github",
@@ -883,8 +891,77 @@ test("the viewer's own open PRs list as authored, drafts included, with their ow
       fileCount: 1,
       ci: null,
       pendingDrafts: 0,
+      status: "unreviewed",
+      reviewers: [],
+      reviewedSinceLastPush: false,
+      latestReviewAt: null,
     },
   ]);
+});
+
+const HEAD_31 = "3c9e0b7a1f2d4e6c8b0a9f8e7d6c5b4a39281706";
+const EARLIER_31 = "0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c";
+
+type LatestReview = { id: string; state: string; submittedAt: string; author: { login: string }; commit: { oid: string } };
+
+function review(id: string, login: string, state: string, commit = HEAD_31, submittedAt = "2026-10-06T15:00:00Z"): LatestReview {
+  return { id, state, submittedAt, author: { login }, commit: { oid: commit } };
+}
+
+/** The authored PR #31 as the search answers it, with these reviewers asked, latest reviews and dismissals in place of the fixture's. */
+async function authored31(pr: { asked?: string[]; reviews?: LatestReview[]; dismissals?: object[] }) {
+  const answer = JSON.parse(fixture("review-search-authored.json"));
+  const node = answer.data.search.nodes[0];
+  node.reviewRequests.nodes = (pr.asked ?? []).map((login) => ({ requestedReviewer: { __typename: "User", login } }));
+  node.latestReviews.nodes = pr.reviews ?? [];
+  node.timelineItems.nodes = pr.dismissals ?? [];
+  const [host] = await forgeReplaying(searches({ authored: { stdout: JSON.stringify(answer) } })).forge.listChangeRequests();
+  return host!.authored[0]!;
+}
+
+test("an approval GitHub dismissed on a push reads as an approval reset, and one dismissed by hand does not", async () => {
+  const dismissal = (id: string, pushed: boolean) => ({ previousReviewState: "APPROVED", pullRequestCommit: pushed ? { id: "PURC_1" } : null, review: { id } });
+
+  const reset = await authored31({ reviews: [review("PRR_a", "alice", "DISMISSED", EARLIER_31)], dismissals: [dismissal("PRR_a", true)] });
+  const byHand = await authored31({ reviews: [review("PRR_a", "alice", "DISMISSED", EARLIER_31)], dismissals: [dismissal("PRR_a", false)] });
+
+  assert.equal(reset.status, "approval-reset");
+  assert.deepEqual(reset.reviewers, [{ name: "alice", state: "unapproved" }]);
+  assert.equal(byHand.status, "commented");
+  assert.deepEqual(byHand.reviewers, [{ name: "alice", state: "commented" }]);
+});
+
+test("an approval still standing beats one GitHub took back, and a change request beats both", async () => {
+  const reset = { previousReviewState: "APPROVED", pullRequestCommit: { id: "PURC_1" }, review: { id: "PRR_b" } };
+  const approved = [review("PRR_a", "alice", "APPROVED"), review("PRR_b", "bob", "DISMISSED", EARLIER_31)];
+
+  assert.equal((await authored31({ reviews: approved, dismissals: [reset] })).status, "approved");
+  assert.equal((await authored31({ reviews: [...approved, review("PRR_c", "carol", "CHANGES_REQUESTED", EARLIER_31)], dismissals: [reset] })).status, "changes-requested");
+});
+
+test("reviewers asked and none answered is waiting, and a review without a verdict is commented", async () => {
+  const waiting = await authored31({ asked: ["alice", "bob"] });
+  const commented = await authored31({ asked: ["bob"], reviews: [review("PRR_a", "alice", "COMMENTED", EARLIER_31, "2026-10-04T10:00:00Z")] });
+
+  assert.equal(waiting.status, "waiting");
+  assert.deepEqual(waiting.reviewers, [
+    { name: "alice", state: "requested" },
+    { name: "bob", state: "requested" },
+  ]);
+  assert.equal(waiting.reviewedSinceLastPush, false);
+  assert.equal(waiting.latestReviewAt, null);
+  assert.equal(commented.status, "commented");
+  assert.equal(commented.reviewedSinceLastPush, false, "the review is of an earlier commit");
+  assert.equal(commented.latestReviewAt, "2026-10-04T10:00:00Z");
+});
+
+test("a reviewer asked again is waited on, whatever they said before, and their review no longer counts as since the push", async () => {
+  const again = await authored31({ asked: ["bob"], reviews: [review("PRR_b", "bob", "CHANGES_REQUESTED")] });
+
+  assert.equal(again.status, "waiting");
+  assert.deepEqual(again.reviewers, [{ name: "bob", state: "requested" }]);
+  assert.equal(again.reviewedSinceLastPush, false);
+  assert.equal(again.latestReviewAt, "2026-10-06T15:00:00Z");
 });
 
 test("only GitHub's own attachment URLs are attachments", () => {

@@ -68,7 +68,7 @@ function request(url: string, overrides: Partial<ReviewRequest> = {}): ReviewReq
 
 function authored(url: string, overrides: Partial<AuthoredChangeRequest> = {}): AuthoredChangeRequest {
   const { state: _, viaTeam: __, changedSinceReview: ___, ...listed } = request(url, { author: "reviewer" });
-  return { ...listed, ...overrides };
+  return { ...listed, status: "unreviewed", reviewers: [], reviewedSinceLastPush: false, latestReviewAt: null, ...overrides };
 }
 
 const COMPLETE = { assigned: false, authored: false };

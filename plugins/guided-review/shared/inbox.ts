@@ -51,13 +51,28 @@ export const ReviewRequestSchema = ListedChangeRequestSchema.extend({
   changedSinceReview: z.boolean().nullable(),
 });
 
+/** A person or team asked to review the author's change request, or who reviewed it, by where their latest review stands. */
+export const ReviewerSchema = z.object({
+  /** A login, or `org/team` for a team. */
+  name: z.string(),
+  state: ReviewerStateSchema,
+});
+
 /** An open change request the viewer authored, as a forge lists it; `author` is always the viewer. */
-export const AuthoredChangeRequestSchema = ListedChangeRequestSchema;
+export const AuthoredChangeRequestSchema = ListedChangeRequestSchema.extend({
+  status: ReviewStatusSchema,
+  reviewers: z.array(ReviewerSchema),
+  /** Whether a review arrived after the head commit was pushed; null where the forge cannot say. */
+  reviewedSinceLastPush: z.boolean().nullable(),
+  /** When the newest review arrived; null before any did. */
+  latestReviewAt: z.string().nullable(),
+});
 
 export type ReviewerState = z.output<typeof ReviewerStateSchema>;
 export type ReviewStatus = z.output<typeof ReviewStatusSchema>;
 export type CiState = z.output<typeof CiStateSchema>;
 export type ReviewRequest = z.output<typeof ReviewRequestSchema>;
+export type Reviewer = z.output<typeof ReviewerSchema>;
 export type ListedChangeRequest = z.output<typeof ListedChangeRequestSchema>;
 export type AuthoredChangeRequest = z.output<typeof AuthoredChangeRequestSchema>;
 

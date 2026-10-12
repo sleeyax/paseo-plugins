@@ -19,6 +19,7 @@ import {
 import {
   headMoved,
   ReviewerStateSchema,
+  ReviewStatusSchema,
   type AuthoredInboxItem,
   type Inbox,
   type InboxItem,
@@ -37,7 +38,9 @@ import {
   hiddenCheckedOff,
   passesCheckOff,
   STATE_NAMES,
+  STATUS_NAMES,
   statesLabel,
+  statusesLabel,
   tabLabel,
   visibleItems,
   type ListedItem,
@@ -511,6 +514,59 @@ function stateOf(item: InboxItem): Tinted {
   }
 }
 
+const STATUS_TINTS: Record<ReviewStatus, keyof Colors> = {
+  unreviewed: "foregroundMuted",
+  waiting: "foreground",
+  commented: "foregroundMuted",
+  "changes-requested": "statusDanger",
+  approved: "statusSuccess",
+  "approval-reset": "statusWarning",
+};
+
+const STATUS_HINTS: Record<ReviewStatus, string> = {
+  unreviewed: "Nobody is asked and nobody reviewed",
+  waiting: "Reviewers are asked and none reviewed yet",
+  commented: "Reviews without an approval or a change request",
+  "changes-requested": "A reviewer's latest review asks for changes",
+  approved: "Approved, with no change request outstanding",
+  "approval-reset": "An approval taken back by a push",
+};
+
+/** Where the author's reviewers stand, with whether one reviewed since their last push. */
+function statusOf(item: AuthoredInboxItem): Tinted {
+  const name = STATUS_NAMES[item.status];
+  const text = name.charAt(0).toUpperCase() + name.slice(1);
+  if (item.reviewedSinceLastPush === true) return { text: `${text} · reviewed since your last push`, color: "statusWarning" };
+  return { text, color: STATUS_TINTS[item.status] };
+}
+
+const REVIEWER_TINTS: Record<ReviewerState, keyof Colors> = {
+  requested: "foreground",
+  commented: "foregroundMuted",
+  "changes-requested": "statusDanger",
+  approved: "statusSuccess",
+  unapproved: "statusWarning",
+};
+
+function reviewersOf(item: AuthoredInboxItem): Tinted[] {
+  return item.reviewers.map((reviewer) => ({ text: reviewer.name, color: REVIEWER_TINTS[reviewer.state] }));
+}
+
+/** Each reviewer in their own tint, as many as fit on two lines. */
+function ReviewersCell({ colors, reviewers }: { colors: Colors; reviewers: Tinted[] }) {
+  if (reviewers.length === 0) return <Cell colors={colors} text="—" color="foregroundMuted" />;
+  return (
+    <Text numberOfLines={2} style={{ color: colors.foregroundMuted, fontSize: fontSize.sm, lineHeight: leading(fontSize.sm) }}>
+      {reviewers.map((reviewer, index) => (
+        <React.Fragment key={reviewer.text}>
+          {index > 0 ? ", " : ""}
+          <Text style={{ color: colors[reviewer.color] }}>{reviewer.text}</Text>
+        </React.Fragment>
+      ))}
+    </Text>
+  );
+}
+
 const GUIDE_STATES: Record<LocalReview["guide"], string> = {
   none: "Started",
   "choosing-scope": "Choose what to guide",
@@ -569,7 +625,7 @@ type ColumnSpec<Item> = {
   sort?: InboxSortKey;
   cell: (item: Item, colors: Colors, now: Date) => React.ReactNode;
   line?: (item: Item, now: Date) => string;
-  tint?: (item: Item) => Tinted | null;
+  tint?: (item: Item) => Tinted | Tinted[] | null;
   besideTitle?: true;
 };
 
@@ -635,8 +691,18 @@ const ASSIGNED_SPECS: Record<AssignedColumn, ColumnSpec<InboxItem>> = {
   state: tintedColumn<InboxItem>({ label: "My review", hint: "Where you stand, and whether it changed since your review", size: { flex: 1.4, min: 96 } }, stateOf),
 };
 
-/** The Authored tab cannot list review statuses, reviewers or check-offs yet, so their columns are left out. */
-const AUTHORED_SPECS: Partial<Record<AuthoredColumn, ColumnSpec<AuthoredInboxItem>>> = ROW_COLUMNS;
+/** The Authored tab cannot check off yet, so that column is left out. */
+const AUTHORED_SPECS: Partial<Record<AuthoredColumn, ColumnSpec<AuthoredInboxItem>>> = {
+  ...ROW_COLUMNS,
+  reviewers: {
+    label: "Reviewers",
+    hint: "Who is asked or reviewed, tinted by where each stands",
+    size: { flex: 1.4, min: 96 },
+    tint: reviewersOf,
+    cell: (item, colors) => <ReviewersCell colors={colors} reviewers={reviewersOf(item)} />,
+  },
+  state: tintedColumn<AuthoredInboxItem>({ label: "State", hint: "Where your reviewers stand, and whether one reviewed since your last push", size: { flex: 1.4, min: 96 } }, statusOf),
+};
 
 const ASSIGNED_VIEW: TabView<InboxItem, ReviewerState, AssignedColumn> = {
   tab: "assigned",
@@ -660,8 +726,13 @@ const AUTHORED_VIEW: TabView<AuthoredInboxItem, ReviewStatus, AuthoredColumn> = 
   rules: AUTHORED_RULES,
   columns: AUTHORED_COLUMNS,
   specs: AUTHORED_SPECS,
-  states: null,
-  searchHint: "Search by title, project or number",
+  states: {
+    all: ReviewStatusSchema.options,
+    label: statusesLabel,
+    name: (status) => STATUS_NAMES[status].charAt(0).toUpperCase() + STATUS_NAMES[status].slice(1),
+    hint: (status) => STATUS_HINTS[status],
+  },
+  searchHint: "Search by title, project, reviewer or number",
   listing: "Listing your change requests…",
   failure: "Could not list your change requests",
   empty: "No open change requests of yours.",
@@ -953,10 +1024,7 @@ function Card<Item extends Row, Column extends string>({
   });
   const beside = shown.find((spec) => spec.besideTitle);
   const meta = shown.flatMap((spec) => (spec.line === undefined ? [] : [spec.line(item, now)]));
-  const tinted = shown.flatMap((spec) => {
-    const value = spec.tint?.(item) ?? null;
-    return value === null ? [] : [value];
-  });
+  const tinted = shown.flatMap((spec) => spec.tint?.(item) ?? []);
 
   return (
     <View style={{ padding: spacing[3], gap: spacing[1], borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, opacity: dimmed(item) ? DIMMED : 1 }}>
@@ -976,8 +1044,8 @@ function Card<Item extends Row, Column extends string>({
       </View>
       {tinted.length > 0 ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: spacing[3] }}>
-          {tinted.map((value) => (
-            <Cell key={value.text} colors={colors} text={value.text} color={value.color} />
+          {tinted.map((value, index) => (
+            <Cell key={index} colors={colors} text={value.text} color={value.color} />
           ))}
         </View>
       ) : null}

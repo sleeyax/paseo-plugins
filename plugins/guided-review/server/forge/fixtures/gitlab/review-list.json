@@ -234,6 +234,44 @@
                   "committedDate": "2026-10-05T09:00:00+00:00"
                 }
               ]
+            },
+            "reviewers": {
+              "nodes": [
+                {
+                  "username": "maintainer",
+                  "mergeRequestInteraction": {
+                    "reviewState": "APPROVED",
+                    "approved": true,
+                    "updatedAt": "2026-10-05T10:15:00Z"
+                  }
+                },
+                {
+                  "username": "designer",
+                  "mergeRequestInteraction": {
+                    "reviewState": "REQUESTED_CHANGES",
+                    "approved": false,
+                    "updatedAt": "2026-10-03T14:00:00Z"
+                  }
+                },
+                {
+                  "username": "backend-lead",
+                  "mergeRequestInteraction": {
+                    "reviewState": "UNREVIEWED",
+                    "approved": false,
+                    "updatedAt": "2026-10-01T09:00:00Z"
+                  }
+                }
+              ]
+            },
+            "approvedBy": {
+              "nodes": [
+                {
+                  "username": "maintainer"
+                },
+                {
+                  "username": "passer-by"
+                }
+              ]
             }
           },
           {
@@ -255,6 +293,12 @@
                   "committedDate": "2026-10-02T08:00:00+00:00"
                 }
               ]
+            },
+            "reviewers": {
+              "nodes": []
+            },
+            "approvedBy": {
+              "nodes": []
             }
           }
         ]

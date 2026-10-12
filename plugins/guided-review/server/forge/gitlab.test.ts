@@ -1234,7 +1234,7 @@ test("an MR reads by the viewer's own reviewer record, changed when the head com
   ]);
 });
 
-test("lists the viewer's own open MRs, drafts included, in the same query as the MRs they review", async () => {
+test("lists the viewer's own open MRs, drafts included, with where their reviewers stand, in the same query as the MRs they review", async () => {
   const { forge, run } = forgeReplaying(LIST_REVIEWS);
 
   const [host] = await forge.listChangeRequests();
@@ -1259,6 +1259,15 @@ test("lists the viewer's own open MRs, drafts included, in the same query as the
       fileCount: 7,
       ci: "success",
       pendingDrafts: null,
+      status: "changes-requested",
+      reviewers: [
+        { name: "maintainer", state: "approved" },
+        { name: "designer", state: "changes-requested" },
+        { name: "backend-lead", state: "requested" },
+        { name: "passer-by", state: "approved" },
+      ],
+      reviewedSinceLastPush: true,
+      latestReviewAt: "2026-10-05T10:15:00Z",
     },
     {
       forge: "gitlab",
@@ -1277,8 +1286,69 @@ test("lists the viewer's own open MRs, drafts included, in the same query as the
       fileCount: 0,
       ci: null,
       pendingDrafts: null,
+      status: "unreviewed",
+      reviewers: [],
+      reviewedSinceLastPush: false,
+      latestReviewAt: null,
     },
   ]);
+});
+
+type Interaction = { reviewState: string; approved: boolean; updatedAt: string };
+
+/** The authored MR !15 as GitLab lists it, with these reviewer records and approvers in place of the fixture's. */
+async function authored15(mr: { reviewers?: Record<string, Interaction>; approvedBy?: string[]; committedDate?: string | null }) {
+  const answer = JSON.parse(fixture("review-list.json"));
+  const node = answer.data.currentUser.authoredMergeRequests.nodes[0];
+  node.reviewers.nodes = Object.entries(mr.reviewers ?? {}).map(([username, mergeRequestInteraction]) => ({ username, mergeRequestInteraction }));
+  node.approvedBy.nodes = (mr.approvedBy ?? []).map((username) => ({ username }));
+  if (mr.committedDate !== undefined) node.commits.nodes[0].committedDate = mr.committedDate;
+  const { forge } = forgeReplaying([AUTH_STATUS_ALL, version("19.5.0-pre"), { stdout: JSON.stringify(answer) }]);
+  return (await forge.listChangeRequests())[0]!.authored[0]!;
+}
+
+/** The fixture's head commit of !15 is dated 2026-10-05T09:00. */
+const BEFORE_HEAD = "2026-10-04T12:00:00Z";
+const AFTER_HEAD = "2026-10-05T11:00:00Z";
+const interaction = (reviewState: string, updatedAt: string): Interaction => ({ reviewState, approved: reviewState === "APPROVED", updatedAt });
+
+test("an approval GitLab took back reads as an approval reset, and one still standing beats it", async () => {
+  const reset = await authored15({ reviewers: { maintainer: interaction("UNAPPROVED", AFTER_HEAD) } });
+  const standing = await authored15({ reviewers: { maintainer: interaction("UNAPPROVED", AFTER_HEAD), lead: interaction("APPROVED", AFTER_HEAD) }, approvedBy: ["lead"] });
+
+  assert.equal(reset.status, "approval-reset");
+  assert.deepEqual(reset.reviewers, [{ name: "maintainer", state: "unapproved" }]);
+  assert.equal(reset.reviewedSinceLastPush, false, "a reset is no review");
+  assert.equal(reset.latestReviewAt, null);
+  assert.equal(standing.status, "approved");
+});
+
+test("reviewers asked and none answered is waiting, and a review without a verdict is commented", async () => {
+  const waiting = await authored15({ reviewers: { maintainer: interaction("UNREVIEWED", AFTER_HEAD), designer: interaction("REVIEW_STARTED", AFTER_HEAD) } });
+  const commented = await authored15({ reviewers: { maintainer: interaction("UNREVIEWED", AFTER_HEAD), designer: interaction("REVIEWED", BEFORE_HEAD) } });
+
+  assert.equal(waiting.status, "waiting");
+  assert.equal(waiting.reviewedSinceLastPush, false);
+  assert.equal(waiting.latestReviewAt, null);
+  assert.equal(commented.status, "commented");
+  assert.equal(commented.reviewedSinceLastPush, false, "the review is older than the head commit");
+  assert.equal(commented.latestReviewAt, BEFORE_HEAD);
+});
+
+test("the author's own reviewer record and approval are not a review of their MR", async () => {
+  const own = await authored15({ reviewers: { Reviewer: interaction("APPROVED", AFTER_HEAD) }, approvedBy: ["reviewer"] });
+
+  assert.equal(own.status, "unreviewed");
+  assert.deepEqual(own.reviewers, []);
+  assert.equal(own.latestReviewAt, null);
+});
+
+test("whether a review came after the push is unknown when GitLab gives no date for the head commit", async () => {
+  const undated = await authored15({ reviewers: { designer: interaction("REQUESTED_CHANGES", AFTER_HEAD) }, committedDate: null });
+
+  assert.equal(undated.status, "changes-requested");
+  assert.equal(undated.reviewedSinceLastPush, null);
+  assert.equal(undated.latestReviewAt, AFTER_HEAD);
 });
 
 test("a host glab is not logged in to, or one older than 19.2, comes back with its error and the others listed", async () => {

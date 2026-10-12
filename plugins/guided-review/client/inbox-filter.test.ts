@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_INBOX_PREFERENCES, type AssignedPreferences } from "../shared/inbox-preferences.ts";
-import type { AuthoredInboxItem, Inbox, InboxItem } from "../shared/inbox.ts";
+import { ReviewStatusSchema, type AuthoredInboxItem, type Inbox, type InboxItem } from "../shared/inbox.ts";
 import {
   age,
   ASSIGNED_RULES,
@@ -12,6 +12,7 @@ import {
   matchesSearch,
   needsAttention,
   statesLabel,
+  statusesLabel,
   tabLabel,
   visibleItems,
 } from "./inbox-filter.ts";
@@ -121,6 +122,12 @@ test("the states label names whichever side is shorter", () => {
   assert.equal(statesLabel(["requested", "commented", "changes-requested"]), "States: all but approved and approval reset");
 });
 
+test("Authored's states label names its review statuses the same way", () => {
+  assert.equal(statusesLabel(AUTHORED_DEFAULTS.states), "States: all but approved");
+  assert.equal(statusesLabel(["waiting", "approval-reset"]), "States: waiting and approval reset");
+  assert.equal(statusesLabel([...ReviewStatusSchema.options]), "States: all");
+});
+
 test("needs attention is what was never reviewed, asked again, unapproved or changed since the review", () => {
   assert.equal(needsAttention(item(1)), true);
   assert.equal(needsAttention(item(1, { state: "unapproved" })), true);
@@ -153,7 +160,7 @@ test("the search needs every word somewhere in the title, project, author or num
 
 function mine(number: number, overrides: Partial<AuthoredInboxItem> = {}): AuthoredInboxItem {
   const { state: _, viaTeam: __, changedSinceReview: ___, ...listed } = item(number, { author: "me" });
-  return { ...listed, ...overrides };
+  return { ...listed, status: "waiting", reviewers: [], reviewedSinceLastPush: false, latestReviewAt: null, ...overrides };
 }
 
 const AUTHORED_DEFAULTS = DEFAULT_INBOX_PREFERENCES.authored;
@@ -171,18 +178,46 @@ test("Authored lists newest first by default, drafts in their place, and filters
   assert.deepEqual(numbers(visibleItems(AUTHORED_RULES, items, { ...AUTHORED_DEFAULTS, sort: { key: "size", descending: false } }, "")), [1, 3, 2]);
 });
 
-test("Authored offers no states or needs attention to filter by yet, so neither hides anything", () => {
-  const items = [mine(1), mine(2)];
+test("Authored filters by review status, by default everything but what is approved", () => {
+  const items = [
+    mine(1, { status: "unreviewed" }),
+    mine(2, { status: "waiting" }),
+    mine(3, { status: "commented" }),
+    mine(4, { status: "changes-requested" }),
+    mine(5, { status: "approved" }),
+    mine(6, { status: "approval-reset" }),
+  ];
 
-  assert.equal(AUTHORED_RULES.state, null);
-  assert.equal(AUTHORED_RULES.needsAttention, null);
-  assert.deepEqual(numbers(visibleItems(AUTHORED_RULES, items, { ...AUTHORED_DEFAULTS, states: ["approved"], needsAttention: true }, "")), [1, 2]);
+  assert.deepEqual(numbers(visibleItems(AUTHORED_RULES, items, { ...AUTHORED_DEFAULTS, sort: { key: "created", descending: false } }, "")), [1, 2, 3, 4, 6]);
+  assert.deepEqual(numbers(visibleItems(AUTHORED_RULES, items, { ...AUTHORED_DEFAULTS, states: ["approved", "approval-reset"] }, "")), [5, 6]);
 });
 
-test("the search on Authored needs every word in the title, project or number, not the viewer's own name", () => {
-  const mr = mine(12, { forge: "gitlab", project: "example-group/service", title: "Add rate limiting" });
+test("an authored change request needs attention on a change request, a review since the last push, or failing CI, and not on an approval reset", () => {
+  const items = [
+    mine(1, { status: "changes-requested" }),
+    mine(2, { status: "commented", reviewedSinceLastPush: true }),
+    mine(3, { status: "waiting", ci: "failure" }),
+    mine(4, { status: "approval-reset" }),
+    mine(5, { status: "commented", reviewedSinceLastPush: null, ci: "pending" }),
+    mine(6, { status: "approved", reviewedSinceLastPush: false, ci: "success" }),
+  ];
+  const attention = { ...AUTHORED_DEFAULTS, states: [...ReviewStatusSchema.options], needsAttention: true, sort: { key: "created" as const, descending: false } };
 
-  for (const query of ["", "rate", "service !12", "LIMITING"]) assert.equal(matchesSearch(AUTHORED_RULES, mr, query), true, query);
+  assert.deepEqual(numbers(visibleItems(AUTHORED_RULES, items, attention, "")), [1, 2, 3]);
+});
+
+test("the search on Authored needs every word in the title, project, reviewers or number, not the viewer's own name", () => {
+  const mr = mine(12, {
+    forge: "gitlab",
+    project: "example-group/service",
+    title: "Add rate limiting",
+    reviewers: [
+      { name: "kobe", state: "approved" },
+      { name: "example-org/backend", state: "requested" },
+    ],
+  });
+
+  for (const query of ["", "rate", "service !12", "LIMITING", "kobe", "backend rate"]) assert.equal(matchesSearch(AUTHORED_RULES, mr, query), true, query);
   for (const query of ["me", "#12", "uploader"]) assert.equal(matchesSearch(AUTHORED_RULES, mr, query), false, query);
 });
 

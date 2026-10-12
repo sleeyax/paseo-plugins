@@ -3,10 +3,10 @@ import { z } from "zod";
 import type { Draft, DraftLocation, LineRef } from "../../shared/drafts.ts";
 import type { CommandRunner } from "../command-runner.ts";
 import type { Verdict } from "../../shared/submit.ts";
-import type { CiState, ListedChangeRequest, ListedHost, ReviewerState, ReviewRequest } from "../../shared/inbox.ts";
+import type { AuthoredChangeRequest, CiState, ListedChangeRequest, ListedHost, ReviewerState, ReviewRequest } from "../../shared/inbox.ts";
 import { createCli, type Cli } from "./cli.ts";
 import { GITHUB_HOST } from "./github.ts";
-import { CLONE_TIMEOUT_MS, COMMIT_READS_AT_ONCE, mapAtMost, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, userOf } from "./common.ts";
+import { CLONE_TIMEOUT_MS, COMMIT_READS_AT_ONCE, mapAtMost, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, latestOf, reviewStatusOf, userOf } from "./common.ts";
 import { SubmitSteps } from "./submit-steps.ts";
 import {
   commitsSinceIn,
@@ -207,10 +207,13 @@ const LISTED_MERGE_REQUEST_FIELDS = `webUrl title draft createdAt updatedAt diff
         headPipeline { status }
         commits(first: 1) { nodes { sha committedDate } }`;
 
+const REVIEWER_FIELDS = "reviewers { nodes { username mergeRequestInteraction { reviewState approved updatedAt } } }";
+
 /**
  * The open MRs the viewer is a reviewer of, with their own reviewer record among the MR's reviewers,
- * since GitLab has no field for the viewer's alone, and the open MRs the viewer authored.
- * Both lists are one query, so a host fails for both at once.
+ * since GitLab has no field for the viewer's alone, and the open MRs the viewer authored, with every
+ * reviewer's record and whoever approved without being one.
+ * Both lists are one query, so a host fails for both at once; gitlab.com scores it 159 of the 250 it allows a signed-in user.
  */
 export const REVIEW_LIST_QUERY = `query GuidedReviewInbox {
   currentUser {
@@ -219,13 +222,15 @@ export const REVIEW_LIST_QUERY = `query GuidedReviewInbox {
       pageInfo { hasNextPage }
       nodes {
         ${LISTED_MERGE_REQUEST_FIELDS}
-        reviewers { nodes { username mergeRequestInteraction { reviewState approved updatedAt } } }
+        ${REVIEWER_FIELDS}
       }
     }
     authoredMergeRequests(state: opened, first: ${REVIEW_LIST_SIZE}, sort: UPDATED_DESC) {
       pageInfo { hasNextPage }
       nodes {
         ${LISTED_MERGE_REQUEST_FIELDS}
+        ${REVIEWER_FIELDS}
+        approvedBy { nodes { username } }
       }
     }
   }
@@ -259,6 +264,10 @@ const ReviewedMergeRequest = ListedMergeRequest.extend({
   }),
 });
 
+const AuthoredMergeRequest = ReviewedMergeRequest.extend({
+  approvedBy: z.object({ nodes: z.array(z.object({ username: z.string() })) }),
+});
+
 function pageOf<Node extends z.ZodType>(node: Node) {
   return z.object({ pageInfo: z.object({ hasNextPage: z.boolean() }), nodes: z.array(node) });
 }
@@ -271,7 +280,7 @@ const ReviewListResponse = z.object({
         .object({
           username: z.string(),
           reviewRequestedMergeRequests: pageOf(ReviewedMergeRequest),
-          authoredMergeRequests: pageOf(ListedMergeRequest),
+          authoredMergeRequests: pageOf(AuthoredMergeRequest),
         })
         .nullable(),
     })
@@ -281,6 +290,8 @@ const ReviewListResponse = z.object({
 
 type ListedMergeRequest = z.output<typeof ListedMergeRequest>;
 type ReviewedMergeRequest = z.output<typeof ReviewedMergeRequest>;
+type AuthoredMergeRequest = z.output<typeof AuthoredMergeRequest>;
+type ReviewerRecord = ReviewedMergeRequest["reviewers"]["nodes"][number];
 
 const LISTED_STATES: Record<(typeof GITLAB_REVIEW_STATES)[number], ReviewerState> = {
   UNREVIEWED: "requested",
@@ -312,10 +323,10 @@ const CI_STATES: Record<string, CiState> = {
 function reviewRequestOf(mr: ReviewedMergeRequest, viewer: string): ReviewRequest | null {
   const listed = listedOf(mr);
   if (listed === null) return null;
-  const own = mr.reviewers.nodes.find((reviewer) => reviewer.username.toLowerCase() === viewer.toLowerCase())?.mergeRequestInteraction;
+  const own = mr.reviewers.nodes.find((reviewer) => sameUser(reviewer.username, viewer))?.mergeRequestInteraction;
   const reviewState = own?.reviewState ?? "UNREVIEWED";
   const head = mr.commits?.nodes[0];
-  const state = own?.approved ? "approved" : LISTED_STATES[reviewState];
+  const state = reviewerStateOf(own ?? null);
   let changedSinceReview: boolean | null = null;
   if (reviewState === "UNAPPROVED") changedSinceReview = true;
   else if (state !== "requested" && own?.updatedAt && head?.committedDate) {
@@ -323,6 +334,44 @@ function reviewRequestOf(mr: ReviewedMergeRequest, viewer: string): ReviewReques
   }
   return { ...listed, state, viaTeam: null, changedSinceReview };
 }
+
+function reviewerStateOf(interaction: ReviewerRecord["mergeRequestInteraction"]): ReviewerState {
+  return interaction?.approved ? "approved" : LISTED_STATES[interaction?.reviewState ?? "UNREVIEWED"];
+}
+
+function sameUser(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * The viewer's own MR with where each reviewer stands, and anyone who approved without being asked.
+ * GitLab gives the same state to an approval reset by a push and one its reviewer took back, so both read as reset.
+ * It keeps no record of the commit a review was of, so a review after the head commit's date counts as one since the push.
+ */
+function authoredOf(mr: AuthoredMergeRequest): AuthoredChangeRequest | null {
+  const listed = listedOf(mr);
+  if (listed === null) return null;
+  const others = mr.reviewers.nodes.filter((reviewer) => !sameUser(reviewer.username, listed.author));
+  const reviewers = others.map((reviewer) => ({ name: reviewer.username, state: reviewerStateOf(reviewer.mergeRequestInteraction) }));
+  for (const { username } of mr.approvedBy.nodes) {
+    if (!sameUser(username, listed.author) && !reviewers.some((reviewer) => sameUser(reviewer.name, username))) reviewers.push({ name: username, state: "approved" });
+  }
+  const reviewedAt = others.flatMap((reviewer) => {
+    const at = reviewer.mergeRequestInteraction?.updatedAt;
+    return at && REVIEWED_STATES.has(reviewerStateOf(reviewer.mergeRequestInteraction)) ? [at] : [];
+  });
+  const headAt = mr.commits?.nodes[0]?.committedDate;
+  return {
+    ...listed,
+    status: reviewStatusOf(reviewers),
+    reviewers,
+    reviewedSinceLastPush: reviewedAt.length === 0 ? false : headAt ? reviewedAt.some((at) => Date.parse(at) > Date.parse(headAt)) : null,
+    latestReviewAt: latestOf(reviewedAt),
+  };
+}
+
+/** The states a reviewer reaches by reviewing, rather than by being asked or by GitLab taking an approval back. */
+const REVIEWED_STATES: ReadonlySet<ReviewerState> = new Set(["commented", "changes-requested", "approved"]);
 
 /** GitLab's listing cannot count the viewer's drafts, which take a call per MR. */
 function listedOf(mr: ListedMergeRequest): ListedChangeRequest | null {
@@ -467,7 +516,7 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       forge: "gitlab",
       host,
       requests: assigned.nodes.map((mr) => reviewRequestOf(mr, user.username)).filter((request) => request !== null),
-      authored: authored.nodes.map(listedOf).filter((mine) => mine !== null),
+      authored: authored.nodes.map(authoredOf).filter((mine) => mine !== null),
       truncated: { assigned: assigned.pageInfo.hasNextPage, authored: authored.pageInfo.hasNextPage },
     };
   };

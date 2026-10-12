@@ -1,6 +1,7 @@
 import { DEFAULT_INBOX_PREFERENCES, type AssignedPreferences, type InboxSortKey, type InboxTab } from "../shared/inbox-preferences.ts";
 import {
   ReviewerStateSchema,
+  ReviewStatusSchema,
   type AuthoredInboxItem,
   type Inbox,
   type InboxItem,
@@ -45,11 +46,19 @@ export const ASSIGNED_RULES: TabRules<InboxItem, ReviewerState> = {
   noun: ["review", "reviews"],
 };
 
+/**
+ * Whether the author has something to do on their change request: changes asked for, a review since their last push, or failing CI.
+ * An approval reset waits on the reviewer, not the author.
+ */
+export function authoredNeedsAttention(item: AuthoredInboxItem): boolean {
+  return item.status === "changes-requested" || item.reviewedSinceLastPush === true || item.ci === "failure";
+}
+
 /** The author is always the viewer, so the search leaves their name out. */
 export const AUTHORED_RULES: TabRules<AuthoredInboxItem, ReviewStatus> = {
-  state: null,
-  needsAttention: null,
-  searched: (item) => [item.title, item.project],
+  state: (item) => item.status,
+  needsAttention: authoredNeedsAttention,
+  searched: (item) => [item.title, item.project, ...item.reviewers.map((reviewer) => reviewer.name)],
   noun: ["change request", "change requests"],
 };
 
@@ -151,20 +160,38 @@ export const STATE_NAMES: Record<ReviewerState, string> = {
   unapproved: "approval reset",
 };
 
+/** Each review status of an authored change request as a sentence names it mid-way. */
+export const STATUS_NAMES: Record<ReviewStatus, string> = {
+  unreviewed: "unreviewed",
+  waiting: "waiting",
+  commented: "commented",
+  "changes-requested": "changes requested",
+  approved: "approved",
+  "approval-reset": "approval reset",
+};
+
 /**
  * Which states the list shows, naming whichever side is shorter: `States: requested and commented`,
  * or `States: all but approved`.
  */
 export function statesLabel(states: readonly ReviewerState[]): string {
-  const hidden = ReviewerStateSchema.options.filter((state) => !states.includes(state));
-  if (hidden.length === 0) return "States: all";
-  if (states.length <= hidden.length) return `States: ${namesOf(states)}`;
-  return `States: all but ${namesOf(hidden)}`;
+  return shownLabel(states, ReviewerStateSchema.options, STATE_NAMES);
 }
 
-function namesOf(states: readonly ReviewerState[]): string {
-  const names = states.map((state) => STATE_NAMES[state]);
-  return names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+/** Which review statuses the Authored tab shows, named as `statesLabel` names states. */
+export function statusesLabel(statuses: readonly ReviewStatus[]): string {
+  return shownLabel(statuses, ReviewStatusSchema.options, STATUS_NAMES);
+}
+
+function shownLabel<State extends string>(shown: readonly State[], all: readonly State[], names: Record<State, string>): string {
+  const hidden = all.filter((state) => !shown.includes(state));
+  if (hidden.length === 0) return "States: all";
+  const namesOf = (states: readonly State[]) => {
+    const named = states.map((state) => names[state]);
+    return named.length === 1 ? named[0] : `${named.slice(0, -1).join(", ")} and ${named.at(-1)}`;
+  };
+  if (shown.length <= hidden.length) return `States: ${namesOf(shown)}`;
+  return `States: all but ${namesOf(hidden)}`;
 }
 
 /** How many rows the list shows, of how many when the filters or the search hide some, and how many of those are checked off. */
