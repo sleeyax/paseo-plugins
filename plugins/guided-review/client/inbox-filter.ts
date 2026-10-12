@@ -1,6 +1,34 @@
-import { DEFAULT_INBOX_PREFERENCES, type AssignedPreferences, type InboxSortKey } from "../shared/inbox-preferences.ts";
-import { ReviewerStateSchema, type InboxItem, type ReviewerState } from "../shared/inbox.ts";
+import { DEFAULT_INBOX_PREFERENCES, type AssignedPreferences, type InboxSortKey, type InboxTab } from "../shared/inbox-preferences.ts";
+import {
+  ReviewerStateSchema,
+  type AuthoredInboxItem,
+  type Inbox,
+  type InboxItem,
+  type ListedChangeRequest,
+  type ReviewerState,
+  type ReviewStatus,
+} from "../shared/inbox.ts";
 import { numberLabel } from "../shared/reference.ts";
+
+/** What every row of either tab has to be filtered by. */
+export type ListedItem = ListedChangeRequest & { checkedOff: boolean };
+
+/** What a tab's filters read of the preferences; the columns are the table's business. */
+export type ListFilters<State extends string> = Pick<AssignedPreferences, "provider" | "hideDrafts" | "checkedOff" | "needsAttention" | "sort"> & {
+  states: readonly State[];
+};
+
+/** How a tab reads its rows. */
+export type TabRules<Item extends ListedItem, State extends string> = {
+  /** Where a row stands, as the States filter reads it; null while the tab has no states to filter by, so the filter is not offered. */
+  state: ((item: Item) => State) | null;
+  /** Whether a row needs the viewer's attention; null while the tab cannot tell, so the filter is not offered. */
+  needsAttention: ((item: Item) => boolean) | null;
+  /** What the search looks in, besides the number as the forge writes it. */
+  searched(item: Item): string[];
+  /** What a row is called, one and many. */
+  noun: readonly [string, string];
+};
 
 /**
  * Whether the reviewer has something to do on it: never reviewed, asked again, an approval the forge
@@ -10,14 +38,29 @@ export function needsAttention(item: InboxItem): boolean {
   return item.state === "requested" || item.state === "unapproved" || item.changedSinceReview === true;
 }
 
-/** Every word of `query` is in the title, the project, the author or the number as the forge writes it. */
-export function matchesSearch(item: InboxItem, query: string): boolean {
+export const ASSIGNED_RULES: TabRules<InboxItem, ReviewerState> = {
+  state: (item) => item.state,
+  needsAttention,
+  searched: (item) => [item.title, item.project, item.author],
+  noun: ["review", "reviews"],
+};
+
+/** The author is always the viewer, so the search leaves their name out. */
+export const AUTHORED_RULES: TabRules<AuthoredInboxItem, ReviewStatus> = {
+  state: null,
+  needsAttention: null,
+  searched: (item) => [item.title, item.project],
+  noun: ["change request", "change requests"],
+};
+
+/** Every word of `query` is in what the tab searches or the number as the forge writes it. */
+export function matchesSearch<Item extends ListedItem>(rules: TabRules<Item, string>, item: Item, query: string): boolean {
   const words = query.toLowerCase().split(/\s+/).filter((word) => word !== "");
-  const text = [item.title, item.project, item.author, numberLabel(item.forge, item.number)].join(" ").toLowerCase();
+  const text = [...rules.searched(item), numberLabel(item.forge, item.number)].join(" ").toLowerCase();
   return words.every((word) => text.includes(word));
 }
 
-const SORT_VALUES: Record<InboxSortKey, (item: InboxItem) => number> = {
+const SORT_VALUES: Record<InboxSortKey, (item: ListedItem) => number> = {
   updated: (item) => Date.parse(item.updatedAt),
   created: (item) => Date.parse(item.createdAt),
   size: (item) => item.additions + item.deletions,
@@ -30,29 +73,42 @@ const NONE_HELD: ReadonlySet<string> = new Set();
  * The items the list shows, filtered as the preferences say and by the search, in their sort order; ties go to the latest update.
  * A `held` row is shown whether or not the check-off filter would take it, so a row just checked off or unchecked stays put.
  */
-export function visibleItems(items: readonly InboxItem[], preferences: AssignedPreferences, query: string, held = NONE_HELD): InboxItem[] {
+export function visibleItems<Item extends ListedItem, State extends string>(
+  rules: TabRules<Item, State>,
+  items: readonly Item[],
+  preferences: ListFilters<State>,
+  query: string,
+  held = NONE_HELD,
+): Item[] {
   const value = SORT_VALUES[preferences.sort.key];
   const direction = preferences.sort.descending ? -1 : 1;
   return items
-    .filter((item) => matchesFilters(item, preferences, query) && (held.has(item.url) || passesCheckOff(item, preferences)))
+    .filter((item) => matchesFilters(rules, item, preferences, query) && (held.has(item.url) || passesCheckOff(item, preferences)))
     .sort((a, b) => direction * (value(a) - value(b)) || SORT_VALUES.updated(b) - SORT_VALUES.updated(a));
 }
 
 /** How many checked-off items the list leaves out that every other filter and the search would show. */
-export function hiddenCheckedOff(items: readonly InboxItem[], preferences: AssignedPreferences, query: string, held = NONE_HELD): number {
-  return items.filter((item) => item.checkedOff && !held.has(item.url) && !passesCheckOff(item, preferences) && matchesFilters(item, preferences, query)).length;
+export function hiddenCheckedOff<Item extends ListedItem, State extends string>(
+  rules: TabRules<Item, State>,
+  items: readonly Item[],
+  preferences: ListFilters<State>,
+  query: string,
+  held = NONE_HELD,
+): number {
+  return items.filter((item) => item.checkedOff && !held.has(item.url) && !passesCheckOff(item, preferences) && matchesFilters(rules, item, preferences, query))
+    .length;
 }
 
-/** The list's default filters with only what needs the reviewer's attention kept, whatever the reviewer last set. */
+/** The Assigned tab's default filters with only what needs the reviewer's attention kept, whatever the reviewer last set. */
 const ATTENTION_FILTERS: AssignedPreferences = { ...DEFAULT_INBOX_PREFERENCES.assigned, needsAttention: true };
 
-/** How many items need the reviewer's attention: the sidebar's count. */
-export function attentionCount(items: readonly InboxItem[]): number {
-  return items.filter((item) => matchesFilters(item, ATTENTION_FILTERS, "") && passesCheckOff(item, ATTENTION_FILTERS)).length;
+/** How many review requests need the reviewer's attention: the sidebar's count, which leaves their own change requests out. */
+export function attentionCount(inbox: Inbox): number {
+  return inbox.items.filter((item) => matchesFilters(ASSIGNED_RULES, item, ATTENTION_FILTERS, "") && passesCheckOff(item, ATTENTION_FILTERS)).length;
 }
 
 /** Whether the check-off filter shows the item, which a held row is not asked. */
-export function passesCheckOff(item: InboxItem, preferences: AssignedPreferences): boolean {
+export function passesCheckOff(item: ListedItem, preferences: Pick<ListFilters<string>, "checkedOff">): boolean {
   switch (preferences.checkedOff) {
     case "hide":
       return !item.checkedOff;
@@ -63,14 +119,27 @@ export function passesCheckOff(item: InboxItem, preferences: AssignedPreferences
   }
 }
 
-function matchesFilters(item: InboxItem, preferences: AssignedPreferences, query: string): boolean {
+function matchesFilters<Item extends ListedItem, State extends string>(rules: TabRules<Item, State>, item: Item, preferences: ListFilters<State>, query: string): boolean {
   return (
     (preferences.provider === "all" || item.forge === preferences.provider) &&
-    preferences.states.includes(item.state) &&
+    (rules.state === null || preferences.states.includes(rules.state(item))) &&
     (!preferences.hideDrafts || !item.isDraft) &&
-    (!preferences.needsAttention || needsAttention(item)) &&
-    matchesSearch(item, query)
+    (!preferences.needsAttention || rules.needsAttention === null || rules.needsAttention(item)) &&
+    matchesSearch(rules, item, query)
   );
+}
+
+const TAB_TITLES: Record<InboxTab, string> = { assigned: "Assigned to me", authored: "Authored by me" };
+
+function listedOn(inbox: Inbox, tab: InboxTab): readonly ListedItem[] {
+  return tab === "assigned" ? inbox.items : inbox.authored;
+}
+
+/** A tab's name with how many it lists, a `+` when a host listed only part of it, and no number until it is listed. */
+export function tabLabel(tab: InboxTab, inbox: Inbox | undefined): string {
+  if (inbox === undefined) return TAB_TITLES[tab];
+  const partial = inbox.hosts.some((host) => host.truncated[tab]);
+  return `${TAB_TITLES[tab]} · ${listedOn(inbox, tab).length}${partial ? "+" : ""}`;
 }
 
 /** Each reviewer state as a sentence names it mid-way. */
@@ -98,9 +167,9 @@ function namesOf(states: readonly ReviewerState[]): string {
   return names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
-/** How many reviews the list shows, of how many when the filters or the search hide some, and how many of those are checked off. */
-export function countLabel(shown: number, total: number, checkedOff = 0): string {
-  const noun = total === 1 ? "review" : "reviews";
+/** How many rows the list shows, of how many when the filters or the search hide some, and how many of those are checked off. */
+export function countLabel(shown: number, total: number, checkedOff = 0, [one, many] = ASSIGNED_RULES.noun): string {
+  const noun = total === 1 ? one : many;
   const count = shown === total ? `${total} ${noun}` : `${shown} of ${total} ${noun}`;
   return checkedOff > 0 ? `${count} · ${checkedOff} checked off` : count;
 }

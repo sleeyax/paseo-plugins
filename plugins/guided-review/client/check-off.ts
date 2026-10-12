@@ -4,6 +4,7 @@ import { createContext, useState } from "react";
 import * as contracts from "../shared/contracts.ts";
 import { PLUGIN_ID } from "../shared/identity.ts";
 import type { Inbox, InboxItem } from "../shared/inbox.ts";
+import type { ListedItem } from "./inbox-filter.ts";
 
 export const INBOX_QUERY_KEY = [PLUGIN_ID, "inbox"];
 const MUTATION_KEY = [PLUGIN_ID, "check-off"];
@@ -59,7 +60,7 @@ export function useCheckOff(): CheckOffControl {
 }
 
 /** What a row's checkbox needs from the list, so the column's cell takes no more than every other cell. */
-export const CheckOffContext = createContext<{ toggle(item: InboxItem): void; dimmed(item: InboxItem): boolean }>({
+export const CheckOffContext = createContext<{ toggle(item: InboxItem): void; dimmed(item: ListedItem): boolean }>({
   toggle: () => {},
   dimmed: () => false,
 });

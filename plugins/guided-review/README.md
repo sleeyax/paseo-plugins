@@ -38,18 +38,23 @@ To guide the branch you already have checked out, choose **Guided Review: guide 
 If your branch is clean and behind the PR/MR, the plugin fast-forwards it and writes the guide in your workspace.
 Otherwise it leaves your branch alone and uses a new workspace.
 
-### Pick from your review requests
+### Pick from your review requests or your own
 
-**Assigned to me for review** lists the open pull requests and merge requests you are a reviewer of, on github.com and on every GitLab host `glab` is logged in to.
+The start tab lists open pull requests and merge requests in two tabs.
+**Assigned to me** lists the ones you are a reviewer of, on github.com and on every GitLab host `glab` is logged in to.
+**Authored by me** lists your own on github.com, drafts included.
+Each tab shows how many it lists, with a `+` when a host has more than one page.
 
 - Select **Review** to start a review, **Open** to open one, or **Continue** to reopen one whose workspace was closed.
-- Filter by forge, by state under **States**, with **Needs my attention** or **Hide drafts**, or search.
+- Filter by forge or with **Hide drafts**, or search.
+  On **Assigned to me**, also filter by state under **States** or with **Needs my attention**.
 - Select a column heading to sort, and **Columns** to choose what the table shows.
-- Tick a row's box to check it off while it waits on someone else.
+- Each tab keeps its own filters, sort, columns and search.
+- On **Assigned to me**, tick a row's box to check it off while it waits on someone else.
   It comes back when someone pushes to it, asks you to review again, or GitLab resets your approval.
-- Select **Refresh** to list again.
+- Select **Refresh** to list both tabs again.
 
-The count beside **Guided Review** in the sidebar is how many reviews need your attention.
+The count beside **Guided Review** in the sidebar is how many review requests on **Assigned to me** need your attention.
 
 If a review workspace shows no panel, select **Open Guided Review** in the workspace's header.
 
