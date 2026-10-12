@@ -15,6 +15,7 @@ import {
   statusesLabel,
   tabLabel,
   visibleItems,
+  withCheckedOff,
 } from "./inbox-filter.ts";
 
 function item(number: number, overrides: Partial<InboxItem> = {}): InboxItem {
@@ -204,6 +205,29 @@ test("an authored change request needs attention on a change request, a review s
   const attention = { ...AUTHORED_DEFAULTS, states: [...ReviewStatusSchema.options], needsAttention: true, sort: { key: "created" as const, descending: false } };
 
   assert.deepEqual(numbers(visibleItems(AUTHORED_RULES, items, attention, "")), [1, 2, 3]);
+});
+
+test("Authored hides its checked-off change requests by default, shows them among the rest, or shows them alone", () => {
+  const items = [mine(1), mine(2, { checkedOff: true }), mine(3, { checkedOff: true, isDraft: true })];
+  const any = { ...AUTHORED_DEFAULTS, sort: { key: "created" as const, descending: false } };
+
+  assert.deepEqual(numbers(visibleItems(AUTHORED_RULES, items, any, "")), [1]);
+  assert.deepEqual(numbers(visibleItems(AUTHORED_RULES, items, { ...any, checkedOff: "show" }, "")), [1, 2, 3]);
+  assert.deepEqual(numbers(visibleItems(AUTHORED_RULES, items, { ...any, checkedOff: "only" }, "")), [2, 3]);
+  assert.deepEqual(numbers(visibleItems(AUTHORED_RULES, items, { ...any, checkedOff: "only" }, "", new Set([mine(1).url]))), [1, 2, 3], "a held row stays");
+  assert.equal(hiddenCheckedOff(AUTHORED_RULES, items, any, ""), 2);
+});
+
+test("checking a change request off marks it on that tab only, though the same one is on the other", () => {
+  const url = "https://gitlab.com/acme/uploader/-/merge_requests/7";
+  const both = inboxOf([item(7, { url }), item(8)], [mine(7, { url })]);
+
+  const assigned = withCheckedOff(both, "assigned", url, true);
+  assert.deepEqual([assigned.items.map((entry) => entry.checkedOff), assigned.authored.map((entry) => entry.checkedOff)], [[true, false], [false]]);
+  const authored = withCheckedOff(assigned, "authored", url, true);
+  assert.deepEqual([authored.items.map((entry) => entry.checkedOff), authored.authored.map((entry) => entry.checkedOff)], [[true, false], [true]]);
+  const unchecked = withCheckedOff(authored, "assigned", url, false);
+  assert.deepEqual([unchecked.items.map((entry) => entry.checkedOff), unchecked.authored.map((entry) => entry.checkedOff)], [[false, false], [true]]);
 });
 
 test("the search on Authored needs every word in the title, project, reviewers or number, not the viewer's own name", () => {

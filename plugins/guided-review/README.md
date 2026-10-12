@@ -56,8 +56,10 @@ Each tab shows how many it lists, with a `+` when a host has more than one page.
   On **Authored by me**, **Needs my attention** keeps changes requested, a review since your last push, and failing CI.
 - Select a column heading to sort, and **Columns** to choose what the table shows.
 - Each tab keeps its own filters, sort, columns and search.
-- On **Assigned to me**, tick a row's box to check it off while it waits on someone else.
-  It comes back when someone pushes to it, asks you to review again, or GitLab resets your approval.
+- Tick a row's box to check it off while it waits on someone else.
+  On **Assigned to me**, it comes back when someone pushes to it, asks you to review again, or GitLab resets your approval.
+  On **Authored by me**, it comes back when a reviewer reviews again or its review status changes, an approval reset included, but not when you push.
+  A check-off on one tab leaves the other tab alone.
 - Select **Refresh** to list both tabs again.
 
 The count beside **Guided Review** in the sidebar is how many review requests on **Assigned to me** need your attention.

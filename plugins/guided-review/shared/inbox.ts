@@ -127,6 +127,12 @@ export const CheckOffSchema = z.object({ headSha: z.string(), state: ReviewerSta
 /** What the author saw of their change request when they checked it off: where it stood with its reviewers, and when the newest review arrived. */
 export const AuthoredCheckOffSchema = z.object({ status: ReviewStatusSchema, latestReviewAt: z.string().nullable() });
 
+/** A check-off set on one tab as of what its row showed, or with null taken back. */
+export const CheckOffChangeSchema = z.discriminatedUnion("tab", [
+  z.object({ tab: z.literal("assigned"), url: z.string(), checkOff: CheckOffSchema.nullable() }),
+  z.object({ tab: z.literal("authored"), url: z.string(), checkOff: AuthoredCheckOffSchema.nullable() }),
+]);
+
 /** Every host's review requests and the viewer's own change requests, each joined with the review started here, if any. */
 export const InboxSchema = z.object({
   hosts: z.array(ListedHostSchema.omit({ requests: true, authored: true })),
@@ -139,6 +145,7 @@ export const InboxSchema = z.object({
 export type LocalReview = z.output<typeof LocalReviewSchema>;
 export type CheckOff = z.output<typeof CheckOffSchema>;
 export type AuthoredCheckOff = z.output<typeof AuthoredCheckOffSchema>;
+export type CheckOffChange = z.output<typeof CheckOffChangeSchema>;
 export type InboxItem = z.output<typeof InboxItemSchema>;
 export type AuthoredInboxItem = z.output<typeof AuthoredInboxItemSchema>;
 export type Inbox = z.output<typeof InboxSchema>;

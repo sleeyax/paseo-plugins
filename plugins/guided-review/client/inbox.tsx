@@ -29,7 +29,7 @@ import {
 } from "../shared/inbox.ts";
 import { numberLabel } from "../shared/reference.ts";
 import { Button } from "./button.tsx";
-import { CheckOffContext, INBOX_QUERY_KEY, useCheckOff, type CheckOffControl } from "./check-off.ts";
+import { ASSIGNED_CHECK_OFF, AUTHORED_CHECK_OFF, CheckOffContext, INBOX_QUERY_KEY, useCheckOff, type CheckOffControl } from "./check-off.ts";
 import {
   age,
   ASSIGNED_RULES,
@@ -95,17 +95,18 @@ export function ReviewInbox({ colors, compact, openPanel }: { colors: Colors; co
   const starts = useReviewStarts(openPanel, [...(inbox.data?.items ?? []), ...(inbox.data?.authored ?? [])]);
   const assigned = useInboxPreferences("assigned");
   const authored = useInboxPreferences("authored");
-  const checkOff = useCheckOff();
+  const checkOffs = { assigned: useCheckOff(ASSIGNED_CHECK_OFF), authored: useCheckOff(AUTHORED_CHECK_OFF) };
   const [tab, setTab] = useState<InboxTab>("assigned");
   const [queries, setQueries] = useState<Record<InboxTab, string>>({ assigned: "", authored: "" });
   const [width, setWidth] = useState<number | null>(null);
 
   const setQuery = (next: string) => {
-    checkOff.release();
+    checkOffs[tab].release();
     setQueries((current) => ({ ...current, [tab]: next }));
   };
   const refresh = () => {
-    checkOff.release();
+    checkOffs.assigned.release();
+    checkOffs.authored.release();
     starts.forget();
     void inbox.refetch();
   };
@@ -124,9 +125,9 @@ export function ReviewInbox({ colors, compact, openPanel }: { colors: Colors; co
   return (
     <View onLayout={onVisibleWidth(setWidth)}>
       {tab === "assigned" ? (
-        <TabSection key={tab} {...shared} view={ASSIGNED_VIEW} listed={inbox.data?.items} preferences={assigned} checkOff={checkOff} />
+        <TabSection key={tab} {...shared} view={ASSIGNED_VIEW} listed={inbox.data?.items} preferences={assigned} checkOff={checkOffs.assigned} />
       ) : (
-        <TabSection key={tab} {...shared} view={AUTHORED_VIEW} listed={inbox.data?.authored} preferences={authored} checkOff={null} />
+        <TabSection key={tab} {...shared} view={AUTHORED_VIEW} listed={inbox.data?.authored} preferences={authored} checkOff={checkOffs.authored} />
       )}
     </View>
   );
@@ -171,7 +172,7 @@ function TabSwitch({ colors, tab, setTab, inbox }: { colors: Colors; tab: InboxT
   );
 }
 
-/** The section as one tab shows it; a tab without a check-off control has no check-offs to show or set. */
+/** The section as one tab shows it. */
 function TabSection<Item extends Row, State extends string, Column extends string>({
   colors,
   compact,
@@ -199,21 +200,27 @@ function TabSection<Item extends Row, State extends string, Column extends strin
   view: TabView<Item, State, Column>;
   listed: readonly Item[] | undefined;
   preferences: { preferences: TabPreferences<State, Column>; change(update: Partial<TabPreferences<State, Column>>): void; error: string | null };
-  checkOff: CheckOffControl | null;
+  checkOff: CheckOffControl<Item>;
 }) {
   const { preferences, error } = control;
   const [choosing, setChoosing] = useState<"columns" | "states" | null>(null);
-  const held = checkOff?.held ?? new Set<string>();
+  const { held } = checkOff;
 
   const change = (update: Partial<TabPreferences<State, Column>>) => {
-    checkOff?.release();
+    checkOff.release();
     control.change(update);
   };
   const items = visibleItems(view.rules, listed, preferences, query, held).map((item) => ({ ...item, local: starts.local(item.reviewId, item.local) }));
   const columns = preferences.columns.filter((column) => view.specs[column] !== undefined);
   // Until the list has been measured it is not drawn, rather than as cards for a frame.
   const shape = compact ? "cards" : width === null ? null : width >= tableWidth(view.specs, columns) ? "table" : "cards";
-  const rows = { toggle: checkOff?.toggle ?? (() => {}), dimmed: (item: ListedItem) => held.has(item.url) && !passesCheckOff(item, preferences) };
+  const rows = {
+    toggle: (row: ListedItem) => {
+      const item = listed.find((entry) => entry.url === row.url);
+      if (item !== undefined) checkOff.toggle(item);
+    },
+    dimmed: (item: ListedItem) => held.has(item.url) && !passesCheckOff(item, preferences),
+  };
 
   return (
     <>
@@ -224,7 +231,7 @@ function TabSection<Item extends Row, State extends string, Column extends strin
             <NewReview colors={colors} starts={starts} />
             <Button colors={colors} small label="Columns" onPress={() => setChoosing("columns")} />
             {view.states !== null ? <Button colors={colors} small label={view.states.label(preferences.states)} onPress={() => setChoosing("states")} /> : null}
-            <Button colors={colors} small label={inbox.isFetching ? "Refreshing…" : "Refresh"} disabled={inbox.isFetching || checkOff?.saving === true} onPress={refresh} />
+            <Button colors={colors} small label={inbox.isFetching ? "Refreshing…" : "Refresh"} disabled={inbox.isFetching || checkOff.saving} onPress={refresh} />
           </View>
         }
       >
@@ -238,10 +245,9 @@ function TabSection<Item extends Row, State extends string, Column extends strin
             setQuery={setQuery}
             searchHint={view.searchHint}
             attention={view.rules.needsAttention !== null}
-            checkOffs={checkOff !== null}
           />
           {error !== null ? <Note colors={colors} tone="danger" text={`Could not keep these filters for next time: ${error}`} /> : null}
-          {checkOff?.error != null ? <Note colors={colors} tone="danger" text={`Could not keep that check-off: ${checkOff.error}`} /> : null}
+          {checkOff.error !== null ? <Note colors={colors} tone="danger" text={`Could not keep that check-off: ${checkOff.error}`} /> : null}
           {inbox.data ? <HostNotes colors={colors} hosts={inbox.data.hosts} tab={view.tab} /> : null}
           <PastedRows colors={colors} starts={starts} shown={items} />
           {inbox.isPending ? (
@@ -378,7 +384,6 @@ function Toolbar<State extends string>({
   setQuery,
   searchHint,
   attention,
-  checkOffs,
 }: {
   colors: Colors;
   preferences: ListFilters<State>;
@@ -388,8 +393,6 @@ function Toolbar<State extends string>({
   searchHint: string;
   /** Whether the tab can tell what needs the viewer's attention. */
   attention: boolean;
-  /** Whether the tab's rows can be checked off. */
-  checkOffs: boolean;
 }) {
   return (
     <View style={{ gap: spacing[2] }}>
@@ -427,18 +430,16 @@ function Toolbar<State extends string>({
           <Chip colors={colors} label="Needs my attention" selected={preferences.needsAttention} onPress={() => change({ needsAttention: !preferences.needsAttention })} />
         ) : null}
         <Chip colors={colors} label="Hide drafts" selected={preferences.hideDrafts} onPress={() => change({ hideDrafts: !preferences.hideDrafts })} />
-        {checkOffs ? <Divider colors={colors} /> : null}
-        {checkOffs
-          ? CHECK_OFF_FILTERS.map((checkedOff) => (
-              <Chip
-                key={checkedOff}
-                colors={colors}
-                label={CHECK_OFF_LABELS[checkedOff]}
-                selected={preferences.checkedOff === checkedOff}
-                onPress={() => change({ checkedOff })}
-              />
-            ))
-          : null}
+        <Divider colors={colors} />
+        {CHECK_OFF_FILTERS.map((checkedOff) => (
+          <Chip
+            key={checkedOff}
+            colors={colors}
+            label={CHECK_OFF_LABELS[checkedOff]}
+            selected={preferences.checkedOff === checkedOff}
+            onPress={() => change({ checkedOff })}
+          />
+        ))}
       </View>
     </View>
   );
@@ -677,23 +678,20 @@ const ROW_COLUMNS = {
   local: tintedColumn<Row>({ label: "Here", hint: "The guide and drafts you have for it in this plugin", size: { flex: 1.4, min: 96 } }, localOf),
 } satisfies Record<string, ColumnSpec<Row>>;
 
+function checkedColumn(hint: string): ColumnSpec<Row> {
+  return { label: "Checked off", header: "", hint, size: { width: 20 }, besideTitle: true, cell: (item, colors) => <CheckOffBox colors={colors} item={item} /> };
+}
+
 const ASSIGNED_SPECS: Record<AssignedColumn, ColumnSpec<InboxItem>> = {
   ...ROW_COLUMNS,
-  checked: {
-    label: "Checked off",
-    header: "",
-    hint: "Set a review aside here until it is pushed to or you are asked again",
-    size: { width: 20 },
-    besideTitle: true,
-    cell: (item, colors) => <CheckOffBox colors={colors} item={item} />,
-  },
+  checked: checkedColumn("Set a review aside here until it is pushed to or you are asked again"),
   author: textColumn<InboxItem>({ label: "Author", size: { flex: 1, min: 64 } }, (item) => item.author, (item) => item.author),
   state: tintedColumn<InboxItem>({ label: "My review", hint: "Where you stand, and whether it changed since your review", size: { flex: 1.4, min: 96 } }, stateOf),
 };
 
-/** The Authored tab cannot check off yet, so that column is left out. */
-const AUTHORED_SPECS: Partial<Record<AuthoredColumn, ColumnSpec<AuthoredInboxItem>>> = {
+const AUTHORED_SPECS: Record<AuthoredColumn, ColumnSpec<AuthoredInboxItem>> = {
   ...ROW_COLUMNS,
+  checked: checkedColumn("Set it aside here until a reviewer reviews again or its review status changes"),
   reviewers: {
     label: "Reviewers",
     hint: "Who is asked or reviewed, tinted by where each stands",
@@ -798,7 +796,7 @@ function Badge({ colors, text }: { colors: Colors; text: string }) {
 /** How faint a row is that stays only because it was just checked off or unchecked. */
 const DIMMED = 0.5;
 
-function CheckOffBox({ colors, item }: { colors: Colors; item: InboxItem }) {
+function CheckOffBox({ colors, item }: { colors: Colors; item: ListedItem }) {
   const { toggle } = useContext(CheckOffContext);
   const checked = item.checkedOff;
   return (

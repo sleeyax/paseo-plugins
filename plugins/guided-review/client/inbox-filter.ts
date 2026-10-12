@@ -151,6 +151,12 @@ export function tabLabel(tab: InboxTab, inbox: Inbox | undefined): string {
   return `${TAB_TITLES[tab]} · ${listedOn(inbox, tab).length}${partial ? "+" : ""}`;
 }
 
+/** The inbox with the change request at `url` checked off or not on `tab`, leaving the same one on the other tab as it was. */
+export function withCheckedOff(inbox: Inbox, tab: InboxTab, url: string, checkedOff: boolean): Inbox {
+  const mark = <Item extends ListedItem>(items: Item[]) => items.map((item) => (item.url === url ? { ...item, checkedOff } : item));
+  return tab === "assigned" ? { ...inbox, items: mark(inbox.items) } : { ...inbox, authored: mark(inbox.authored) };
+}
+
 /** Each reviewer state as a sentence names it mid-way. */
 export const STATE_NAMES: Record<ReviewerState, string> = {
   requested: "requested",

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import { headMoved, type AuthoredChangeRequest, type ListedHost, type ReviewRequest } from "../shared/inbox.ts";
+import { headMoved, type AuthoredChangeRequest, type AuthoredCheckOff, type ListedHost, type ReviewRequest } from "../shared/inbox.ts";
 import { fakeForge, sampleChangeRequest, type FakeForge } from "./fake-forge.ts";
 import { fakeGuideAgents, sampleGuideReply, type FakeGuideAgents } from "./fake-guide-agents.ts";
 import { fakeWorkspaces, type FakeWorkspaces } from "./fake-workspaces.ts";
@@ -241,8 +241,9 @@ test("a GitLab review published from here says whether the head moved since, ove
   assert.equal((await service.inbox()).items[0]?.changedSinceReview, null, "asked again, which the listing says");
 });
 
-async function checkedOff(service: ReviewService): Promise<string[]> {
-  return (await service.inbox()).items.filter((item) => item.checkedOff).map((item) => item.url);
+async function checkedOff(service: ReviewService, tab: "assigned" | "authored" = "assigned"): Promise<string[]> {
+  const inbox = await service.inbox();
+  return (tab === "assigned" ? inbox.items : inbox.authored).filter((item) => item.checkedOff).map((item) => item.url);
 }
 
 test("a check-off holds while the change request stands still, survives a restart and is undone by unchecking", async (t) => {
@@ -250,18 +251,18 @@ test("a check-off holds while the change request stands still, survives a restar
   github.listedHosts = [listed("github", [request(GITHUB_URL)])];
   gitlab.listedHosts = [listed("gitlab", [request(GITLAB_URL)])];
 
-  await service.setCheckedOff({ url: GITLAB_URL, checkOff: { headSha: HEAD, state: "requested" } });
+  await service.setCheckedOff({ tab: "assigned", url: GITLAB_URL, checkOff: { headSha: HEAD, state: "requested" } });
   assert.deepEqual(await checkedOff(service), [GITLAB_URL]);
   assert.deepEqual(await checkedOff(restart()), [GITLAB_URL], "still requested, as when it was checked off");
 
-  await service.setCheckedOff({ url: GITLAB_URL, checkOff: null });
+  await service.setCheckedOff({ tab: "assigned", url: GITLAB_URL, checkOff: null });
   assert.deepEqual(await checkedOff(service), []);
 });
 
 test("a check-off comes back on a push, or when the reviewer is asked again or loses an approval", async (t) => {
   const { gitlab, service } = await withForges(t);
   const comeBack = async (checkOff: { headSha: string; state: ReviewRequest["state"] }, ...listings: Partial<ReviewRequest>[]) => {
-    await service.setCheckedOff({ url: GITLAB_URL, checkOff });
+    await service.setCheckedOff({ tab: "assigned", url: GITLAB_URL, checkOff });
     const seen: boolean[] = [];
     for (const listing of listings) {
       gitlab.listedHosts = [listed("gitlab", [request(GITLAB_URL, listing)])];
@@ -284,7 +285,7 @@ test("a check-off comes back on a push, or when the reviewer is asked again or l
 test("a check-off goes once a host listed in full no longer has it, and stays while its host fails or has more", async (t) => {
   const { gitlab, service } = await withForges(t);
   gitlab.listedHosts = [listed("gitlab", [request(GITLAB_URL)])];
-  await service.setCheckedOff({ url: GITLAB_URL, checkOff: { headSha: HEAD, state: "requested" } });
+  await service.setCheckedOff({ tab: "assigned", url: GITLAB_URL, checkOff: { headSha: HEAD, state: "requested" } });
 
   gitlab.listedHosts = [listed("gitlab", [], { error: "glab is not logged in to gitlab.com." })];
   await service.inbox();
@@ -299,6 +300,25 @@ test("a check-off goes once a host listed in full no longer has it, and stays wh
   assert.deepEqual(await checkedOff(service), []);
 });
 
+test("an authored check-off goes once a host listed its authored ones in full without it, and stays while its host fails or has more", async (t) => {
+  const { gitlab, service } = await withForges(t);
+  const mine = (extra: Partial<ListedHost> = {}) => listed("gitlab", [], { authored: [authored(GITLAB_URL)], ...extra });
+  gitlab.listedHosts = [mine()];
+  await service.setCheckedOff({ tab: "authored", url: GITLAB_URL, checkOff: { status: "unreviewed", latestReviewAt: null } });
+
+  gitlab.listedHosts = [listed("gitlab", [], { error: "glab is not logged in to gitlab.com." })];
+  await service.inbox();
+  gitlab.listedHosts = [listed("gitlab", [], { truncated: { assigned: false, authored: true } })];
+  await service.inbox();
+  gitlab.listedHosts = [mine()];
+  assert.deepEqual(await checkedOff(service, "authored"), [GITLAB_URL]);
+
+  gitlab.listedHosts = [listed("gitlab", [], { truncated: { assigned: true, authored: false } })];
+  await service.inbox();
+  gitlab.listedHosts = [mine()];
+  assert.deepEqual(await checkedOff(service, "authored"), [], "only the Authored list having more keeps it");
+});
+
 test("a check-off kept before the list had tabs holds on the Assigned tab", async (t) => {
   const { data, gitlab, service } = await withForges(t);
   gitlab.listedHosts = [listed("gitlab", [request(GITLAB_URL)])];
@@ -307,26 +327,68 @@ test("a check-off kept before the list had tabs holds on the Assigned tab", asyn
 
   assert.deepEqual(await checkedOff(service), [GITLAB_URL]);
 
-  await service.setCheckedOff({ url: GITHUB_URL, checkOff: { headSha: HEAD, state: "requested" } });
+  await service.setCheckedOff({ tab: "assigned", url: GITHUB_URL, checkOff: { headSha: HEAD, state: "requested" } });
   assert.deepEqual(JSON.parse(await readFile(file, "utf8")), {
     assigned: { [GITLAB_URL]: { headSha: HEAD, state: "requested" }, [GITHUB_URL]: { headSha: HEAD, state: "requested" } },
     authored: {},
   });
 });
 
-test("a check-off on the Authored tab leaves the Assigned row alone, and outlasts the Assigned tab's check-offs", async (t) => {
-  const { data, gitlab, service } = await withForges(t);
-  gitlab.listedHosts = [listed("gitlab", [request(GITLAB_URL)], { authored: [authored(GITLAB_URL)] })];
-  const file = path.join(data, "inbox-check-offs.json");
-  const kept = { [GITLAB_URL]: { status: "waiting", latestReviewAt: null } };
-  await writeFile(file, JSON.stringify({ assigned: {}, authored: kept }));
+test("a check-off on one tab leaves the same MR on the other tab alone, and comes back on that tab only", async (t) => {
+  const { gitlab, service } = await withForges(t);
+  const onBothTabs = (headSha = HEAD, mine: Partial<AuthoredChangeRequest> = {}) => {
+    gitlab.listedHosts = [listed("gitlab", [request(GITLAB_URL, { headSha })], { authored: [authored(GITLAB_URL, { ...mine, headSha })] })];
+  };
+  const tabs = async () => {
+    const inbox = await service.inbox();
+    return [inbox.items[0]?.checkedOff, inbox.authored[0]?.checkedOff];
+  };
+  onBothTabs();
 
-  const inbox = await service.inbox();
-  assert.deepEqual([inbox.items[0]?.checkedOff, inbox.authored[0]?.checkedOff], [false, true]);
+  await service.setCheckedOff({ tab: "authored", url: GITLAB_URL, checkOff: { status: "unreviewed", latestReviewAt: null } });
+  assert.deepEqual(await tabs(), [false, true]);
+  await service.setCheckedOff({ tab: "assigned", url: GITLAB_URL, checkOff: { headSha: HEAD, state: "requested" } });
+  assert.deepEqual(await tabs(), [true, true]);
 
-  await service.setCheckedOff({ url: GITLAB_URL, checkOff: { headSha: HEAD, state: "requested" } });
-  gitlab.listedHosts = [listed("gitlab", [request(GITLAB_URL, { headSha: PUSHED })], { authored: [authored(GITLAB_URL, { headSha: PUSHED })] })];
-  const pushed = await service.inbox();
-  assert.deepEqual([pushed.items[0]?.checkedOff, pushed.authored[0]?.checkedOff], [false, true], "came back on Assigned only");
-  assert.deepEqual(JSON.parse(await readFile(file, "utf8")).authored, kept);
+  onBothTabs(PUSHED);
+  assert.deepEqual(await tabs(), [false, true], "a push brings it back on Assigned only");
+
+  await service.setCheckedOff({ tab: "assigned", url: GITLAB_URL, checkOff: { headSha: PUSHED, state: "requested" } });
+  onBothTabs(PUSHED, { status: "commented", latestReviewAt: "2026-09-03T10:00:00Z" });
+  assert.deepEqual(await tabs(), [true, false], "a review brings it back on Authored only");
+});
+
+test("an authored check-off holds while its reviews stand still, survives a restart and is undone by unchecking", async (t) => {
+  const { github, gitlab, service, restart } = await withForges(t);
+  github.listedHosts = [listed("github", [], { authored: [authored(GITHUB_URL, { status: "waiting" })] })];
+  gitlab.listedHosts = [listed("gitlab", [], { authored: [authored(GITLAB_URL, { status: "commented", latestReviewAt: "2026-09-03T10:00:00Z" })] })];
+
+  await service.setCheckedOff({ tab: "authored", url: GITLAB_URL, checkOff: { status: "commented", latestReviewAt: "2026-09-03T10:00:00Z" } });
+  assert.deepEqual(await checkedOff(service, "authored"), [GITLAB_URL]);
+  assert.deepEqual(await checkedOff(restart(), "authored"), [GITLAB_URL], "no review since it was checked off");
+
+  await service.setCheckedOff({ tab: "authored", url: GITLAB_URL, checkOff: null });
+  assert.deepEqual(await checkedOff(service, "authored"), []);
+});
+
+test("an authored check-off comes back when its review status changes or a newer review arrives, and holds over a push", async (t) => {
+  const { gitlab, service } = await withForges(t);
+  const REVIEWED = "2026-09-03T10:00:00Z";
+  const comeBack = async (checkOff: AuthoredCheckOff, ...listings: Partial<AuthoredChangeRequest>[]) => {
+    await service.setCheckedOff({ tab: "authored", url: GITLAB_URL, checkOff });
+    const seen: boolean[] = [];
+    for (const listing of listings) {
+      gitlab.listedHosts = [listed("gitlab", [], { authored: [authored(GITLAB_URL, listing)] })];
+      seen.push((await checkedOff(service, "authored")).length === 1);
+    }
+    return seen;
+  };
+  const approved = { status: "approved", latestReviewAt: REVIEWED } as const;
+
+  assert.deepEqual(await comeBack(approved, { ...approved, headSha: PUSHED }, { ...approved, headSha: HEAD }), [true, true], "a push alone is no news");
+  assert.deepEqual(await comeBack(approved, { status: "changes-requested", latestReviewAt: "2026-09-04T10:00:00Z" }), [false]);
+  assert.deepEqual(await comeBack(approved, { ...approved, latestReviewAt: "2026-09-04T10:00:00Z" }), [false], "approved again by another reviewer");
+  assert.deepEqual(await comeBack({ status: "waiting", latestReviewAt: null }, { status: "commented", latestReviewAt: REVIEWED }), [false]);
+  assert.deepEqual(await comeBack(approved, { status: "approval-reset", latestReviewAt: null, headSha: PUSHED }), [false], "an approval reset, which GitLab leaves with no review");
+  assert.deepEqual(await comeBack(approved, { ...approved, latestReviewAt: "2026-09-02T10:00:00Z" }), [false], "a review taken back, leaving an older one newest");
 });
