@@ -4,6 +4,7 @@ import { ClaudeTtyAgent } from "./agent.ts";
 import { useAnswersDirectory } from "./card-answers.ts";
 import { readIdleTimeout } from "./idle-timeout.ts";
 import { enableLogFile, writeLog } from "./log.ts";
+import { withRequestErrors } from "./request-errors.ts";
 import { cleanupAbandonedRuntimeDirectories } from "./runtime-directories.ts";
 import { useSettingsFile } from "./settings-document.ts";
 
@@ -34,7 +35,7 @@ export async function runAcpServer(settingsFile: string | null, answersDirectory
         void shutdown("workspace_removed").finally(() => process.exit(0));
       },
     });
-    return agent;
+    return withRequestErrors(agent);
   }, ndJsonStream(output, input));
 
   const handleSignal = (signal: NodeJS.Signals): void => {
