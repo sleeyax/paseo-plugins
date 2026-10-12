@@ -902,28 +902,38 @@ test("the viewer's own open PRs list as authored, drafts included, with their ow
 const HEAD_31 = "3c9e0b7a1f2d4e6c8b0a9f8e7d6c5b4a39281706";
 const EARLIER_31 = "0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c";
 
-type LatestReview = { id: string; state: string; submittedAt: string; author: { login: string }; commit: { oid: string } };
+type LatestReview = { state: string; submittedAt: string; author: { login: string }; commit: { oid: string } };
 
-function review(id: string, login: string, state: string, commit = HEAD_31, submittedAt = "2026-10-06T15:00:00Z"): LatestReview {
-  return { id, state, submittedAt, author: { login }, commit: { oid: commit } };
+function review(login: string, state: string, commit = HEAD_31, submittedAt = "2026-10-06T15:00:00Z"): LatestReview {
+  return { state, submittedAt, author: { login }, commit: { oid: commit } };
 }
 
-/** The authored PR #31 as the search answers it, with these reviewers asked, latest reviews and dismissals in place of the fixture's. */
-async function authored31(pr: { asked?: string[]; reviews?: LatestReview[]; dismissals?: object[] }) {
+/** GitHub dismissing `login`'s approval submitted at `submittedAt`, on a push or by hand. */
+function dismissal(login: string, pushed: boolean, submittedAt = "2026-10-04T10:00:00Z") {
+  return { previousReviewState: "APPROVED", pullRequestCommit: pushed ? { id: "PURC_1" } : null, review: { author: { login }, submittedAt } };
+}
+
+/**
+ * The authored PR #31 as the search answers it, with these reviewers asked, reviews and dismissals in place of the fixture's.
+ * `reviews` is each reviewer's latest review, and `opinions` their latest approval or change request, which by default are the verdicts among `reviews`.
+ */
+async function authored31(pr: { asked?: string[]; reviews?: LatestReview[]; opinions?: LatestReview[]; dismissals?: object[] }) {
   const answer = JSON.parse(fixture("review-search-authored.json"));
   const node = answer.data.search.nodes[0];
+  const reviews = pr.reviews ?? [];
   node.reviewRequests.nodes = (pr.asked ?? []).map((login) => ({ requestedReviewer: { __typename: "User", login } }));
-  node.latestReviews.nodes = pr.reviews ?? [];
+  node.latestReviews.nodes = reviews;
+  node.latestOpinionatedReviews.nodes = pr.opinions ?? reviews.filter((latest) => latest.state === "APPROVED" || latest.state === "CHANGES_REQUESTED");
   node.timelineItems.nodes = pr.dismissals ?? [];
   const [host] = await forgeReplaying(searches({ authored: { stdout: JSON.stringify(answer) } })).forge.listChangeRequests();
   return host!.authored[0]!;
 }
 
 test("an approval GitHub dismissed on a push reads as an approval reset, and one dismissed by hand does not", async () => {
-  const dismissal = (id: string, pushed: boolean) => ({ previousReviewState: "APPROVED", pullRequestCommit: pushed ? { id: "PURC_1" } : null, review: { id } });
+  const dismissed = [review("alice", "DISMISSED", EARLIER_31, "2026-10-04T10:00:00Z")];
 
-  const reset = await authored31({ reviews: [review("PRR_a", "alice", "DISMISSED", EARLIER_31)], dismissals: [dismissal("PRR_a", true)] });
-  const byHand = await authored31({ reviews: [review("PRR_a", "alice", "DISMISSED", EARLIER_31)], dismissals: [dismissal("PRR_a", false)] });
+  const reset = await authored31({ reviews: dismissed, dismissals: [dismissal("alice", true)] });
+  const byHand = await authored31({ reviews: dismissed, dismissals: [dismissal("alice", false)] });
 
   assert.equal(reset.status, "approval-reset");
   assert.deepEqual(reset.reviewers, [{ name: "alice", state: "unapproved" }]);
@@ -931,17 +941,48 @@ test("an approval GitHub dismissed on a push reads as an approval reset, and one
   assert.deepEqual(byHand.reviewers, [{ name: "alice", state: "commented" }]);
 });
 
-test("an approval still standing beats one GitHub took back, and a change request beats both", async () => {
-  const reset = { previousReviewState: "APPROVED", pullRequestCommit: { id: "PURC_1" }, review: { id: "PRR_b" } };
-  const approved = [review("PRR_a", "alice", "APPROVED"), review("PRR_b", "bob", "DISMISSED", EARLIER_31)];
+test("a comment after an approval leaves the approval standing", async () => {
+  const approved = await authored31({
+    reviews: [review("alice", "COMMENTED", HEAD_31, "2026-10-06T15:00:00Z")],
+    opinions: [review("alice", "APPROVED", EARLIER_31, "2026-10-04T10:00:00Z")],
+  });
 
-  assert.equal((await authored31({ reviews: approved, dismissals: [reset] })).status, "approved");
-  assert.equal((await authored31({ reviews: [...approved, review("PRR_c", "carol", "CHANGES_REQUESTED", EARLIER_31)], dismissals: [reset] })).status, "changes-requested");
+  assert.equal(approved.status, "approved");
+  assert.deepEqual(approved.reviewers, [{ name: "alice", state: "approved" }]);
+  assert.equal(approved.reviewedSinceLastPush, true);
+  assert.equal(approved.latestReviewAt, "2026-10-06T15:00:00Z");
+});
+
+test("a comment after a change request leaves the change request standing", async () => {
+  const blocked = await authored31({
+    reviews: [review("bob", "COMMENTED", HEAD_31, "2026-10-06T15:00:00Z")],
+    opinions: [review("bob", "CHANGES_REQUESTED", EARLIER_31, "2026-10-04T10:00:00Z")],
+  });
+
+  assert.equal(blocked.status, "changes-requested");
+  assert.deepEqual(blocked.reviewers, [{ name: "bob", state: "changes-requested" }]);
+});
+
+test("an approval GitHub dismissed on a push stays reset through a later comment, until the reviewer approves again", async () => {
+  const commentedSince = await authored31({ reviews: [review("alice", "COMMENTED")], dismissals: [dismissal("alice", true)] });
+  const approvedAgain = await authored31({ reviews: [review("alice", "APPROVED")], dismissals: [dismissal("alice", true)] });
+
+  assert.equal(commentedSince.status, "approval-reset");
+  assert.deepEqual(commentedSince.reviewers, [{ name: "alice", state: "unapproved" }]);
+  assert.deepEqual(approvedAgain.reviewers, [{ name: "alice", state: "approved" }]);
+});
+
+test("an approval still standing beats one GitHub took back, and a change request beats both", async () => {
+  const approved = [review("alice", "APPROVED"), review("bob", "DISMISSED", EARLIER_31, "2026-10-04T10:00:00Z")];
+  const reset = [dismissal("bob", true)];
+
+  assert.equal((await authored31({ reviews: approved, dismissals: reset })).status, "approved");
+  assert.equal((await authored31({ reviews: [...approved, review("carol", "CHANGES_REQUESTED", EARLIER_31)], dismissals: reset })).status, "changes-requested");
 });
 
 test("reviewers asked and none answered is waiting, and a review without a verdict is commented", async () => {
   const waiting = await authored31({ asked: ["alice", "bob"] });
-  const commented = await authored31({ asked: ["bob"], reviews: [review("PRR_a", "alice", "COMMENTED", EARLIER_31, "2026-10-04T10:00:00Z")] });
+  const commented = await authored31({ asked: ["bob"], reviews: [review("alice", "COMMENTED", EARLIER_31, "2026-10-04T10:00:00Z")] });
 
   assert.equal(waiting.status, "waiting");
   assert.deepEqual(waiting.reviewers, [
@@ -956,7 +997,7 @@ test("reviewers asked and none answered is waiting, and a review without a verdi
 });
 
 test("a reviewer asked again is waited on, and their review no longer counts as since the push", async () => {
-  const again = await authored31({ asked: ["alice"], reviews: [review("PRR_a", "alice", "APPROVED")] });
+  const again = await authored31({ asked: ["alice"], reviews: [review("alice", "APPROVED")] });
 
   assert.equal(again.status, "waiting");
   assert.deepEqual(again.reviewers, [{ name: "alice", state: "requested" }]);
@@ -965,7 +1006,7 @@ test("a reviewer asked again is waited on, and their review no longer counts as 
 });
 
 test("a reviewer asked again after requesting changes still holds them, and their review counts as since the push", async () => {
-  const again = await authored31({ asked: ["bob"], reviews: [review("PRR_b", "bob", "CHANGES_REQUESTED")] });
+  const again = await authored31({ asked: ["bob"], reviews: [review("bob", "CHANGES_REQUESTED")] });
 
   assert.equal(again.status, "changes-requested");
   assert.deepEqual(again.reviewers, [{ name: "bob", state: "changes-requested" }]);

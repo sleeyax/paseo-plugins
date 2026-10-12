@@ -43,7 +43,6 @@
           "latestReviews": {
             "nodes": [
               {
-                "id": "PRR_kwDOExample31a",
                 "state": "APPROVED",
                 "submittedAt": "2026-10-06T15:02:40Z",
                 "author": {
@@ -54,7 +53,6 @@
                 }
               },
               {
-                "id": "PRR_kwDOExample31b",
                 "state": "CHANGES_REQUESTED",
                 "submittedAt": "2026-10-03T09:14:05Z",
                 "author": {
@@ -65,7 +63,6 @@
                 }
               },
               {
-                "id": "PRR_kwDOExample31c",
                 "state": "COMMENTED",
                 "submittedAt": "2026-10-06T16:40:00Z",
                 "author": {
@@ -73,6 +70,24 @@
                 },
                 "commit": {
                   "oid": "3c9e0b7a1f2d4e6c8b0a9f8e7d6c5b4a39281706"
+                }
+              }
+            ]
+          },
+          "latestOpinionatedReviews": {
+            "nodes": [
+              {
+                "state": "APPROVED",
+                "submittedAt": "2026-10-06T15:02:40Z",
+                "author": {
+                  "login": "alice"
+                }
+              },
+              {
+                "state": "CHANGES_REQUESTED",
+                "submittedAt": "2026-10-03T09:14:05Z",
+                "author": {
+                  "login": "bob"
                 }
               }
             ]
@@ -103,6 +118,9 @@
             "nodes": []
           },
           "latestReviews": {
+            "nodes": []
+          },
+          "latestOpinionatedReviews": {
             "nodes": []
           },
           "timelineItems": {

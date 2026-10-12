@@ -387,7 +387,8 @@ export const REVIEW_SEARCH_QUERY = `query GuidedReviewInbox($query: String!) {
 }`;
 
 /**
- * The viewer's own PRs, with who is asked to review each, every reviewer's latest review, and the latest dismissals.
+ * The viewer's own PRs, with who is asked to review each, every reviewer's latest review, their latest approval or change request, and the latest dismissals.
+ * A later comment hides a verdict from `latestReviews`, and `latestOpinionatedReviews` leaves out a dismissed one, so a push dismissal is read from its event.
  * A dismissal that names the commit it came with is GitHub dismissing a stale review on a push; one dismissed by hand names none.
  */
 export const AUTHORED_SEARCH_QUERY = `query GuidedReviewAuthored($query: String!) {
@@ -399,9 +400,10 @@ export const AUTHORED_SEARCH_QUERY = `query GuidedReviewAuthored($query: String!
         reviewRequests(first: ${AUTHORED_REVIEWERS}) {
           nodes { requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { combinedSlug } } }
         }
-        latestReviews(first: ${AUTHORED_REVIEWERS}) { nodes { id state submittedAt author { login } commit { oid } } }
+        latestReviews(first: ${AUTHORED_REVIEWERS}) { nodes { state submittedAt author { login } commit { oid } } }
+        latestOpinionatedReviews(first: ${AUTHORED_REVIEWERS}) { nodes { state submittedAt author { login } } }
         timelineItems(itemTypes: [REVIEW_DISMISSED_EVENT], last: ${AUTHORED_REVIEWERS}) {
-          nodes { ... on ReviewDismissedEvent { previousReviewState pullRequestCommit { id } review { id } } }
+          nodes { ... on ReviewDismissedEvent { previousReviewState pullRequestCommit { id } review { submittedAt author { login } } } }
         }
       }
     }
@@ -455,7 +457,6 @@ const AuthoredPullRequest = ListedPullRequest.extend({
   latestReviews: z.object({
     nodes: z.array(
       z.object({
-        id: z.string(),
         state: ReviewState,
         submittedAt: z.string().nullable(),
         author: z.object({ login: z.string() }).nullable(),
@@ -463,12 +464,15 @@ const AuthoredPullRequest = ListedPullRequest.extend({
       }),
     ),
   }),
+  latestOpinionatedReviews: z.object({
+    nodes: z.array(z.object({ state: ReviewState, submittedAt: z.string().nullable(), author: z.object({ login: z.string() }).nullable() })),
+  }),
   timelineItems: z.object({
     nodes: z.array(
       z.object({
         previousReviewState: z.string().optional(),
         pullRequestCommit: z.object({ id: z.string() }).nullish(),
-        review: z.object({ id: z.string() }).nullish(),
+        review: z.object({ submittedAt: z.string().nullable(), author: z.object({ login: z.string() }).nullable() }).nullish(),
       }),
     ),
   }),
@@ -525,16 +529,21 @@ function reviewRequestOf(pr: SearchedPullRequest, requested: boolean): ReviewReq
 }
 
 /**
- * The viewer's own PR with where each reviewer stands.
+ * The viewer's own PR with where each reviewer stands: their latest approval or change request, else their approval GitHub dismissed on a push, else that they commented.
  * A reviewer asked again is `requested`, as on GitLab, where asking again resets their state, unless they requested changes: a blocking review is never hidden.
  * The author's own reviews are replies to threads, not reviews of their PR, so they are left out.
  */
 function authoredOf(pr: AuthoredPullRequest): AuthoredChangeRequest | null {
   const listed = listedOf(pr);
   if (listed === null) return null;
-  const resetByPush = new Set(
-    pr.timelineItems.nodes.flatMap((event) => (event.previousReviewState === "APPROVED" && event.pullRequestCommit && event.review ? [event.review.id] : [])),
-  );
+  const resets = new Map<string, string>();
+  for (const { previousReviewState, pullRequestCommit, review } of pr.timelineItems.nodes) {
+    if (previousReviewState !== "APPROVED" || !pullRequestCommit || !review?.submittedAt) continue;
+    const login = userOf(review.author).login;
+    const known = resets.get(login);
+    if (known === undefined || Date.parse(review.submittedAt) > Date.parse(known)) resets.set(login, review.submittedAt);
+  }
+  const opinions = new Map(pr.latestOpinionatedReviews.nodes.map((opinion) => [userOf(opinion.author).login, opinion]));
   const reviews = pr.latestReviews.nodes.filter((review) => review.state !== "PENDING" && review.author?.login !== pr.author?.login);
   const asked = new Set(
     pr.reviewRequests.nodes.flatMap(({ requestedReviewer }) => {
@@ -544,8 +553,8 @@ function authoredOf(pr: AuthoredPullRequest): AuthoredChangeRequest | null {
   );
   const states = new Map<string, ReviewerState>();
   for (const review of reviews) {
-    const state = review.state === "DISMISSED" && resetByPush.has(review.id) ? "unapproved" : REVIEWER_STATES[review.state];
-    states.set(userOf(review.author).login, state);
+    const login = userOf(review.author).login;
+    states.set(login, standingOf(opinions.get(login), resets.get(login)) ?? REVIEWER_STATES[review.state]);
   }
   for (const name of asked) {
     if (states.get(name) !== "changes-requested") states.set(name, "requested");
@@ -560,6 +569,13 @@ function authoredOf(pr: AuthoredPullRequest): AuthoredChangeRequest | null {
     ),
     latestReviewAt: latestOf(reviews.flatMap((review) => (review.submittedAt === null ? [] : [review.submittedAt]))),
   };
+}
+
+/** A reviewer's verdict, or the approval a push took from them when that came after it; null when they gave none. */
+function standingOf(opinion: AuthoredPullRequest["latestOpinionatedReviews"]["nodes"][number] | undefined, resetAt: string | undefined): ReviewerState | null {
+  const verdict = opinion?.state === "APPROVED" || opinion?.state === "CHANGES_REQUESTED" ? opinion : undefined;
+  if (resetAt !== undefined && (verdict?.submittedAt == null || Date.parse(resetAt) > Date.parse(verdict.submittedAt))) return "unapproved";
+  return verdict === undefined ? null : REVIEWER_STATES[verdict.state];
 }
 
 function listedOf(pr: ListedPullRequest): ListedChangeRequest | null {
