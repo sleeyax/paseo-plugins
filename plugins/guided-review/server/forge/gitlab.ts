@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Draft, DraftLocation, LineRef } from "../../shared/drafts.ts";
 import type { CommandRunner } from "../command-runner.ts";
 import type { Verdict } from "../../shared/submit.ts";
-import type { CiState, ReviewerState, ReviewRequest, ReviewRequestHost } from "../../shared/inbox.ts";
+import type { CiState, ReviewerState, ReviewRequest, ListedHost } from "../../shared/inbox.ts";
 import { createCli, type Cli } from "./cli.ts";
 import { GITHUB_HOST } from "./github.ts";
 import { CLONE_TIMEOUT_MS, COMMIT_READS_AT_ONCE, mapAtMost, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, userOf } from "./common.ts";
@@ -432,7 +432,7 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
     );
   };
 
-  const reviewRequestsOn = async (host: string): Promise<Omit<ReviewRequestHost, "error">> => {
+  const listingOn = async (host: string): Promise<Omit<ListedHost, "error">> => {
     const { version } = await glab.json(VersionResponse, ["api", "--hostname", host, "version"]);
     if (!isAtLeast(version, REVIEW_LIST_VERSION)) {
       throw new ForgeError(`${host} runs GitLab ${version}; listing your reviews needs ${REVIEW_LIST_VERSION.join(".")} or newer.`);
@@ -829,10 +829,10 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
       }
     },
 
-    async listReviewRequests(): Promise<ReviewRequestHost[]> {
+    async listChangeRequests(): Promise<ListedHost[]> {
       const statuses = parseAuthStatus(await glab.report(["auth", "status", "--all"]));
       return Promise.all(
-        statuses.map(async ({ host, loggedIn, problem }): Promise<ReviewRequestHost> => {
+        statuses.map(async ({ host, loggedIn, problem }): Promise<ListedHost> => {
           const listed = { forge: "gitlab" as const, host, requests: [], truncated: false };
           if (!loggedIn) {
             const reason = problem === null ? "" : ` (${problem})`;
@@ -840,7 +840,7 @@ export function createGitLabForge(options: GitLabForgeOptions): Forge {
           }
           hosts.set(host, Promise.resolve());
           try {
-            return { ...(await reviewRequestsOn(host)), error: null };
+            return { ...(await listingOn(host)), error: null };
           } catch (error) {
             if (!(error instanceof ForgeError)) throw error;
             return { ...listed, error: error.message };

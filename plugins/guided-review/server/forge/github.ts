@@ -3,7 +3,7 @@ import type { CommandRunner } from "../command-runner.ts";
 import { oneAtATimePer } from "../one-at-a-time.ts";
 import { createCli } from "./cli.ts";
 import type { Draft, DraftLocation } from "../../shared/drafts.ts";
-import type { CiState, ReviewerState, ReviewRequest, ReviewRequestHost } from "../../shared/inbox.ts";
+import type { CiState, ReviewerState, ReviewRequest, ListedHost } from "../../shared/inbox.ts";
 import type { Verdict } from "../../shared/submit.ts";
 import { CLONE_TIMEOUT_MS, MAX_BRANCH_CHANGE_REQUESTS, MAX_COMMITS, MAX_LINKED_ISSUES, userOf } from "./common.ts";
 import { SubmitSteps } from "./submit-steps.ts";
@@ -748,7 +748,7 @@ export function createGitHubForge(options: GitHubForgeOptions): Forge {
       });
     },
 
-    async listReviewRequests(): Promise<ReviewRequestHost[]> {
+    async listChangeRequests(): Promise<ListedHost[]> {
       const search = (query: string) =>
         gh.json(ReviewSearchResponse, ["api", "graphql", "--hostname", GITHUB_HOST, "--input", "-"], {
           input: JSON.stringify({ query: REVIEW_SEARCH_QUERY, variables: { query } }),

@@ -7,7 +7,7 @@ import {
   type CheckOff,
   type ReviewerState,
   type ReviewRequest,
-  type ReviewRequestHost,
+  type ListedHost,
 } from "../shared/inbox.ts";
 import { byTab } from "./inbox-tabs.ts";
 import { readJson, writeJson } from "./json-file.ts";
@@ -42,7 +42,7 @@ export class InboxCheckOffsFile {
   }
 
   /** Follows a listing of every host, and answers the URLs still checked off. */
-  async follow(hosts: readonly ReviewRequestHost[]): Promise<Set<string>> {
+  async follow(hosts: readonly ListedHost[]): Promise<Set<string>> {
     const followed = await this.#change((checkOffs) => ({ ...checkOffs, assigned: followListing(checkOffs.assigned, hosts) }));
     return new Set(Object.keys(followed.assigned));
   }
@@ -66,7 +66,7 @@ export class InboxCheckOffsFile {
  * Drops the check-offs whose change request came back, and those a host listed in full no longer has.
  * The rest keep the state the reviewer is now in, so one they moved on themselves, by commenting, still comes back when they are asked again.
  */
-function followListing(checkOffs: AssignedCheckOffs, hosts: readonly ReviewRequestHost[]): AssignedCheckOffs {
+function followListing(checkOffs: AssignedCheckOffs, hosts: readonly ListedHost[]): AssignedCheckOffs {
   const requests = new Map(hosts.flatMap((host) => host.requests.map((request) => [request.url, request] as const)));
   const complete = new Set<string | null>(hosts.filter((host) => host.error === null && !host.truncated).map((host) => host.host));
   const followed: AssignedCheckOffs = {};

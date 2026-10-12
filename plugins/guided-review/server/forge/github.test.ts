@@ -719,7 +719,7 @@ test("a discussion on the pull request is a comment on its conversation, as GitH
 test("lists what the viewer is asked to review and what they reviewed, as two searches on github.com", async () => {
   const { forge, run } = forgeReplaying([{ stdout: fixture("review-search-requested.json") }, { stdout: fixture("review-search-reviewed.json") }]);
 
-  const [host, ...others] = await forge.listReviewRequests();
+  const [host, ...others] = await forge.listChangeRequests();
 
   assert.deepEqual(others, []);
   assert.deepEqual(
@@ -765,7 +765,7 @@ test("lists what the viewer is asked to review and what they reviewed, as two se
 test("a PR the viewer is asked to review again reads as requested and changed, with the team it was asked of", async () => {
   const { forge } = forgeReplaying([{ stdout: fixture("review-search-requested.json") }, { stdout: fixture("review-search-reviewed.json") }]);
 
-  const [host] = await forge.listReviewRequests();
+  const [host] = await forge.listChangeRequests();
   const again = host?.requests.find((request) => request.number === 7);
 
   assert.equal(again?.author, "ghost");
@@ -780,7 +780,7 @@ test("a PR the viewer is asked to review again reads as requested and changed, w
 test("a PR the viewer reviewed and is not asked again reads by their review, changed when the head moved past it", async () => {
   const { forge } = forgeReplaying([{ stdout: fixture("review-search-requested.json") }, { stdout: fixture("review-search-reviewed.json") }]);
 
-  const [host] = await forge.listReviewRequests();
+  const [host] = await forge.listChangeRequests();
   const byUrl = (url: string) => host?.requests.find((request) => request.url === url);
 
   const commented = byUrl("https://github.com/themouette/claude-vm/pull/96");
@@ -794,7 +794,7 @@ test("a PR the viewer reviewed and is not asked again reads by their review, cha
 test("a PR the viewer reviewed without being asked, by name or through a team, is left out", async () => {
   const { forge } = forgeReplaying([{ stdout: fixture("review-search-requested.json") }, { stdout: fixture("review-search-reviewed.json") }]);
 
-  const [host] = await forge.listReviewRequests();
+  const [host] = await forge.listChangeRequests();
   const urls = host?.requests.map((request) => request.url);
 
   assert.ok(!urls?.includes("https://github.com/magisterquis/connectproxy/pull/2"));
@@ -808,7 +808,7 @@ test("a search with more results than it returned marks the host as truncated", 
   requested.data.search.issueCount = 120;
   const { forge } = forgeReplaying([{ stdout: JSON.stringify(requested) }, { stdout: fixture("review-search-reviewed.json") }]);
 
-  const [host] = await forge.listReviewRequests();
+  const [host] = await forge.listChangeRequests();
 
   assert.equal(host?.truncated, true);
 });
@@ -819,7 +819,7 @@ test("a search gh cannot run comes back as the host's error rather than a throw"
     { stdout: fixture("review-search-reviewed.json") },
   ]);
 
-  const hosts = await forge.listReviewRequests();
+  const hosts = await forge.listChangeRequests();
 
   assert.deepEqual(hosts, [
     { forge: "github", host: "github.com", requests: [], truncated: false, error: "gh failed: To get started with GitHub CLI, please run:  gh auth login" },

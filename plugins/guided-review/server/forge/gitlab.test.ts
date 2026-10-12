@@ -1182,7 +1182,7 @@ test("reads every host glab reports, logged in or not, and why glab cannot use o
 test("lists the open MRs the viewer reviews on each host glab is logged in to, after checking its version", async () => {
   const { forge, run } = forgeReplaying(LIST_REVIEWS);
 
-  const hosts = await forge.listReviewRequests();
+  const hosts = await forge.listChangeRequests();
 
   assert.deepEqual(
     run.calls.map((call) => call.args),
@@ -1222,7 +1222,7 @@ test("lists the open MRs the viewer reviews on each host glab is logged in to, a
 test("an MR reads by the viewer's own reviewer record, changed when the head commit is newer than it", async () => {
   const { forge } = forgeReplaying(LIST_REVIEWS);
 
-  const [host] = await forge.listReviewRequests();
+  const [host] = await forge.listChangeRequests();
   const summary = host?.requests.map(({ number, state, changedSinceReview, ci, author, isDraft }) => ({ number, state, changedSinceReview, ci, author, isDraft }));
 
   assert.deepEqual(summary, [
@@ -1238,7 +1238,7 @@ test("a host glab is not logged in to, or one older than 19.2, comes back with i
   const report = { exitCode: 1, stderr: fixture("auth-status-all-unreachable.stderr") + fixture("auth-status-all.stderr") };
   const { forge } = forgeReplaying([report, version("19.5.0-pre"), { stdout: fixture("review-list.json") }]);
 
-  const hosts = await forge.listReviewRequests();
+  const hosts = await forge.listChangeRequests();
 
   assert.deepEqual(
     hosts.map(({ host, error, requests }) => ({ host, error, count: requests.length })),
@@ -1254,7 +1254,7 @@ test("a host glab is not logged in to, or one older than 19.2, comes back with i
   );
 
   const { forge: old } = forgeReplaying([AUTH_STATUS_ALL, version("18.11.2-ee")]);
-  assert.deepEqual(await old.listReviewRequests(), [
+  assert.deepEqual(await old.listChangeRequests(), [
     { forge: "gitlab", host: "gitlab.com", requests: [], truncated: false, error: "gitlab.com runs GitLab 18.11.2-ee; listing your reviews needs 19.2 or newer." },
   ]);
 });
@@ -1263,21 +1263,21 @@ test("a GraphQL answer with errors and no user is the host's error, and more MRs
   const failed = JSON.stringify({ data: { currentUser: null }, errors: [{ message: "Query has complexity of 301, which exceeds max complexity of 250" }] });
   const { forge } = forgeReplaying([AUTH_STATUS_ALL, version("19.5.0-pre"), { stdout: failed }]);
   assert.equal(
-    (await forge.listReviewRequests())[0]?.error,
+    (await forge.listChangeRequests())[0]?.error,
     "GitLab on gitlab.com did not list your reviews: Query has complexity of 301, which exceeds max complexity of 250.",
   );
 
   const more = JSON.parse(fixture("review-list.json"));
   more.data.currentUser.reviewRequestedMergeRequests.pageInfo.hasNextPage = true;
   const { forge: paged } = forgeReplaying([AUTH_STATUS_ALL, version("19.5.0-pre"), { stdout: JSON.stringify(more) }]);
-  assert.equal((await paged.listReviewRequests())[0]?.truncated, true);
+  assert.equal((await paged.listChangeRequests())[0]?.truncated, true);
 });
 
 test("a host listed as logged in is not checked again before reading an MR on it", async () => {
   const head = { stdout: JSON.stringify({ state: "opened", description: null, sha: "a".repeat(40), diff_refs: { head_sha: "a".repeat(40) } }) };
   const { forge, run } = forgeReplaying([...LIST_REVIEWS, { stdout: fixture("project.json") }, head]);
 
-  await forge.listReviewRequests();
+  await forge.listChangeRequests();
   run.calls.length = 0;
 
   assert.deepEqual(await forge.fetchHead(MR_3931), { headSha: "a".repeat(40), state: "open", description: "" });

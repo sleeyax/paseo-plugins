@@ -44,7 +44,7 @@ export class ReviewInbox {
   }
 
   async list(): Promise<Inbox> {
-    const listed = (await Promise.all(this.#forges.map((forge) => forge.listReviewRequests()))).flat();
+    const listed = (await Promise.all(this.#forges.map((forge) => forge.listChangeRequests()))).flat();
     const requests = listed.flatMap((host) => host.requests);
     const checkedOff = await this.#checkOffs.follow(listed);
     const items = await Promise.all(requests.map(async (request) => ({ ...(await this.#item(request)), checkedOff: checkedOff.has(request.url) })));

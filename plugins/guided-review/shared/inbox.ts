@@ -53,7 +53,7 @@ export type CiState = z.output<typeof CiStateSchema>;
 export type ReviewRequest = z.output<typeof ReviewRequestSchema>;
 
 /** What one host of a forge listed, or why it could not, so one host failing leaves the others listed. */
-export const ReviewRequestHostSchema = z.object({
+export const ListedHostSchema = z.object({
   forge: z.enum(["github", "gitlab"]),
   host: z.string(),
   requests: z.array(ReviewRequestSchema),
@@ -63,7 +63,7 @@ export const ReviewRequestHostSchema = z.object({
   error: z.string().nullable(),
 });
 
-export type ReviewRequestHost = z.output<typeof ReviewRequestHostSchema>;
+export type ListedHost = z.output<typeof ListedHostSchema>;
 
 /**
  * What this plugin has of a change request's review, if the reviewer started one here: the start
@@ -95,7 +95,7 @@ export const AuthoredCheckOffSchema = z.object({ status: ReviewStatusSchema, lat
 
 /** Every host's review requests, each joined with the review started here, if any. */
 export const InboxSchema = z.object({
-  hosts: z.array(ReviewRequestHostSchema.omit({ requests: true })),
+  hosts: z.array(ListedHostSchema.omit({ requests: true })),
   items: z.array(InboxItemSchema),
 });
 
