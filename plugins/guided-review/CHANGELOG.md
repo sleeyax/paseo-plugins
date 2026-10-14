@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0](https://github.com/sleeyax/paseo-plugins/compare/guided-review-v0.1.0...guided-review-v0.2.0) (2026-10-14)
+
+
+### Features
+
+* **guided-review:** Authored by me tab on the start tab ([#151](https://github.com/sleeyax/paseo-plugins/issues/151)) ([8647e29](https://github.com/sleeyax/paseo-plugins/commit/8647e2984f269f142322dcaf6cf0640696f41921))
+
+
+### Bug Fixes
+
+* **guided-review:** have the guide agent read the change with git instead of the prompt ([#141](https://github.com/sleeyax/paseo-plugins/issues/141)) ([d94fc0c](https://github.com/sleeyax/paseo-plugins/commit/d94fc0c08fa28cfa4408354eca4ba5ac5d945855))
+* **guided-review:** load the review list when glab is not installed ([#153](https://github.com/sleeyax/paseo-plugins/issues/153)) ([0ce14f3](https://github.com/sleeyax/paseo-plugins/commit/0ce14f3da8f09806dc477e0ec13fba9a02964d58))
+* **guided-review:** set GLAB_NO_PROMPT instead of the deprecated NO_PROMPT ([#136](https://github.com/sleeyax/paseo-plugins/issues/136)) ([3786397](https://github.com/sleeyax/paseo-plugins/commit/37863978cb20c566b57bbb5d1f936260dbda6c24))
+
 ## 0.1.0 (2026-10-07)
 
 
