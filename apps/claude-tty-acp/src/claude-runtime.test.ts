@@ -3403,6 +3403,103 @@ test("stops waiting when the agent that reported never wakes Claude to answer fo
   }
 });
 
+test("goes on waiting while the question Claude asked for the agent that reported is still being answered", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-question-test-"));
+  const configDirectory = path.join(root, "claude");
+  const runtimeRoot = path.join(root, "runtime");
+  const cwd = "/work/agents-question";
+  const projectDirectory = path.join(configDirectory, "projects", escapeProjectDirName(cwd));
+  await mkdir(projectDirectory, { recursive: true });
+  await mkdir(runtimeRoot, { recursive: true });
+  let agent!: ClaudeTtyAgent;
+  let spawned: FakePty | null = null;
+  let answer: ((response: RequestPermissionResponse) => void) | null = null;
+  const spawnPty = (_file: string, args: string[]): Pick<IPty, "pid" | "write" | "kill" | "onData" | "onExit"> => {
+    spawned = new FakePty(3850);
+    const sessionId = args[args.indexOf("--session-id") + 1]!;
+    setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
+    return spawned;
+  };
+  const connection = {
+    sessionUpdate: async () => undefined,
+    requestPermission: () => new Promise<RequestPermissionResponse>((resolve) => (answer = resolve)),
+    extNotification: async () => undefined,
+  } as unknown as AgentSideConnection;
+  agent = new ClaudeTtyAgent(connection, {
+    ...TEST_TIMINGS,
+    spawnPty,
+    runtimeRoot,
+    claudeConfigDir: configDirectory,
+    stateDirectory: path.join(root, "state"),
+    startupTimeoutMs: 500,
+    readinessTimeoutMs: 0,
+    submitDelayMs: 0,
+    contextRefreshTimeoutMs: 0,
+    transcriptPollIntervalMs: 10,
+    subagentPollMs: 10,
+    subagentWakeMs: 100,
+  });
+
+  try {
+    const session = await agent.newSession({ cwd, mcpServers: [] });
+    const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "launch an agent" }] });
+    await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    const transcript = path.join(projectDirectory, `${session.sessionId}.jsonl`);
+    const records = [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "launcher",
+        message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Count the files" } }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched",
+        toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+      }),
+    ];
+    await writeFile(transcript, `${records.join("\n")}\n`);
+    let settled = false;
+    void turn.then(() => {
+      settled = true;
+    });
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
+    records.push(
+      JSON.stringify({
+        type: "user",
+        uuid: "notified",
+        message: { content: "<task-notification> <task-id>a1</task-id> <status>completed</status> <summary>done</summary> </task-notification>" },
+      }),
+    );
+    await writeFile(transcript, `${records.join("\n")}\n`);
+
+    // Claude wakes for the report and asks something, then writes nothing until it is answered.
+    const question = agent.hooks.dispatch({
+      hook_event_name: "PreToolUse",
+      session_id: session.sessionId,
+      tool_name: "AskUserQuestion",
+      tool_use_id: "toolu_held",
+      tool_input: { questions: [{ question: "Which one?", header: "Pick", options: [{ label: "This one" }] }] },
+    });
+    await waitFor(() => answer !== null);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(settled, false);
+
+    answer!({ outcome: { outcome: "selected", optionId: "answer-0-0" } });
+    const decision = (await question) as { hookSpecificOutput?: { permissionDecision?: string } };
+    assert.equal(decision.hookSpecificOutput?.permissionDecision, "allow");
+    // Claude has only just been given the answer, so the wake bound counts from there rather than from the question.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(settled, false);
+
+    await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "Going with this one." });
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+  } finally {
+    await agent.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test("goes on waiting while Claude is answering for the agent that reported", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-answer-test-"));
   const configDirectory = path.join(root, "claude");

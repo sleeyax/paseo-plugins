@@ -81,6 +81,7 @@ export class InteractionBridge {
   private readonly blockingRequests = new Set<Deferred<RequestPermissionResponse>>();
   private readonly liveInteractions = new Map<string, Promise<InteractionOutcome>>();
   private readonly autoAccept: () => Promise<boolean>;
+  private lastAnsweredAt = 0;
 
   constructor(sessionId: string, cwd: string, connection: AgentSideConnection, autoAccept: () => Promise<boolean> = async () => false) {
     this.sessionId = sessionId;
@@ -92,6 +93,11 @@ export class InteractionBridge {
   /** Something is waiting on a person: a card is open in Paseo and Claude is held up behind it. */
   get pending(): boolean {
     return this.blockingRequests.size > 0;
+  }
+
+  /** When the last card Claude was held up behind was answered, or 0 if none has been. */
+  get answeredAt(): number {
+    return this.lastAnsweredAt;
   }
 
   beginTurn(): void {
@@ -338,7 +344,7 @@ export class InteractionBridge {
       cancellation.promise,
     ]).finally(() => {
       this.pendingRequests.delete(cancellation);
-      this.blockingRequests.delete(cancellation);
+      if (this.blockingRequests.delete(cancellation)) this.lastAnsweredAt = Date.now();
     });
     return {
       response,
