@@ -853,6 +853,8 @@ export class ClaudeRuntime {
       this.releaseBackgroundHold();
       return;
     }
+    // Claude writes nothing while it waits on a card, so the silence is the person's, however long they take.
+    if (this.interactions.pending) return;
     const agents = this.translator.runningSubagents;
     const shells = this.translator.runningBackgroundShells;
     const now = Date.now();
@@ -896,12 +898,13 @@ export class ClaudeRuntime {
     return Math.max(this.translator.backgroundShellActivityAt, this.heldAt);
   }
 
-  /** Claude answering for work that has reported is exactly what the wake bound waits for, so anything Claude writes counts towards it: what it says, what it thinks, and the tools it runs on the way. */
+  /** Claude answering for work that has reported is exactly what the wake bound waits for, so anything Claude writes counts towards it: what it says, what it thinks, and the tools it runs on the way, and so does the answer to a card that held it up. */
   private answerProgressAt(): number {
     return Math.max(
       this.translator.subagentActivityAt,
       this.translator.backgroundShellActivityAt,
       this.translator.assistantActivityAt,
+      this.interactions.answeredAt,
       this.heldAt,
     );
   }
