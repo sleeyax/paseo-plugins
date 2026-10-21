@@ -3474,20 +3474,20 @@ test("goes on waiting while the question Claude asked for the agent that reporte
     await writeFile(transcript, `${records.join("\n")}\n`);
 
     // Claude wakes for the report and asks something, then writes nothing until it is answered.
-    const question = agent.hooks.dispatch({
-      hook_event_name: "PreToolUse",
+    const asked = {
       session_id: session.sessionId,
       tool_name: "AskUserQuestion",
-      tool_use_id: "toolu_held",
       tool_input: { questions: [{ question: "Which one?", header: "Pick", options: [{ label: "This one" }] }] },
-    });
+    };
+    await agent.hooks.dispatch({ ...asked, hook_event_name: "PreToolUse", tool_use_id: "toolu_held" });
+    const question = agent.hooks.dispatch({ ...asked, hook_event_name: "PermissionRequest" });
     await waitFor(() => answer !== null);
     await new Promise((resolve) => setTimeout(resolve, 400));
     assert.equal(settled, false);
 
     answer!({ outcome: { outcome: "selected", optionId: "answer-0-0" } });
-    const decision = (await question) as { hookSpecificOutput?: { permissionDecision?: string } };
-    assert.equal(decision.hookSpecificOutput?.permissionDecision, "allow");
+    const decision = (await question) as { hookSpecificOutput?: { decision?: { behavior?: string } } };
+    assert.equal(decision.hookSpecificOutput?.decision?.behavior, "allow");
     // Claude has only just been given the answer, so the wake bound counts from there rather than from the question.
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.equal(settled, false);
