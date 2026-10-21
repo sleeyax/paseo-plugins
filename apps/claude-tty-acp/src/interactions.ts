@@ -155,6 +155,10 @@ export class InteractionBridge {
     const toolUseId = stringValue(payload.tool_use_id) || `tool-${randomUUID()}`;
     if (this.pendingTools.length >= MAX_PENDING_TOOLS) this.pendingTools.shift();
     this.pendingTools.push({ id: toolUseId, name, input });
+    // A question waits for the PermissionRequest that Claude raises for it in every mode. In Auto mode Claude
+    // writes nothing of the message to the transcript until PreToolUse returns, so a card raised from here
+    // reached Paseo without the text written above the question, which showed up only once it was answered.
+    if (name === QUESTION_TOOL) return {};
     const interaction = this.interactionFor(name, input, toolUseId);
     if (interaction) return preToolResponse(await interaction);
     return {};
@@ -196,9 +200,10 @@ export class InteractionBridge {
     return permissionHookResponse(choice);
   }
 
-  // Claude skips its permission pipeline only while the PreToolUse hook that renders these answers in time.
+  // A plan is answered from PreToolUse, and Claude skips its permission pipeline only while that hook answers in time.
   // A hook that died leaves the pipeline to ask instead, so the same interaction serves both events: it reuses the card already on screen, or renders one here.
-  // Rendering the tool again would show it as raw JSON, and that card's Allow leaves Claude waiting at its own dialog inside the PTY.
+  // A question always arrives here through the pipeline, see `handlePreToolUse`.
+  // Rendering either tool as an ordinary permission would show it as raw JSON, and that card's Allow leaves Claude waiting at its own dialog inside the PTY.
   private interactionFor(name: string, input: Record<string, unknown>, toolUseId: string): Promise<InteractionOutcome> | null {
     if (name === QUESTION_TOOL) return this.interaction(name, input, () => this.handleQuestions(toolUseId, input));
     if (name === PLAN_TOOL) return this.interaction(name, input, () => this.handlePlanApproval(toolUseId, input));

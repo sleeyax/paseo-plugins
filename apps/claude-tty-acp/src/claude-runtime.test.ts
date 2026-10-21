@@ -970,20 +970,24 @@ test("delivers the assistant text before an interactive hook prompts", async () 
     const session = await agent.newSession({ cwd, mcpServers: [] });
     const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "ask me" }] });
     await waitFor(() => spawned !== null && spawned.writes.length === 2);
+    const question = {
+      session_id: session.sessionId,
+      tool_name: "AskUserQuestion",
+      tool_input: { questions: [{ question: "Which way?", header: "Approach", options: [{ label: "First" }, { label: "Second" }] }] },
+    };
+    // In Auto mode Claude writes the message only once PreToolUse has returned, so that hook must not wait on the card.
+    assert.deepEqual(await agent.hooks.dispatch({ ...question, hook_event_name: "PreToolUse", tool_use_id: "question-tool" }), {});
     await writeFile(
       path.join(projectDirectory, `${session.sessionId}.jsonl`),
       `${JSON.stringify({ type: "assistant", uuid: "preamble", message: { content: [{ type: "text", text: "Two ways to do this." }] } })}\n`,
     );
-    const answered = await agent.hooks.dispatch({
-      hook_event_name: "PreToolUse",
-      session_id: session.sessionId,
-      tool_use_id: "question-tool",
-      tool_name: "AskUserQuestion",
-      tool_input: { questions: [{ question: "Which way?", header: "Approach", options: [{ label: "First" }, { label: "Second" }] }] },
-    });
+    const answered = await agent.hooks.dispatch({ ...question, hook_event_name: "PermissionRequest" });
 
     assert.deepEqual(textWhenAsked, ["Two ways to do this."]);
-    assert.equal((answered.hookSpecificOutput as { updatedInput?: { answers?: Record<string, string> } } | undefined)?.updatedInput?.answers?.["Which way?"], "First");
+    assert.equal(
+      (answered.hookSpecificOutput as { decision?: { updatedInput?: { answers?: Record<string, string> } } } | undefined)?.decision?.updatedInput?.answers?.["Which way?"],
+      "First",
+    );
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "done" });
     await turn;
   } finally {
@@ -2433,10 +2437,9 @@ test("leaves a session running while a card is still waiting on the person who h
 
     // A card raised outside the turn, the way work Claude is still finishing in the background raises one.
     const question = agent.hooks.dispatch({
-      hook_event_name: "PreToolUse",
+      hook_event_name: "PermissionRequest",
       session_id: created.sessionId,
       tool_name: "AskUserQuestion",
-      tool_use_id: "toolu_1",
       tool_input: { questions: [{ question: "Which one?", options: [{ label: "This one" }] }] },
     });
     await waitFor(() => answer !== null);
@@ -2446,8 +2449,8 @@ test("leaves a session running while a card is still waiting on the person who h
     assert.equal(agent.sessions.get(created.sessionId)?.started, true);
 
     answer!({ outcome: { outcome: "selected", optionId: "answer-0-0" } });
-    const decision = (await question) as { hookSpecificOutput?: { permissionDecision?: string } };
-    assert.equal(decision.hookSpecificOutput?.permissionDecision, "allow");
+    const decision = (await question) as { hookSpecificOutput?: { decision?: { behavior?: string } } };
+    assert.equal(decision.hookSpecificOutput?.decision?.behavior, "allow");
   } finally {
     await agent.close();
     await rm(runtimeRoot, { force: true, recursive: true });
