@@ -25,6 +25,15 @@ async function handOff(cardId: string, answers: Record<string, string>): Promise
   await writeFile(path.join(answersDirectory, answersFileName(cardId)), JSON.stringify({ answers }));
 }
 
+/**
+ * A question the way Claude asks it: PreToolUse, let through without a card, then the PermissionRequest
+ * for the same call, which is where the card is raised and answered.
+ */
+async function ask(bridge: InteractionBridge, toolUseId: string, input: Record<string, unknown>) {
+  assert.deepEqual(await bridge.handlePreToolUse({ hook_event_name: "PreToolUse", tool_use_id: toolUseId, tool_name: "AskUserQuestion", tool_input: input }), {});
+  return bridge.handlePermissionRequest({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion", tool_input: input });
+}
+
 test("correlates ordinary permissions and returns exact durable suggestions", async () => {
   const requests: RequestPermissionRequest[] = [];
   const suggestion = {
@@ -137,13 +146,7 @@ test("raises one card for every question a tool call asks, and answers them all 
     { question: "Choose runtime", header: "Runtime", options: [{ label: "Node" }, { label: "Bun" }], multiSelect: false },
     { question: "Choose checks", header: "Checks", options: [{ label: "Types" }, { label: "Tests" }], multiSelect: true },
   ];
-  const response = await bridge.handlePreToolUse({
-    hook_event_name: "PreToolUse",
-    session_id: "session",
-    tool_use_id: "question-tool",
-    tool_name: "AskUserQuestion",
-    tool_input: { questions },
-  });
+  const response = await ask(bridge, "question-tool", { questions });
 
   assert.equal(requests.length, 1);
   assert.equal(requests[0]?.toolCall.toolCallId, "question-tool-questions");
@@ -160,9 +163,8 @@ test("raises one card for every question a tool call asks, and answers them all 
   );
   assert.deepEqual(response, {
     hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-      updatedInput: { questions, answers: { "Choose runtime": "Bun", "Choose checks": "Types, Tests" } },
+      hookEventName: "PermissionRequest",
+      decision: { behavior: "allow", updatedInput: { questions, answers: { "Choose runtime": "Bun", "Choose checks": "Types, Tests" } } },
     },
   });
 });
@@ -178,13 +180,7 @@ test("offers one option per answer while a single question is on the card", asyn
     }),
   );
   const questions = [{ question: "Choose runtime", header: "Runtime", options: [{ label: "Node" }, { label: "Bun" }] }];
-  const response = await bridge.handlePreToolUse({
-    hook_event_name: "PreToolUse",
-    session_id: "session",
-    tool_use_id: "question-tool",
-    tool_name: "AskUserQuestion",
-    tool_input: { questions },
-  });
+  const response = await ask(bridge, "question-tool", { questions });
 
   // Submit stays first: a client that allows without naming an action resolves the first affirmative one,
   // and that has to be the option that carries no answer of its own.
@@ -192,9 +188,8 @@ test("offers one option per answer while a single question is on the card", asyn
   assert.deepEqual(requests[0]?.options.map((option) => option.name), ["Submit answers", "Node", "Bun", "Answer in chat"]);
   assert.deepEqual(response, {
     hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-      updatedInput: { questions, answers: { "Choose runtime": "Bun" } },
+      hookEventName: "PermissionRequest",
+      decision: { behavior: "allow", updatedInput: { questions, answers: { "Choose runtime": "Bun" } } },
     },
   });
 });
@@ -208,23 +203,22 @@ test("leaves the questions nobody answered to be asked in chat", async () => {
       return selected("submit");
     }),
   );
-  const question = await bridge.handlePreToolUse({
-    tool_name: "AskUserQuestion",
-    tool_use_id: "partial",
-    tool_input: {
-      questions: [
-        { question: "Name?", options: [{ label: "Alice" }] },
-        { question: "Notes?", options: [{ label: "None" }] },
-        { question: "Proceed?", options: [{ label: "Yes" }] },
-      ],
-    },
+  const question = await ask(bridge, "partial", {
+    questions: [
+      { question: "Name?", options: [{ label: "Alice" }] },
+      { question: "Notes?", options: [{ label: "None" }] },
+      { question: "Proceed?", options: [{ label: "Yes" }] },
+    ],
   });
   assert.deepEqual(question, {
     hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason:
-        'The user left these questions to be asked in chat. Keep these completed answers: {"Name?":"Alice","Proceed?":"Yes"}. Ask only these deferred questions: ["Notes?"]. Restate the deferred questions conversationally in one message, then end this turn and wait for the user\'s response.',
+      hookEventName: "PermissionRequest",
+      decision: {
+        behavior: "deny",
+        message:
+          'The user left these questions to be asked in chat. Keep these completed answers: {"Name?":"Alice","Proceed?":"Yes"}. Ask only these deferred questions: ["Notes?"]. Restate the deferred questions conversationally in one message, then end this turn and wait for the user\'s response.',
+        interrupt: false,
+      },
     },
   });
 });
@@ -237,9 +231,9 @@ test("falls back to chat for a card nobody answered", async () => {
     'The user left these questions to be asked in chat. Ask only these deferred questions: ["Which way?"]. Restate the deferred questions conversationally in one message, then end this turn and wait for the user\'s response.';
 
   for (const toolUseId of ["chat", "empty", "cancelled"]) {
-    const response = await bridge.handlePreToolUse({ tool_name: "AskUserQuestion", tool_use_id: toolUseId, tool_input: input });
+    const response = await ask(bridge, toolUseId, input);
     assert.deepEqual(response, {
-      hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
+      hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny", message: reason, interrupt: false } },
     });
   }
 });
@@ -295,7 +289,7 @@ test("cancels outstanding hook waits when the turn ends", async () => {
   });
 });
 
-test("answers the permission pipeline from the question card the killed PreToolUse hook left on screen", async () => {
+test("answers the permission pipeline from the plan card the killed PreToolUse hook left on screen", async () => {
   const requests: RequestPermissionRequest[] = [];
   let answer: ((response: RequestPermissionResponse) => void) | null = null;
   const bridge = new InteractionBridge(
@@ -308,33 +302,44 @@ test("answers the permission pipeline from the question card the killed PreToolU
       });
     }),
   );
-  const questions = [{ question: "Choose runtime", options: [{ label: "Node" }, { label: "Bun" }], multiSelect: false }];
-  const preTool = bridge.handlePreToolUse({
-    tool_name: "AskUserQuestion",
-    tool_use_id: "question-tool",
-    tool_input: { questions },
-  });
+  const plan = { plan: "1. Implement", allowedPrompts: [] };
+  const preTool = bridge.handlePreToolUse({ tool_name: "ExitPlanMode", tool_use_id: "plan-tool", tool_input: plan });
   await waitFor(() => requests.length > 0);
 
   // Claude killed that hook at its timeout and fell through to its permission pipeline for the same call.
-  const permission = bridge.handlePermissionRequest({ tool_name: "AskUserQuestion", tool_input: { questions } });
+  const permission = bridge.handlePermissionRequest({ tool_name: "ExitPlanMode", tool_input: plan });
   await waitFor(() => answer !== null);
-  answer!(selected("answer-0-1"));
+  answer!(selected("implement"));
 
   assert.deepEqual(await permission, {
-    hookSpecificOutput: {
-      hookEventName: "PermissionRequest",
-      decision: { behavior: "allow", updatedInput: { questions, answers: { "Choose runtime": "Bun" } } },
-    },
+    hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow", updatedInput: plan } },
   });
   assert.deepEqual(await preTool, {
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-      updatedInput: { questions, answers: { "Choose runtime": "Bun" } },
-    },
+    hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: plan },
   });
   assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.toolCall.toolCallId, "plan-tool-approval");
+});
+
+test("lets a question through PreToolUse without a card, so Claude writes the text above it first", async () => {
+  // In Auto mode Claude keeps the whole message out of the transcript until PreToolUse returns, so a card
+  // raised from that hook went up in Paseo before the text that explains it (Claude Code 2.1.306).
+  const requests: RequestPermissionRequest[] = [];
+  const bridge = new InteractionBridge(
+    "session",
+    "/work/repo",
+    connectionWith(async (request) => {
+      requests.push(request);
+      return selected("answer-0-1");
+    }),
+  );
+  const questions = [{ question: "Choose runtime", options: [{ label: "Node" }, { label: "Bun" }] }];
+
+  assert.deepEqual(await bridge.handlePreToolUse({ tool_name: "AskUserQuestion", tool_use_id: "question-tool", tool_input: { questions } }), {});
+  assert.equal(requests.length, 0);
+
+  // The card raised from the PermissionRequest still carries the call's own id, which the plugin's answers are filed under.
+  await bridge.handlePermissionRequest({ tool_name: "AskUserQuestion", tool_input: { questions } });
   assert.equal(requests[0]?.toolCall.toolCallId, "question-tool-questions");
 });
 
