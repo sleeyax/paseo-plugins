@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-acp-v0.4.0...claude-tty-acp-v0.5.0) (2026-10-21)
+
+
+### Features
+
+* **claude-tty:** link owner/repo[#123](https://github.com/sleeyax/paseo-plugins/issues/123) issue references in Claude's replies ([#154](https://github.com/sleeyax/paseo-plugins/issues/154)) ([7ea605c](https://github.com/sleeyax/paseo-plugins/commit/7ea605c7f85c0fbc78c3b5d8e3276a79cf59387d))
+
+
+### Bug Fixes
+
+* **claude-tty:** keep a question card open in a turn held for background work ([#157](https://github.com/sleeyax/paseo-plugins/issues/157)) ([3af2e78](https://github.com/sleeyax/paseo-plugins/commit/3af2e785a6ce0238e58c701ffb053a2b2c691496))
+* **claude-tty:** send a prompt as the user's own words instead of one collapsed paste ([#140](https://github.com/sleeyax/paseo-plugins/issues/140)) ([421d071](https://github.com/sleeyax/paseo-plugins/commit/421d0714b902ba6ca932e020c985cce21db7dd2e))
+* **claude-tty:** show the text Claude writes above a question before the question ([#158](https://github.com/sleeyax/paseo-plugins/issues/158)) ([4e62a73](https://github.com/sleeyax/paseo-plugins/commit/4e62a73e4139613edd81bfd59cc8222c0e5d189c))
+
 ## [0.4.0](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-acp-v0.3.0...claude-tty-acp-v0.4.0) (2026-10-07)
 
 

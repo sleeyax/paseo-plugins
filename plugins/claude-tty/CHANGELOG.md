@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-v0.4.0...claude-tty-v0.5.0) (2026-10-21)
+
+
+### Features
+
+* **claude-tty:** draw the provider icon as Claude's spark with a terminal badge ([#152](https://github.com/sleeyax/paseo-plugins/issues/152)) ([c2511c3](https://github.com/sleeyax/paseo-plugins/commit/c2511c37373442c5e4b50366276403d989b4f833))
+
 ## [0.4.0](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-v0.3.0...claude-tty-v0.4.0) (2026-10-07)
 
 
