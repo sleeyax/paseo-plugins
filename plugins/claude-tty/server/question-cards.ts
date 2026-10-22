@@ -18,7 +18,7 @@ export const REPLY_IN_CHAT_OPTION_ID = "reply-in-chat";
 type Question = {
   question: string;
   header: string;
-  options: Array<{ label: string; description?: string }>;
+  options: Array<{ label: string; description?: string; preview?: string }>;
   multiSelect: boolean;
 };
 
@@ -130,10 +130,10 @@ function readQuestions(input: ProviderPermissionRequest["input"]): Question[] {
       const option = readRecord(value);
       const label = readString(option?.label);
       if (!option || !label) return [];
-      // Paseo's form has no surface for a preview, and a description under the label is the one
-      // place an option can say more, so a preview that would otherwise be dropped goes there.
-      const description = [readString(option.description), readString(option.preview)].filter((part) => part !== null).join("\n\n");
-      return [{ label, ...(description ? { description } : {}) }];
+      const description = readString(option.description);
+      // The card draws a preview as code, and a mockup in one needs its whitespace.
+      const preview = readString(option.preview) === null ? null : (option.preview as string);
+      return [{ label, ...(description ? { description } : {}), ...(preview ? { preview } : {}) }];
     });
     return [{ question: text, header: uniqueHeader(readString(question.header) ?? text, headers), options, multiSelect: question.multiSelect === true }];
   });

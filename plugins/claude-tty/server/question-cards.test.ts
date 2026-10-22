@@ -28,7 +28,8 @@ test("rebuilds Claude's questions into the shape Paseo's question form renders",
           multiSelect: true,
           options: [
             { label: "Node", description: "The established one", preview: "node --version" },
-            { label: "Bun", preview: "bun --version" },
+            { label: "Bun", preview: "  ┌──────┐\n  │ bun  │\n  └──────┘\n" },
+            { label: "Deno", preview: "  " },
             { label: 7 },
           ],
         },
@@ -44,9 +45,9 @@ test("rebuilds Claude's questions into the shape Paseo's question form renders",
       multiSelect: true,
       allowOther: true,
       options: [
-        // The form has no preview of its own, so a preview joins the description under the label.
-        { label: "Node", description: "The established one\n\nnode --version" },
-        { label: "Bun", description: "bun --version" },
+        { label: "Node", description: "The established one", preview: "node --version" },
+        { label: "Bun", preview: "  ┌──────┐\n  │ bun  │\n  └──────┘\n" },
+        { label: "Deno" },
       ],
     },
   ]);
