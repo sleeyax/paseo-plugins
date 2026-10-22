@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import { runAcpProvider } from "@getpaseo/plugin/server/acp";
+import type { AcpStream, AcpStreamMessage } from "@getpaseo/plugin/server/acp";
 import type {
   ProviderConnection,
   ProviderEvent,
@@ -11,7 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { BackgroundCommandOutput, COMMAND_FAILED, type BackgroundCommand } from "./background-commands.ts";
 import type { SubagentSidecar } from "./subagent-transcripts.ts";
-import { SUBSESSION_CAPABILITY, withSubagentSessions, type SubagentSource } from "./subsessions.ts";
+import { SUBSESSION_CAPABILITY, TURN_FAILED, withSubagentSessions, type SubagentSource } from "./subsessions.ts";
 
 const POLL_MS = 1;
 
@@ -121,6 +124,11 @@ function launch(harness: Harness, status: "running" | "completed" | "failed" | "
 
 /** What the bridge makes of a still-open launch when Paseo cancels a turn to replace it. */
 function launchCancelledWithTurn(harness: Harness, callId = "toolu_1"): void {
+  launch(harness, "canceled", callId);
+}
+
+/** What the bridge makes of a still-open launch when the turn fails. */
+function launchFailedWithTurn(harness: Harness, callId = "toolu_1"): void {
   harness.emit({
     type: "timeline.item",
     sessionId: "session",
@@ -131,7 +139,7 @@ function launchCancelledWithTurn(harness: Harness, callId = "toolu_1"): void {
       name: "Task",
       detail: { type: "plain_text", text: "Explore" },
       status: "failed",
-      error: null,
+      error: { message: TURN_FAILED },
     },
   });
 }
@@ -212,15 +220,14 @@ test("keeps a subsession open across a launch cancelled with its turn, and close
   kit.sidecars = [sidecar()];
   await kit.tick();
 
-  // A message sent while the agent runs: Paseo cancels the turn, the bridge terminalizes the launch
-  // as failed with no error, and the outcome wrapper — outside this one — would repair it to canceled.
+  // A message sent while the agent runs: Paseo cancels the turn and the bridge cancels the launch with it.
   launchCancelledWithTurn(kit);
   await kit.tick();
   assert.equal(childEvents(kit).find((event) => event.type === "session.closed"), undefined);
 
-  // The agent keeps writing, so the adapter reopens the card; a later cancel arrives already repaired.
+  // The agent keeps writing, so the adapter reopens the card.
   launch(kit, "running");
-  launch(kit, "canceled");
+  launchCancelledWithTurn(kit);
   await kit.tick();
   assert.equal(childEvents(kit).find((event) => event.type === "session.closed"), undefined);
 
@@ -230,6 +237,55 @@ test("keeps a subsession open across a launch cancelled with its turn, and close
   const closed = childEvents(kit).find((event) => event.type === "session.closed");
   assert.ok(closed?.type === "session.closed" && closed.error === undefined);
   await kit.connection.close();
+});
+
+test("keeps a subsession open across a launch failed with its turn, and closes it on the real ending", async () => {
+  const kit = harness();
+  opened(kit);
+  launch(kit, "running");
+  kit.sidecars = [sidecar()];
+  await kit.tick();
+
+  launchFailedWithTurn(kit);
+  await kit.tick();
+  assert.equal(childEvents(kit).find((event) => event.type === "session.closed"), undefined);
+
+  launch(kit, "running");
+  launch(kit, "failed");
+  await kit.tick();
+  const closed = childEvents(kit).find((event) => event.type === "session.closed");
+  assert.ok(closed?.type === "session.closed" && closed.error !== undefined);
+  await kit.connection.close();
+});
+
+/** The wrapper tells a launch the bridge failed with its turn by this error, so the bridge itself is held to it. */
+test("the bridge fails a tool call still running at a failed turn with the error the wrapper looks for", async (t) => {
+  const events: ProviderEvent[] = [];
+  const connection = await runAcpProvider({ id: "claude-tty-under-test", label: "Claude TTY", connector: () => failingAgent() }).connect({
+    versions: [1],
+    capabilities: ["prompt.message"],
+  });
+  t.after(() => connection.close());
+  connection.onEvent((event) => events.push(event));
+
+  await connection.send({
+    type: "session.open",
+    requestId: "open",
+    sessionId: "session",
+    history: "skip",
+    config: { cwd: "/repo", env: {}, mcpServers: {}, settings: {}, persist: false },
+  });
+  await settled(events, (event) => event.type === "session.ready");
+  await connection.send({
+    type: "session.prompt",
+    sessionId: "session",
+    prompt: { clientMessageId: "first", delivery: "auto", input: { type: "message", content: [{ type: "text", text: "first" }] } },
+  });
+  await settled(events, (event) => event.type === "session.turn" && event.state === "failed");
+
+  const last = events.filter((event) => event.type === "timeline.item" && event.item.type === "tool_call").at(-1);
+  assert.ok(last?.type === "timeline.item" && last.item.type === "tool_call");
+  assert.deepEqual({ status: last.item.status, error: last.item.error }, { status: "failed", error: { message: TURN_FAILED } });
 });
 
 test("never opens an agent a second time once its launch has ended", async () => {
@@ -370,3 +426,51 @@ test("closes a background command's subsession as failed when its card fails", a
   assert.deepEqual(childEvents(kit).at(-1), { type: "session.closed", sessionId: "session:b1", error: { message: COMMAND_FAILED } });
   await kit.connection.close();
 });
+
+async function settled(events: ProviderEvent[], matches: (event: ProviderEvent) => boolean): Promise<ProviderEvent> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const found = events.find(matches);
+    if (found) return found;
+    await delay(5);
+  }
+  throw new Error(`No matching event arrived; saw ${events.map((event) => event.type).join(", ")}`);
+}
+
+/** An ACP agent that starts a tool call in a prompt and then fails the prompt with the call still running. */
+function failingAgent(): AcpStream {
+  let push: (message: AcpStreamMessage) => void = () => undefined;
+  const readable = new ReadableStream<AcpStreamMessage>({
+    start(controller) {
+      push = (message) => controller.enqueue(message);
+    },
+  });
+  const writable = new WritableStream<AcpStreamMessage>({
+    write(message) {
+      if (!("method" in message)) return;
+      const id = "id" in message ? message.id : null;
+      if (message.method === "initialize") {
+        push({ jsonrpc: "2.0", id, result: { protocolVersion: 1, agentCapabilities: {} } });
+        return;
+      }
+      if (message.method === "session/new") {
+        push({ jsonrpc: "2.0", id, result: { sessionId: "native", modes: null, configOptions: [] } });
+        return;
+      }
+      if (message.method === "session/prompt") {
+        push({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: "native",
+            update: { sessionUpdate: "tool_call", toolCallId: "call", title: "Agent: count", kind: "other", status: "in_progress" },
+          },
+        });
+        push({ jsonrpc: "2.0", id, error: { code: -32603, message: "Claude PTY exited unexpectedly" } });
+        return;
+      }
+      if (id !== null) push({ jsonrpc: "2.0", id, result: {} });
+    },
+  });
+  return { readable, writable };
+}
