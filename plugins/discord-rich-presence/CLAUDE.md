@@ -2,7 +2,7 @@
 
 Run `paseo plugin reload discord-rich-presence` after every change, then read `paseo plugin logs discord-rich-presence`.
 The reload is the only compile check of the two bundles, so run it yourself rather than handing it to the user.
-If a reload hangs on `Stopping plugin` until the 60s timeout, kill the lingering `plugin-process.js` that is still connected to the daemon port.
+If the plugin's log stays on `Stopping plugin`, the reload waits on a lingering `plugin-process.js` that is still connected to the daemon port, so kill it.
 
 The server holds its own websocket to the daemon in `server/daemon.ts`; `docs/adr/0001-own-daemon-connection.md` says why.
 
