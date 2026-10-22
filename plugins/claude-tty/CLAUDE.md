@@ -42,7 +42,6 @@ The plugin side of each is marked "Mirrors the adapter's own …"; they include:
 ## Session events the daemon is strict about
 
 - **Tool cards need the update twice.** The bridge draws a card from the ACP update alone as raw JSON; `server/tool-details.ts` fills it from the `_claude_tty/tool_call` copy, which the adapter sends *before* the update. Sent after, or returned as a timeline item from the hook, it is overwritten by the bridge's own item.
-- **Offer `prompt.steer`, then decline every steer with a `failed` result** (`server/steering.ts`). Leaving the capability off makes the daemon throw and drop a mid-turn message; a declined steer makes it cancel the turn and send the message as the next one.
 - **Withdraw a card by answering it** with a plain deny through a `session.permission` input (`server/session-notices.ts`). Emitting only `session.permission_resolved` leaves it in the bridge, and the daemon resurrects it the next time any card is answered. Answer only cards still pending: an unknown one becomes `session.runtime_failed`, which the daemon reads as the session falling over.
 - **The bridge's `config` update replaces the whole `ProviderConfigState`.** To move one field, such as the model Claude fell back to, send the last published state with that field changed.
 - **Pickers come from `configOptions`.** The bridge takes the first option with `category: "model"` and the first with `"thought_level"`; any other option becomes a settings row. The adapter also publishes `models` for the daemon's own bridge, so keep both.
