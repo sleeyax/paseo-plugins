@@ -42,7 +42,6 @@ The plugin side of each is marked "Mirrors the adapter's own …"; they include:
 ## Session events the daemon is strict about
 
 - **Tool cards need the update twice.** The bridge draws a card from the ACP update alone as raw JSON; `server/tool-details.ts` fills it from the `_claude_tty/tool_call` copy, which the adapter sends *before* the update. Sent after, or returned as a timeline item from the hook, it is overwritten by the bridge's own item.
-- **A cancelled tool call is `canceled`, never `failed` with a null error.** One `failed` item without an error makes the client refuse the agent's whole timeline ("Couldn't refresh agent history"). The bridge produces these on every cancelled turn, and `server/tool-call-outcomes.ts` repairs them; on the adapter side, every failed `tool_call_update` carries `rawOutput`.
 - **Offer `prompt.steer`, then decline every steer with a `failed` result** (`server/steering.ts`). Leaving the capability off makes the daemon throw and drop a mid-turn message; a declined steer makes it cancel the turn and send the message as the next one.
 - **Withdraw a card by answering it** with a plain deny through a `session.permission` input (`server/session-notices.ts`). Emitting only `session.permission_resolved` leaves it in the bridge, and the daemon resurrects it the next time any card is answered. Answer only cards still pending: an unknown one becomes `session.runtime_failed`, which the daemon reads as the session falling over.
 - **The bridge's `config` update replaces the whole `ProviderConfigState`.** To move one field, such as the model Claude fell back to, send the last published state with that field changed.
@@ -59,7 +58,7 @@ The plugin side of each is marked "Mirrors the adapter's own …"; they include:
 
 - Add `session.subsession` to the connection's capabilities *and* to every root `session.opened`. A child whose parent lacks it, or whose parent the daemon has already closed, takes the whole connection down with every agent on it.
 - Close a parent's children before passing on its `session.close`.
-- A child's lifecycle is its launching tool call's. A launch that ends `canceled` decides nothing: Paseo cancels the turn on every mid-turn message while the subagent keeps running.
+- A child's lifecycle is its launching tool call's. A launch the bridge ends with its turn decides nothing: `canceled` comes on every mid-turn message, and `failed` with the bridge's `Turn failed` on a prompt that never reached Claude, while the subagent keeps running.
 
 ## Sessions panel
 

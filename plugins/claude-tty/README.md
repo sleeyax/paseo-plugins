@@ -7,7 +7,7 @@ A sidebar panel diagnoses the adapter and manages its saved sessions on the sele
 
 Requires:
 
-- Paseo 0.11 or newer
+- Paseo 0.12 or newer
 - `pnpm` on the daemon's `PATH`
 - Claude Code, installed and logged in as the user the daemon runs as
 

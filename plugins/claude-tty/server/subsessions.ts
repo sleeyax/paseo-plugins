@@ -174,11 +174,10 @@ export function withSubagentSessions(
  * process it ran in stops, so a session whose process died says so here rather than going on
  * looking busy — which is what the transcript on its own could never tell anybody.
  *
- * A launch cancelled with its turn decides nothing. Paseo cancels a turn before it replaces one, so
- * every message sent while an agent runs terminalizes the launch — the bridge marks it failed with
- * no error, which the outcome wrapper outside this one repairs to `canceled` — while the agent runs
- * on in its own loop and the adapter reopens the card as soon as it writes. Only the adapter ends a
- * launch for real: the agent's report, or a failure carrying the error the adapter wrote for it.
+ * A launch the bridge closed with its turn decides nothing, since the agent runs on in its own loop and the adapter reopens the card as soon as it writes.
+ * Paseo cancels a turn before it replaces one, so every message sent while an agent runs ends the launch as `canceled`.
+ * A turn fails when its prompt never reached Claude, which leaves the agent running too.
+ * Only the adapter ends a launch for real: the agent's report, or a failure carrying the error the adapter wrote for it.
  */
 function trackLaunch(parent: Parent | undefined, item: ProviderTimelineItem): void {
   if (parent === undefined || item.type !== "tool_call") return;
@@ -187,8 +186,17 @@ function trackLaunch(parent: Parent | undefined, item: ProviderTimelineItem): vo
     return;
   }
   parent.running.delete(item.callId);
-  if (item.status === "canceled" || (item.status === "failed" && item.error === null)) return;
+  if (item.status === "canceled" || failedWithItsTurn(item)) return;
   parent.ended.set(item.callId, item.status === "completed" ? "completed" : "failed");
+}
+
+/** The error the bridge gives every tool call still running when its turn fails. */
+export const TURN_FAILED = "Turn failed";
+
+function failedWithItsTurn(item: Extract<ProviderTimelineItem, { type: "tool_call" }>): boolean {
+  if (item.status !== "failed") return false;
+  const error = item.error;
+  return error !== null && typeof error === "object" && !Array.isArray(error) && error.message === TURN_FAILED;
 }
 
 async function poll(
