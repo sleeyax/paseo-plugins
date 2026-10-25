@@ -20,6 +20,12 @@ import { toolCallDetails } from "./tool-details.ts";
  */
 const INITIAL_COMMANDS_TIMEOUT_MS = 10_000;
 
+/**
+ * The SDK's default of 10 seconds is shorter than the adapter's cold start while the daemon brings up every plugin and agent at once.
+ * It stays under the 30 seconds the daemon gives a whole provider connect, which also covers resolving the adapter first.
+ */
+const STARTUP_TIMEOUT_MS = 25_000;
+
 /** Read from the plugin directory and sanitised by the daemon when the plugin starts. */
 const PROVIDER_ICON = "icon.svg";
 
@@ -74,7 +80,11 @@ export function claudeTtyProvider(settings: Settings, snapshot: SettingsMirror):
         id: PROVIDER_ID,
         label: PROVIDER_LABEL,
         command: adapterCommand(adapter.executable),
-        acpOptions: { waitForInitialCommands: true, initialCommandsTimeoutMs: INITIAL_COMMANDS_TIMEOUT_MS },
+        acpOptions: {
+          startupTimeoutMs: STARTUP_TIMEOUT_MS,
+          waitForInitialCommands: true,
+          initialCommandsTimeoutMs: INITIAL_COMMANDS_TIMEOUT_MS,
+        },
         transformers: [details.transformer, notices.transformer],
       }).connect(request);
       // The notices go innermost: what that wrapper injects -- a card the adapter has taken back --
