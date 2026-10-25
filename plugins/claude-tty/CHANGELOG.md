@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-v0.5.0...claude-tty-v0.6.0) (2026-10-25)
+
+
+### Features
+
+* **claude-tty:** show a question option's preview as a preview ([#162](https://github.com/sleeyax/paseo-plugins/issues/162)) ([0ce8a97](https://github.com/sleeyax/paseo-plugins/commit/0ce8a97321b8e8146a42d200be12f97557f3e03b))
+
+
+### Bug Fixes
+
+* **claude-tty:** give the adapter 25 seconds to initialize on a cold start ([#167](https://github.com/sleeyax/paseo-plugins/issues/167)) ([1bb53ba](https://github.com/sleeyax/paseo-plugins/commit/1bb53ba178e3c264b21c569fe23116ab8bc60fae))
+
 ## [0.5.0](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-v0.4.0...claude-tty-v0.5.0) (2026-10-21)
 
 
