@@ -231,7 +231,7 @@ test("a guide agent that is gone, a guide still being written, a file the change
   assert.deepEqual(await question(service, node, "Why?"), {
     status: "not-sent",
     agentId: null,
-    message: "The guide agent is gone: it was archived or closed, so there is no chat to ask in.",
+    message: "The guide agent is gone: it was archived or removed, so there is no chat to ask in.",
   });
 
   let release!: (reply: string) => void;

@@ -23,6 +23,8 @@ function stubPaseo() {
     responses: [] as { requestId: string; response: PaseoAgentPermissionResponse }[],
     sent: [] as string[],
     agentStatus: "idle",
+    archivedAt: null as string | null,
+    exists: true,
     labels: { [GUIDE_AGENT_LABEL]: "github/github.com/acme/uploader/7" } as Record<string, string>,
   };
   const handle = {
@@ -40,7 +42,8 @@ function stubPaseo() {
       state.responses.push(options);
     },
     async refresh() {
-      return { agent: { status: state.agentStatus, labels: state.labels, archivedAt: null, pendingPermissions: [] }, project: null };
+      if (!state.exists) return null;
+      return { agent: { status: state.agentStatus, labels: state.labels, archivedAt: state.archivedAt, pendingPermissions: [] }, project: null };
     },
     async send(text: string) {
       state.sent.push(text);
@@ -269,6 +272,24 @@ test("a busy agent is not sent to, since sending would interrupt its turn", asyn
   state.agentStatus = "idle";
   await agents.send("agent-1", "Why?");
   assert.deepEqual(state.sent, ["Why?"]);
+});
+
+test("a closed agent is sent to, since Paseo resumes it on the next prompt; an archived or missing one is gone", async () => {
+  const { paseo, state } = stubPaseo();
+  const agents = createPaseoGuideAgents({ paseo: () => paseo, agent: async () => ({ agent: "claude", effort: "", mode: "" }) });
+  state.agentStatus = "closed";
+
+  assert.equal(await agents.status("agent-1"), "idle");
+  await agents.send("agent-1", "Why?");
+  assert.deepEqual(state.sent, ["Why?"]);
+
+  state.archivedAt = "2026-11-01T00:00:00.000Z";
+  assert.equal(await agents.status("agent-1"), "gone");
+  await assert.rejects(agents.send("agent-1", "Why?"), new GuideAgentError("The guide agent is gone; it was archived or removed."));
+
+  state.archivedAt = null;
+  state.exists = false;
+  assert.equal(await agents.status("agent-1"), "gone");
 });
 
 test("the permission hook denies a guide agent's writes and leaves other agents alone", async () => {

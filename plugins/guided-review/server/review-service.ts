@@ -754,7 +754,7 @@ export class ReviewService {
       case "busy":
         return { gone: false, message: `${BUSY} ${again}` };
       case "gone":
-        return { gone: true, message: `The guide agent is gone: it was archived or closed, so there is ${without}.` };
+        return { gone: true, message: `The guide agent is gone: it was archived or removed, so there is ${without}.` };
       case "idle":
         return null;
     }

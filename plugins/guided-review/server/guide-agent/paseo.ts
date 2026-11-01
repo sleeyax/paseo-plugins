@@ -183,13 +183,14 @@ export function createPaseoGuideAgents(options: PaseoGuideAgentsOptions): PaseoG
 
   const status = async (agentId: string) => {
     const current = await agent(agentId).refresh();
-    if (current === null || current.agent.archivedAt || current.agent.status === "closed") return "gone" as const;
-    return current.agent.status === "idle" ? ("idle" as const) : ("busy" as const);
+    if (current === null || current.agent.archivedAt) return "gone" as const;
+    // Paseo closes an idle agent's runtime and resumes it on the next prompt.
+    return current.agent.status === "idle" || current.agent.status === "closed" ? ("idle" as const) : ("busy" as const);
   };
 
   const requireIdle = async (agentId: string) => {
     const now = await status(agentId);
-    if (now === "gone") throw new GuideAgentError("The guide agent is gone; it was archived or closed.");
+    if (now === "gone") throw new GuideAgentError("The guide agent is gone; it was archived or removed.");
     if (now === "busy") throw new GuideAgentError("The guide agent is still busy. Wait for it to finish, then try again.");
   };
 

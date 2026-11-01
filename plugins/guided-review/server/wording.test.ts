@@ -251,7 +251,7 @@ test("a gone agent, a guide being written, a place no comment can go and an unkn
   await agents.archive("agent-2");
   assert.deepEqual(await service.suggestWording({ reviewId: REVIEW_ID, headSha: HEAD, subject, prompt: "x" }), {
     status: "failed",
-    message: "The guide agent is gone: it was archived or closed, so there is no one to suggest wording.",
+    message: "The guide agent is gone: it was archived or removed, so there is no one to suggest wording.",
   });
   assert.deepEqual(
     agents.created.map((agent) => agent.sent),
