@@ -152,6 +152,8 @@ type SubagentCard = {
 /** A command Claude started in the background. */
 type BackgroundShell = {
   outstanding: boolean;
+  /** Launched while this process ran and not yet reported or stopped, whether or not a turn still waits on it. */
+  running: boolean;
   /** The launch's own tool call, kept open while the command runs; null where this session shows no card for it. */
   card: BackgroundShellCard | null;
 };
@@ -252,6 +254,16 @@ export class TranscriptTranslator {
     return this.lastBackgroundShellActivity;
   }
 
+  /**
+   * Background work launched while this process ran that has not reported, counting what a turn gave up waiting on.
+   * Waiting quietly is normal for this work, so only a report or the process ending says it is over.
+   */
+  get unreportedBackgroundWork(): number {
+    const agents = new Set([...this.subagents.values()].filter((card) => card.status === "in_progress" && (card.outstanding || card.abandoned)));
+    const shells = [...this.backgroundShells.values()].filter((shell) => shell.running);
+    return agents.size + shells.length;
+  }
+
   /** The agents still being waited on, for the log of a turn that stopped waiting for them. */
   get outstandingSubagents(): string[] {
     return [...new Set([...this.subagents.values()].filter((card) => card.outstanding).map((card) => card.agentId))];
@@ -265,6 +277,7 @@ export class TranscriptTranslator {
   /**
    * Stops counting the agents and background commands a turn has given up waiting on.
    * Their cards keep saying they are working, which is still true — nothing has reported — and they are closed when the process is.
+   * They stay in `unreportedBackgroundWork` for the same reason.
    * Without this every later turn holds for a poll interval and gives up again in the same breath.
    */
   abandonBackgroundWork(): void {
@@ -273,7 +286,7 @@ export class TranscriptTranslator {
       card.outstanding = false;
       card.abandoned = true;
     }
-    this.letGoOfBackgroundShells();
+    for (const shell of this.backgroundShells.values()) shell.outstanding = false;
   }
 
   /** An agent that has reported writes nothing more, so its transcript stops being worth reading. */
@@ -577,7 +590,7 @@ export class TranscriptTranslator {
     // transcript, not this session's, and its notification names it by task id rather than by call.
     const card: BackgroundShellCard | null =
       toolCallId !== null && this.trackingBackgroundWork ? { taskId, toolCallId, outputFile, status: "in_progress", output: "" } : null;
-    this.backgroundShells.set(taskId, { outstanding: this.trackingBackgroundWork, card });
+    this.backgroundShells.set(taskId, { outstanding: this.trackingBackgroundWork, running: this.trackingBackgroundWork, card });
     if (toolCallId !== null) this.backgroundShellsByToolCall.set(toolCallId, taskId);
     this.lastBackgroundShellActivity = Date.now();
     return card;
@@ -592,6 +605,7 @@ export class TranscriptTranslator {
     if (shell === undefined) return false;
     if (shell.outstanding) this.lastBackgroundShellActivity = Date.now();
     shell.outstanding = false;
+    shell.running = false;
     const summary = notification.summary ?? `Background command ${notification.status ?? "finished"}`;
     await this.closeBackgroundShellCard(shell, notificationFailed(notification.status) ? "failed" : "completed", summary);
     return true;
@@ -687,6 +701,7 @@ export class TranscriptTranslator {
     if (shell === undefined) return;
     if (shell.outstanding) this.lastBackgroundShellActivity = Date.now();
     shell.outstanding = false;
+    shell.running = false;
     await this.closeBackgroundShellCard(shell, "failed", STOPPED_COMMAND);
   }
 
@@ -741,10 +756,6 @@ export class TranscriptTranslator {
     else await this.send(update);
   }
 
-  private letGoOfBackgroundShells(): void {
-    for (const shell of this.backgroundShells.values()) shell.outstanding = false;
-  }
-
   /**
    * Puts an agent that has already reported back to work.
    *
@@ -797,8 +808,11 @@ export class TranscriptTranslator {
    */
   async settleOpenToolCalls(): Promise<void> {
     // A background command is a child of the process that has stopped, so its report is not coming either.
-    this.letGoOfBackgroundShells();
-    for (const shell of this.backgroundShells.values()) await this.closeBackgroundShellCard(shell, "failed", UNREPORTED_COMMAND);
+    for (const shell of this.backgroundShells.values()) {
+      shell.outstanding = false;
+      shell.running = false;
+      await this.closeBackgroundShellCard(shell, "failed", UNREPORTED_COMMAND);
+    }
     for (const card of new Set(this.subagents.values())) {
       if (card.status !== "in_progress") continue;
       card.status = "failed";

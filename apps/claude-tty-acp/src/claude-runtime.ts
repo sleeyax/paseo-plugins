@@ -369,6 +369,11 @@ export class ClaudeRuntime {
     return this.turn !== null;
   }
 
+  /** An agent or background command Claude started has not reported, whether or not a turn is still waiting on it. */
+  get backgroundWorkRunning(): boolean {
+    return this.translator.unreportedBackgroundWork > 0;
+  }
+
   /** A permission or question card is on screen in Paseo and nobody has answered it yet. */
   get interactionPending(): boolean {
     return this.interactions.pending;

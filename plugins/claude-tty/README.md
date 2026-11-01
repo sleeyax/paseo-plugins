@@ -70,7 +70,7 @@ Each host has its own settings.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Adapter executable | empty | Path to a built adapter to run instead of the one in the plugin's checkout. Sessions already open keep the adapter they started on. |
-| Suspend idle Claude | 1 hour | How long Claude keeps running after a session goes quiet: 15 minutes to 8 hours, or Never. The next prompt resumes the same conversation. |
+| Suspend idle Claude | 1 hour | How long Claude keeps running after a session goes quiet: 15 minutes to 8 hours, or Never. A background command or agent that has not finished keeps it running. The next prompt resumes the same conversation. |
 | Auto-accept in new sessions | off | Where each agent's **Auto Accept** toggle starts. |
 | In Bypass Permissions sessions | Same as other sessions | Overrides the switch above for sessions in Bypass Permissions mode. |
 

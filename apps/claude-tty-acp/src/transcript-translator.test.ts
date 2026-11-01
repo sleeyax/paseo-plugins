@@ -647,6 +647,72 @@ test("stops counting a background command a turn gave up on, and one whose sessi
   assert.equal(translator.runningBackgroundShells, 0);
 });
 
+test("goes on counting background work a turn gave up on as unreported, until it reports or the session stops", async () => {
+  const connection = { sessionUpdate: async () => undefined, extNotification: async () => undefined } as unknown as AgentSideConnection;
+  const translator = new TranscriptTranslator("session", "/work/repo", connection);
+  const shellLaunch = (toolCallId: string, taskId: string) => [
+    {
+      type: "assistant",
+      uuid: `launcher-${taskId}`,
+      message: { content: [{ type: "tool_use", id: toolCallId, name: "Bash", input: { command: "npm run compare", run_in_background: true } }] },
+    },
+    {
+      type: "user",
+      uuid: `launched-${taskId}`,
+      toolUseResult: { stdout: "", stderr: "", backgroundTaskId: taskId },
+      message: { content: [{ type: "tool_result", tool_use_id: toolCallId, content: [] }] },
+    },
+  ];
+  const agentLaunch = [
+    {
+      type: "assistant",
+      uuid: "agent-launcher",
+      message: { content: [{ type: "tool_use", id: "agent-tool", name: "Agent", input: { description: "Wait on the comparison" } }] },
+    },
+    {
+      type: "user",
+      uuid: "agent-launched",
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "a1" },
+      message: { content: [{ type: "tool_result", tool_use_id: "agent-tool", content: [] }] },
+    },
+  ];
+  const report = (taskId: string, toolCallId: string, uuid: string) => [
+    {
+      type: "user",
+      uuid,
+      message: {
+        content: `<task-notification> <task-id>${taskId}</task-id> <tool-use-id>${toolCallId}</tool-use-id> <status>completed</status> <summary>done</summary> </task-notification>`,
+      },
+    },
+  ];
+
+  // History replayed before any prompt launched nothing this process is running.
+  await translator.translate(shellLaunch("old-tool", "b0"));
+  assert.equal(translator.unreportedBackgroundWork, 0);
+
+  translator.trackBackgroundWork();
+  await translator.translate([...shellLaunch("compare-tool", "b1"), ...agentLaunch]);
+  assert.equal(translator.unreportedBackgroundWork, 2);
+
+  // The turn stops waiting on both, and neither has stopped running.
+  translator.abandonBackgroundWork();
+  assert.equal(translator.runningBackgroundShells, 0);
+  assert.equal(translator.runningSubagents, 0);
+  assert.equal(translator.unreportedBackgroundWork, 2);
+
+  await translator.translate(report("b1", "compare-tool", "b1-report"));
+  assert.equal(translator.unreportedBackgroundWork, 1);
+  await translator.translate(report("a1", "agent-tool", "a1-report"));
+  assert.equal(translator.unreportedBackgroundWork, 0);
+
+  // A command is a child of the Claude process, so it ends with that process whether or not anyone still waited on it.
+  await translator.translate(shellLaunch("next-tool", "b2"));
+  translator.abandonBackgroundWork();
+  assert.equal(translator.unreportedBackgroundWork, 1);
+  await translator.settleOpenToolCalls();
+  assert.equal(translator.unreportedBackgroundWork, 0);
+});
+
 test("lets go of a background command whose report was queued because Claude was busy when it ended", async () => {
   const notifications: SessionNotification[] = [];
   const connection = {
