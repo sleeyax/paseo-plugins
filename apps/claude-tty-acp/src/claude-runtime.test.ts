@@ -817,7 +817,7 @@ const IDLE_SUSPENSION_WAIT_MS = IDLE_TIMEOUT_MS + 3_000;
  * A session for the idle tests: a fake PTY that exits on Ctrl-D, a config directory the transcript
  * watcher reads, and an idle timeout short enough to watch run out.
  */
-async function createIdleHarness(name: string) {
+async function createIdleHarness(name: string, timings: { subagentPollMs?: number; subagentWakeMs?: number; backgroundShellMs?: number } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), `claude-runtime-${name}-`));
   const configDirectory = path.join(root, "claude");
   const cwd = `/work/${name}`;
@@ -850,6 +850,7 @@ async function createIdleHarness(name: string) {
     contextRefreshTimeoutMs: 0,
     transcriptPollIntervalMs: 10,
     idleTimeoutMs: IDLE_TIMEOUT_MS,
+    ...timings,
   });
   const session = await agent.newSession({ cwd, mcpServers: [] });
   const turn = agent.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "start" }] });
@@ -864,6 +865,7 @@ async function createIdleHarness(name: string) {
     transcript,
     started,
     vendor,
+    writes: () => spawns[0]!.pty.writes.length,
     close: async () => {
       await agent.close();
       await rm(root, { force: true, recursive: true });
@@ -924,6 +926,49 @@ test("does not suspend a session Claude is still working in after its prompt end
       await new Promise((resolve) => setTimeout(resolve, IDLE_STEP_MS));
       assert.equal(harness.started(), true, `suspended while Claude was working, at step ${index}`);
     }
+    await waitFor(() => !harness.started(), IDLE_SUSPENSION_WAIT_MS);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("does not suspend a session whose background command is still running after its turn gave up on it", async () => {
+  const harness = await createIdleHarness("idle-abandoned-shell", { subagentPollMs: 10, subagentWakeMs: 10, backgroundShellMs: 10 });
+  try {
+    const turn = harness.agent.prompt({ sessionId: harness.sessionId, prompt: [{ type: "text", text: "run the comparison" }] });
+    await waitFor(() => harness.writes() === 4);
+    const records = [
+      JSON.stringify({
+        type: "assistant",
+        uuid: "launcher",
+        message: { content: [{ type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "npm run compare", run_in_background: true } }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "launched",
+        toolUseResult: { stdout: "", stderr: "", backgroundTaskId: "b1" },
+        message: { content: [{ type: "tool_result", tool_use_id: "bash-tool", content: [] }] },
+      }),
+    ];
+    await writeFile(harness.transcript, `${records.join("\n")}\n`);
+    await harness.agent.hooks.dispatch({ hook_event_name: "Stop", session_id: harness.sessionId, last_assistant_message: "Comparing." });
+    // The command prints nothing for longer than the turn waits on it.
+    assert.deepEqual(await turn, { stopReason: "end_turn" });
+
+    await new Promise((resolve) => setTimeout(resolve, 2 * IDLE_TIMEOUT_MS));
+    assert.equal(harness.started(), true, "suspended while a background command was still running");
+
+    records.push(
+      JSON.stringify({
+        type: "user",
+        uuid: "reported",
+        message: {
+          content:
+            '<task-notification> <task-id>b1</task-id> <tool-use-id>bash-tool</tool-use-id> <status>completed</status> <summary>Background command "npm run compare" completed (exit code 0)</summary> </task-notification>',
+        },
+      }),
+    );
+    await writeFile(harness.transcript, `${records.join("\n")}\n`);
     await waitFor(() => !harness.started(), IDLE_SUSPENSION_WAIT_MS);
   } finally {
     await harness.close();
@@ -3766,7 +3811,7 @@ test("stops counting the agents a turn gave up on, so a later turn does not wait
   }
 });
 
-test("closes a background agent's card when the session it ran in is suspended", async () => {
+test("closes a background agent's card when the Claude process it ran in exits", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-runtime-subagent-suspend-test-"));
   const configDirectory = path.join(root, "claude");
   const runtimeRoot = path.join(root, "runtime");
@@ -3801,7 +3846,6 @@ test("closes a background agent's card when the session it ran in is suspended",
     subagentPollMs: 10,
     subagentSilenceMs: 30,
     subagentWakeMs: 30,
-    idleTimeoutMs: 20,
   });
 
   try {
@@ -3824,10 +3868,11 @@ test("closes a background agent's card when the session it ran in is suspended",
         }),
       ].join("\n")}\n`,
     );
-    // The agent goes quiet without ever reporting, so the turn gives up on it and the session goes idle.
+    // The agent goes quiet without ever reporting, so the turn gives up on it.
     await agent.hooks.dispatch({ hook_event_name: "Stop", session_id: session.sessionId, last_assistant_message: "LAUNCHED" });
     assert.deepEqual(await turn, { stopReason: "end_turn" });
-    // The suspension stops Claude, and with it any agent it was still running.
+    // Claude exiting takes every agent it was still running with it.
+    spawned!.emitExit();
     await waitFor(() => updates.some((sent) => sent.update.sessionUpdate === "tool_call_update" && sent.update.status === "failed"));
 
     const closed = updates.map((update) => update.update).filter((update) => update.sessionUpdate === "tool_call_update").at(-1);

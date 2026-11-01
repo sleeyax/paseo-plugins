@@ -110,7 +110,7 @@ function IdleSuspension({ theme, settings }: { theme: PluginSurfaceProps["theme"
         />
       </SettingsCard>
       <Note color={theme.colors.foregroundMuted}>
-        Suspension stops the PTY and its background tasks but keeps the logical session. Your next
+        Suspension waits for Claude's background commands and agents to finish, then stops the PTY but keeps the logical session. Your next
         prompt resumes the same Claude conversation automatically. The adapter reads this at every
         suspension, so the change applies to open sessions too.
       </Note>

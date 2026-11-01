@@ -330,10 +330,17 @@ export class ClaudeSession {
     // Read again rather than trusted from when the timer was armed, so a change made in Paseo reaches a session that has been idle since before it.
     const idleTimeoutMs = await this.idleTimeout();
     if (idleTimeoutMs === 0) return;
+    // Bounded by the timeout so a short one still suspends a timeout after the session falls quiet.
+    const retryMs = Math.min(SUSPENSION_RETRY_MS, idleTimeoutMs);
     // Somebody is looking at a permission or question card. Stopping Claude now cancels the request behind it and
     // leaves that card on screen in Paseo, answering to nothing.
     if (this.runtime.turnActive || this.runtime.interactionPending) {
-      this.armSuspension(activityVersion, SUSPENSION_RETRY_MS);
+      this.armSuspension(activityVersion, retryMs);
+      return;
+    }
+    // Stopping Claude takes its agents and background commands with it, and one waiting on a long run writes nothing for hours.
+    if (this.runtime.backgroundWorkRunning) {
+      this.armSuspension(activityVersion, retryMs);
       return;
     }
     // Idleness is observed, not inferred from the last prompt. Claude keeps working after a turn ends —
