@@ -1,5 +1,5 @@
 import { useRpc } from "@getpaseo/plugin/client";
-import { Modal, TextInput } from "@getpaseo/plugin/client/react-native";
+import { Modal, TextInput } from "@getpaseo/plugin/client/ui";
 import { ExternalLink, SettingsAction, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import React, { useContext, useState } from "react";

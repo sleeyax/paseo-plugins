@@ -7,7 +7,7 @@ Each review gets its own Paseo workspace, checked out at the change, with a **Gu
 
 Requires:
 
-- Paseo 0.11 or newer
+- Paseo 0.13 or newer
 - `pnpm` on the daemon's `PATH`
 - Either or both:
   - [`gh`](https://cli.github.com/), logged in with `gh auth login`, to review pull requests on github.com; GitHub Enterprise is not supported

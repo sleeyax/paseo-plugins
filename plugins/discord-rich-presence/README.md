@@ -16,7 +16,7 @@ Show your current Paseo activity on your Discord profile.
 
 Requires:
 
-- Paseo 0.11 or newer
+- Paseo 0.13 or newer
 - The Discord desktop app, running on the same machine as the Paseo daemon
 
 ```sh

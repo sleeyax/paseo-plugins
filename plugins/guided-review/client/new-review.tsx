@@ -1,4 +1,4 @@
-import { Modal } from "@getpaseo/plugin/client/react-native";
+import { Modal } from "@getpaseo/plugin/client/ui";
 import React, { useState } from "react";
 import { Text, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from "react-native";
 import { Button } from "./button.tsx";

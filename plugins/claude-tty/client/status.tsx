@@ -1,4 +1,4 @@
-import { Icon, copyText, useToast } from "@getpaseo/plugin/client/react-native";
+import { Icon, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { SettingsRow } from "@getpaseo/plugin/client/ui";
 import React from "react";
 import { Pressable, Text, View } from "react-native";

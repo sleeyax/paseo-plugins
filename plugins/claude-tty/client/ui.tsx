@@ -1,5 +1,5 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import { Icon } from "@getpaseo/plugin/client/react-native";
+import { Icon } from "@getpaseo/plugin/client/ui";
 import { SettingsCard } from "@getpaseo/plugin/client/ui";
 import type { StyleProp, ViewStyle } from "react-native";
 import React, { useMemo, useState } from "react";
