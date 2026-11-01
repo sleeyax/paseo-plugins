@@ -16,7 +16,7 @@ import { markRuntimeDirectory, runtimePrefix } from "./runtime-directories.ts";
 import { INHERIT_EFFORT_ID, INHERIT_MODEL_ID } from "./session-options.ts";
 import { claudeIsWaitingFor } from "./session-status.ts";
 import { TERMINAL_COLS, TERMINAL_ROWS, TerminalScreen } from "./terminal-screen.ts";
-import { sendCardWithdrawn, sendModelChanged, sendNotice } from "./vendor-updates.ts";
+import { sendCardWithdrawn, sendClaudeRunning, sendModelChanged, sendNotice } from "./vendor-updates.ts";
 import { SubagentWatcher } from "./subagent-watcher.ts";
 import { TranscriptReader } from "./transcript-reader.ts";
 import { type ModelFallback, TranscriptTranslator } from "./transcript-translator.ts";
@@ -255,7 +255,7 @@ export class ClaudeRuntime {
   private readonly translator: TranscriptTranslator;
   private transcript: TranscriptWatcher;
   private readonly screen = new TerminalScreen();
-  private pty: PtyProcess | null = null;
+  #pty: PtyProcess | null = null;
   private runtimeDirectory: string | null = null;
   private hookRegistration: HookRegistration | null = null;
   private ready: Deferred<void> | null = null;
@@ -352,6 +352,17 @@ export class ClaudeRuntime {
 
   get started(): boolean {
     return this.pty !== null;
+  }
+
+  private get pty(): PtyProcess | null {
+    return this.#pty;
+  }
+
+  /** Every start and stop of Claude goes through here, so the plugin hears of each one. */
+  private set pty(pty: PtyProcess | null) {
+    const wasRunning = this.#pty !== null;
+    this.#pty = pty;
+    if (wasRunning !== (pty !== null)) void sendClaudeRunning(this.connection, this.sessionId, pty !== null);
   }
 
   get turnActive(): boolean {

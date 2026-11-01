@@ -149,12 +149,16 @@ type SpawnRecord = {
   pty: FakePty;
 };
 
-function createConnection(updates: SessionNotification[]): AgentSideConnection {
+type VendorNotification = { method: string; params: Record<string, unknown> };
+
+function createConnection(updates: SessionNotification[], vendor: VendorNotification[] = []): AgentSideConnection {
   return {
     sessionUpdate: async (update: SessionNotification) => {
       updates.push(update);
     },
-    extNotification: async () => undefined,
+    extNotification: async (method: string, params: Record<string, unknown>) => {
+      vendor.push({ method, params });
+    },
   } as unknown as AgentSideConnection;
 }
 
@@ -833,7 +837,8 @@ async function createIdleHarness(name: string) {
     setImmediate(() => void agent.hooks.dispatch({ hook_event_name: "SessionStart", session_id: sessionId }));
     return pty;
   };
-  agent = new ClaudeTtyAgent(createConnection([]), {
+  const vendor: VendorNotification[] = [];
+  agent = new ClaudeTtyAgent(createConnection([], vendor), {
     ...TEST_TIMINGS,
     spawnPty,
     runtimeRoot: path.join(root, "runtime"),
@@ -858,12 +863,29 @@ async function createIdleHarness(name: string) {
     sessionId: session.sessionId,
     transcript,
     started,
+    vendor,
     close: async () => {
       await agent.close();
       await rm(root, { force: true, recursive: true });
     },
   };
 }
+
+test("tells the plugin that Claude started and that the idle timeout stopped it", async () => {
+  const harness = await createIdleHarness("idle-running");
+  const running = () =>
+    harness.vendor.filter((notification) => notification.method === "_claude_tty/claude_running").map((notification) => notification.params);
+  try {
+    assert.deepEqual(running(), [{ sessionId: harness.sessionId, running: true }]);
+    await waitFor(() => !harness.started(), IDLE_SUSPENSION_WAIT_MS);
+    assert.deepEqual(running(), [
+      { sessionId: harness.sessionId, running: true },
+      { sessionId: harness.sessionId, running: false },
+    ]);
+  } finally {
+    await harness.close();
+  }
+});
 
 test("does not suspend a session whose background agent is still writing", async () => {
   const harness = await createIdleHarness("idle-subagent");

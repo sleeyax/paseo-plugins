@@ -25,7 +25,7 @@ A running adapter keeps the code it started with, so a rebuilt `apps/claude-tty-
 The plugin and `apps/claude-tty-acp` share names and shapes with no type linking them, so change both sides in one commit.
 The plugin side of each is marked "Mirrors the adapter's own …"; they include:
 
-- the `_claude_tty/tool_call`, `_claude_tty/notice`, `_claude_tty/card_withdrawn` and `_claude_tty/model` vendor methods
+- the `_claude_tty/tool_call`, `_claude_tty/notice`, `_claude_tty/card_withdrawn`, `_claude_tty/model` and `_claude_tty/claude_running` vendor methods
 - the `_meta["claudeTty/backgroundCommand"]` mark and the `claudeDialog` input marker
 - the `--settings-file` and `--answers-dir` flags, and the snapshot shape `--settings-file` points at (`server/settings-snapshot.ts`)
 - the output of `--diagnose --json`, which `server/doctor.ts` parses

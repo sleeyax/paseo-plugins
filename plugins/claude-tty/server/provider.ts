@@ -3,6 +3,7 @@ import { runAcpProvider } from "@getpaseo/plugin/server/acp";
 import type { ProviderRegistration } from "@getpaseo/plugin/server/provider";
 import { PROVIDER_ID, PROVIDER_LABEL } from "../shared/provider.ts";
 import { resolveAdapter } from "./adapter.ts";
+import { idleCleanupVeto } from "./idle-cleanup.ts";
 import { adapterCommand, cardAnswersDirectory, defaultStateDirectory } from "./paths.ts";
 import type { Settings } from "./settings.ts";
 import type { SettingsMirror } from "./settings-snapshot.ts";
@@ -76,6 +77,7 @@ export function claudeTtyProvider(settings: Settings, snapshot: SettingsMirror):
       if (adapter.executable === null) throw new Error(adapter.problem!);
       const details = toolCallDetails();
       const notices = sessionNotices();
+      const idleCleanup = idleCleanupVeto();
       const connection = await runAcpProvider({
         id: PROVIDER_ID,
         label: PROVIDER_LABEL,
@@ -85,19 +87,23 @@ export function claudeTtyProvider(settings: Settings, snapshot: SettingsMirror):
           waitForInitialCommands: true,
           initialCommandsTimeoutMs: INITIAL_COMMANDS_TIMEOUT_MS,
         },
-        transformers: [details.transformer, notices.transformer],
+        transformers: [details.transformer, notices.transformer, idleCleanup.transformer],
       }).connect(request);
       // The notices go innermost: what that wrapper injects -- a card the adapter has taken back --
       // has to travel out through every wrapper above, the permission cards included, since each keeps
       // state about the events it sees. The cards go after, so the wrapper outside reads tool calls that
-      // already say what they were. The subsessions go outermost, so what the daemon is told this
+      // already say what they were. The subsessions go outside those, so what the daemon is told this
       // connection can do is what the wrapper that emits the child sessions has already agreed to.
-      return withSubagentSessions(
-        withPermissionCards(
-          details.wrap(notices.wrap(connection)),
-          cardAnswersDirectory(defaultStateDirectory()),
+      // The idle cleanup veto goes outermost, so it sees the child sessions it has to answer for.
+      return idleCleanup.wrap(
+        withSubagentSessions(
+          withPermissionCards(
+            details.wrap(notices.wrap(connection)),
+            cardAnswersDirectory(defaultStateDirectory()),
+          ),
+          subagentSource(details.backgroundCommand),
+          request.capabilities,
         ),
-        subagentSource(details.backgroundCommand),
         request.capabilities,
       );
     },
