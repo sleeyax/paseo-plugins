@@ -36,6 +36,13 @@ export const CARD_WITHDRAWN_METHOD = "_claude_tty/card_withdrawn";
  */
 export const MODEL_CHANGED_METHOD = "_claude_tty/model";
 
+/**
+ * Whether the session's Claude process is running.
+ * Paseo closes an idle session's runtime, and Claude with it, on checks that cannot see the background shells and subagents Claude keeps running after a turn.
+ * The plugin vetoes that until Claude has stopped, which leaves the adapter's own idle suspension deciding when it does.
+ */
+export const CLAUDE_RUNNING_METHOD = "_claude_tty/claude_running";
+
 export type VendorNotice = {
   id: string;
   severity: "info" | "warning" | "error";
@@ -49,6 +56,10 @@ export async function sendNotice(connection: AgentSideConnection, sessionId: str
 
 export async function sendModelChanged(connection: AgentSideConnection, sessionId: string, model: string): Promise<void> {
   await send(connection, sessionId, MODEL_CHANGED_METHOD, { sessionId, model });
+}
+
+export async function sendClaudeRunning(connection: AgentSideConnection, sessionId: string, running: boolean): Promise<void> {
+  await send(connection, sessionId, CLAUDE_RUNNING_METHOD, { sessionId, running });
 }
 
 export async function sendCardWithdrawn(connection: AgentSideConnection, sessionId: string, toolCallId: string): Promise<void> {

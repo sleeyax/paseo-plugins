@@ -1,5 +1,5 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import { Icon } from "@getpaseo/plugin/client/react-native";
+import { Icon } from "@getpaseo/plugin/client/ui";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Dimensions, Modal, Platform, Pressable, Text, View } from "react-native";

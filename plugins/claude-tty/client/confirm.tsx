@@ -1,4 +1,4 @@
-import { Icon, Modal } from "@getpaseo/plugin/client/react-native";
+import { Icon, Modal } from "@getpaseo/plugin/client/ui";
 import React, { useState } from "react";
 import { Text, View } from "react-native";
 import { fontSize, iconSize, leading, spacing, type Palette } from "./theme.ts";

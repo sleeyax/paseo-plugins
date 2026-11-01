@@ -446,8 +446,6 @@ export class SessionRegistry {
       autoAccept: state.autoAccept ?? null,
       persisted: true,
     });
-    // The history is not replayed here. It goes out after `session/load` has answered, because
-    // nothing sent before that answer has a session to land on -- see `ClaudeTtyAgent.restoreSession`.
     return session;
   }
 

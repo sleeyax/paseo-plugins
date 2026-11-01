@@ -16,7 +16,6 @@ export default function contribute(client: PluginClientContext) {
     id: PANEL_ID,
     title: PLUGIN_LABEL,
     icon: PLUGIN_ICON,
-    context: "workspace",
     Component: (props) => <GuidePanel {...props} openPanel={(workspaceId) => void openPanelWhenReady(() => openPanel(workspaceId))} />,
   });
 
