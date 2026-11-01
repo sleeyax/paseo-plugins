@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -8,21 +8,17 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { runAcpProvider } from "@getpaseo/plugin/server/acp";
 import type { ProviderEvent } from "@getpaseo/plugin/server/provider";
-import { adapterBinaryPath, adapterCommand, adapterDirectory, repoRootFromPluginPath } from "./paths.ts";
+import { adapterBinaryPath, adapterCommand, adapterDirectory, projectDirectory, repoRootFromPluginPath, sessionsDirectory, transcriptPath } from "./paths.ts";
 
 const EVENT_TIMEOUT_MS = 60_000;
 
 /**
  * The bridge the plugin provider runs on builds its model and thinking pickers from ACP config options and
  * from nothing else, so the only thing that proves the adapter publishes usable ones is the bridge itself.
- * It spawns the *built* adapter, which is why this builds it first; opening a session is cheap because the
- * adapter creates one lazily and starts no Claude process until something prompts it.
+ * Opening a session is cheap because the adapter creates one lazily and starts no Claude process until something prompts it.
  */
 test("hands the plugin ACP bridge a model catalogue, thought levels, and a session opened on a chosen model", { timeout: 180_000 }, async (t) => {
-  const root = repoRootFromPluginPath(path.join(import.meta.dirname, ".."));
-  await promisify(execFile)(path.join(adapterDirectory(root), "node_modules", ".bin", "tsc"), ["-p", "tsconfig.build.json"], {
-    cwd: adapterDirectory(root),
-  });
+  const root = await builtAdapter();
 
   const home = await mkdtemp(path.join(os.tmpdir(), "claude-tty-acp-bridge-"));
   const cwd = path.join(home, "workspace");
@@ -90,6 +86,82 @@ test("hands the plugin ACP bridge a model catalogue, thought levels, and a sessi
   await connection.send({ type: "session.close", requestId: "close", sessionId: "session-under-test" });
   await settled(events, "request.completed");
 });
+
+test("resumes a persisted session with its earlier prompts as well as Claude's replies", { timeout: 180_000 }, async (t) => {
+  const root = await builtAdapter();
+  const home = await mkdtemp(path.join(os.tmpdir(), "claude-tty-acp-resume-"));
+  const cwd = path.join(home, "workspace");
+  await mkdir(cwd, { recursive: true });
+  const env = {
+    ...process.env,
+    PASEO_HOME: path.join(home, "paseo"),
+    CLAUDE_TTY_ACP_STATE_DIR: path.join(home, "state"),
+    CLAUDE_CONFIG_DIR: path.join(home, "claude"),
+  };
+  Object.assign(process.env, env);
+
+  const acpSessionId = "11111111-1111-4111-8111-111111111111";
+  const claudeSessionId = "22222222-2222-4222-8222-222222222222";
+  await mkdir(sessionsDirectory(env.CLAUDE_TTY_ACP_STATE_DIR), { recursive: true });
+  await writeFile(
+    path.join(sessionsDirectory(env.CLAUDE_TTY_ACP_STATE_DIR), `${acpSessionId}.json`),
+    JSON.stringify({ version: 1, acpSessionId, claudeSessionId, cwd, model: "inherit", mode: "default", lastActivity: 1 }),
+  );
+  await mkdir(projectDirectory(cwd, env), { recursive: true });
+  await writeFile(
+    transcriptPath(cwd, claudeSessionId, env),
+    [
+      JSON.stringify({ type: "user", uuid: "history-user", message: { content: "what did we decide" } }),
+      JSON.stringify({ type: "assistant", uuid: "history-assistant", message: { content: [{ type: "text", text: "to ship it" }] } }),
+      "",
+    ].join("\n"),
+  );
+
+  const events: ProviderEvent[] = [];
+  const connection = await runAcpProvider({
+    id: "claude-tty-under-test",
+    label: "Claude TTY",
+    command: adapterCommand(adapterBinaryPath(root), env),
+  }).connect({ versions: [1], capabilities: ["prompt.message", "session.configure", "session.persistence"] });
+  t.after(async () => {
+    await connection.close();
+    await rm(home, { force: true, recursive: true });
+  });
+  connection.onEvent((event) => events.push(event));
+
+  await connection.send({
+    type: "session.open",
+    requestId: "resume",
+    sessionId: "resumed-under-test",
+    history: "replay",
+    persistence: { version: 1, data: { sessionId: acpSessionId } },
+    config: { cwd, env: {}, mcpServers: {}, settings: {}, persist: true },
+  });
+  await settled(events, "session.ready");
+
+  const timeline = events.flatMap((event) => (event.type === "timeline.item" ? [event.item] : []));
+  assert.deepEqual(
+    timeline.map((item) => [item.type, "text" in item ? item.text : null]),
+    [
+      ["user_message", "what did we decide"],
+      ["assistant_message", "to ship it"],
+    ],
+  );
+});
+
+let adapterBuild: Promise<string> | null = null;
+
+/** The bridge spawns the *built* adapter, so each run builds it once before the first spawn. */
+function builtAdapter(): Promise<string> {
+  adapterBuild ??= (async () => {
+    const root = repoRootFromPluginPath(path.join(import.meta.dirname, ".."));
+    await promisify(execFile)(path.join(adapterDirectory(root), "node_modules", ".bin", "tsc"), ["-p", "tsconfig.build.json"], {
+      cwd: adapterDirectory(root),
+    });
+    return root;
+  })();
+  return adapterBuild;
+}
 
 /** Waits for the named event, and fails on the bridge's own failure rather than on the timeout it would cause. */
 async function settled<Type extends ProviderEvent["type"]>(events: ProviderEvent[], type: Type): Promise<Extract<ProviderEvent, { type: Type }>> {

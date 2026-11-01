@@ -84,12 +84,10 @@ export class ClaudeTtyAgent implements Agent {
     const session = await this.sessions.load(params.sessionId, params.cwd);
     await session.refreshAutoAccept({ publish: false });
     this.workspaces?.watch(session.id, session.cwd);
-    // The client first learns this session id from the response below, so the conversation and the
-    // command list go after it, for the same reason `newSession` publishes its commands after its
-    // own: an update sent earlier has nowhere to land. Replayed ahead of the response, the whole
-    // history of a resumed session is what that costs -- the conversation survives on disk and in
-    // Claude, and the client shows an empty timeline.
-    setImmediate(() => void this.restoreSession(session));
+    // Paseo reads only what arrives before this response as replayed history, and drops a replayed user prompt that comes later.
+    await this.replayHistory(session);
+    // The plugin has Paseo wait for a command list sent after the session opens, so one sent before this response is missed and the open stalls until that wait times out.
+    setImmediate(() => void this.publishCommands(session));
     writeLog({ level: "info", message: "Loaded persisted ACP session", sessionId: params.sessionId, cwd: params.cwd });
     return { models: session.models, modes: session.modes, configOptions: session.configOptions };
   }
@@ -132,18 +130,14 @@ export class ClaudeTtyAgent implements Agent {
   }
 
   /**
-   * Puts a resumed session's conversation back in front of the client, then its commands.
-   * History first, because the command list is what the client reads as the session being ready to
-   * use. A replay that fails costs the timeline, not the session: Claude still holds the
-   * conversation, so the session is left open to carry on rather than failed for its history.
+   * A replay that fails costs the timeline, not the session: Claude still holds the conversation, so the session is left open to carry on rather than failed for its history.
    */
-  private async restoreSession(session: ClaudeSession): Promise<void> {
+  private async replayHistory(session: ClaudeSession): Promise<void> {
     try {
       await session.replayHistory();
     } catch (error) {
       writeLog({ level: "warn", message: "Failed to replay a loaded session's history", sessionId: session.id, error: errorMessage(error) });
     }
-    await this.publishCommands(session);
   }
 
   private async publishCommands(session: ClaudeSession): Promise<void> {

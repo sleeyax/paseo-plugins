@@ -18,7 +18,13 @@ So pastes go in batches that each end on a whole piece, see `PASTE_WRITE_BYTES`.
 ## The client has no session until the response
 
 Paseo drops any session update for a session ID it has not been given yet.
-Anything sent from `session/new` or `session/load` (commands, a replayed history) goes out after the handler returns, which is why both use `setImmediate`.
+A new session's ID reaches it only in the `session/new` response, so anything sent from `session/new` goes out after the handler returns, through `setImmediate`.
+
+## A loaded session's history goes before the response
+
+Paseo reads what arrives before the `session/load` response, plus one macrotask, as replayed history, and drops the user prompts in anything later.
+So `session/load` awaits the whole replay before it returns.
+Its command list still goes after, because the plugin has Paseo wait for one sent after the session opens.
 
 ## Paseo reads "busy" from the open turn only
 
