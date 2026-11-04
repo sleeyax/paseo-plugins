@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-v0.5.0...claude-tty-v0.6.0) (2026-11-04)
+
+
+### Features
+
+* adopt Paseo 0.13.0–0.14.0 ([5eea4f5](https://github.com/sleeyax/paseo-plugins/commit/5eea4f59141a7565c435bf808ad3a9aa13728a1c))
+* **claude-tty:** keep Paseo's idle cleanup from stopping a running Claude ([90670d3](https://github.com/sleeyax/paseo-plugins/commit/90670d3c8f62a31d9d5f990bc2c6f311dbf140aa)), closes [#168](https://github.com/sleeyax/paseo-plugins/issues/168)
+* **claude-tty:** show a question option's preview as a preview ([#162](https://github.com/sleeyax/paseo-plugins/issues/162)) ([0ce8a97](https://github.com/sleeyax/paseo-plugins/commit/0ce8a97321b8e8146a42d200be12f97557f3e03b))
+
+
+### Bug Fixes
+
+* **claude-tty:** give the adapter 25 seconds to initialize on a cold start ([#167](https://github.com/sleeyax/paseo-plugins/issues/167)) ([1bb53ba](https://github.com/sleeyax/paseo-plugins/commit/1bb53ba178e3c264b21c569fe23116ab8bc60fae))
+* **claude-tty:** keep the idle timeout from stopping Claude while its background work runs ([#170](https://github.com/sleeyax/paseo-plugins/issues/170)) ([3a2c1c7](https://github.com/sleeyax/paseo-plugins/commit/3a2c1c7d11ef9769ea31ab9d03b22ea91fdfa13f))
+* **claude-tty:** restore a resumed session's earlier prompts ([f53f51e](https://github.com/sleeyax/paseo-plugins/commit/f53f51ec9d0e6e95498345c6ecd0e9e0c80d7962)), closes [#166](https://github.com/sleeyax/paseo-plugins/issues/166)
+
 ## [0.5.0](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-v0.4.0...claude-tty-v0.5.0) (2026-10-21)
 
 
