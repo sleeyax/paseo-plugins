@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/sleeyax/paseo-plugins/compare/guided-review-v0.2.0...guided-review-v0.3.0) (2026-11-04)
+
+
+### Features
+
+* adopt Paseo 0.13.0–0.14.0 ([5eea4f5](https://github.com/sleeyax/paseo-plugins/commit/5eea4f59141a7565c435bf808ad3a9aa13728a1c))
+
+
+### Bug Fixes
+
+* **guided-review:** keep asking a guide agent Paseo closed while idle ([1411e36](https://github.com/sleeyax/paseo-plugins/commit/1411e36878cd4738e3b7c8e4177e7f44069c2ee1)), closes [#168](https://github.com/sleeyax/paseo-plugins/issues/168)
+
 ## [0.2.0](https://github.com/sleeyax/paseo-plugins/compare/guided-review-v0.1.0...guided-review-v0.2.0) (2026-10-21)
 
 
