@@ -89,14 +89,14 @@ export default function contribute(server: PluginServerContext) {
 
   // The guide agent is read-only. Its provider's plan or read-only mode is the first guard and this
   // the second, since not every provider has such a mode; the generation job answers what it misses.
-  server.on("agent.permission_requested", async ({ agent, request }, context) => {
+  server.addHook("agent.permission.before", async ({ agent, request }, context) => {
     connected(context);
     await guideAgents
       .onPermissionRequested(agent.id, request)
       .catch((error: unknown) => log(`Answering a permission request of ${agent.id} failed: ${String(error)}`));
   });
   // Paseo archives a workspace's agents with it; this makes sure of the guide agents, whose guide ends there.
-  server.on("workspace.archived", async ({ workspace }, context) => {
+  server.addHook("workspace.archive.after", async ({ workspace }, context) => {
     connected(context);
     await service
       .workspaceArchived({ workspaceId: workspace.id })

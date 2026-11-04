@@ -17,7 +17,7 @@ export type PaseoGuideAgentsOptions = {
 
 export type PaseoGuideAgents = GuideAgentPort & {
   /**
-   * For the `agent.permission_requested` hook: denies a guide agent's request to change anything, and
+   * For the `agent.permission.before` hook: denies a guide agent's request to change anything, and
    * leaves every other agent's requests alone. Guide agents are told apart by their label, which
    * survives a plugin restart where an in-memory list would not.
    */
