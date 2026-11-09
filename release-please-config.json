@@ -18,6 +18,10 @@
       "release-type": "node",
       "component": "guided-review"
     },
+    "plugins/task-runner": {
+      "release-type": "node",
+      "component": "task-runner"
+    },
     "apps/claude-tty-acp": {
       "release-type": "node",
       "component": "claude-tty-acp",

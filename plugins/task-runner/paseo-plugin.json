@@ -1,0 +1,7 @@
+{
+  "id": "task-runner",
+  "name": "Task Runner",
+  "description": "Run a project's own scripts from a sidebar panel.",
+  "requirements": { "paseo": ">=0.15.0" },
+  "build": [["pnpm", "install", "--frozen-lockfile"]]
+}
