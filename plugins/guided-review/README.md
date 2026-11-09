@@ -119,7 +119,7 @@ On GitHub your review stays on the commit the guide explained, so a repository t
 | --- | --- | --- |
 | gh path | `gh` | The `gh` the daemon runs: a command on its `PATH` or an absolute path. |
 | glab path | `glab` | The `glab` the daemon runs, the same way. |
-| Provider and model | `claude-tty` | The agent that writes guides: a provider, or `provider/model` like `codex/gpt-5.5`. Falls back to `claude` when the [claude-tty](../claude-tty) provider is not available. |
+| Provider and model | `claude` | The agent that writes guides: a provider, or `provider/model` like `codex/gpt-5.5`. |
 | Effort | _blank_ | The model's effort level, like `high`. Blank uses the model's default. |
 | Mode | _blank_ | The guide agent's mode. Blank uses the provider's plan or read-only mode. Only modes that ask before running a tool are accepted. |
 | Syntax theme | GitHub | The theme diffs are highlighted with. Pick the same one as under Appearance in Paseo's settings, which plugins cannot read. |

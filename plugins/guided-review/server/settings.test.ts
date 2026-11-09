@@ -21,13 +21,13 @@ test("runs the glab the settings name, and glab on the PATH when they name none"
   assert.equal(await readGlabPath(settingsReading({ status: "invalid", revision: "1", error: "Invalid settings" })), "glab");
 });
 
-test("the guide agent is the one the settings name, and Claude TTY's default model when they name none", async () => {
+test("the guide agent is the one the settings name, and Claude's default model when they name none", async () => {
   const ready = (guideAgent: string, guideAgentEffort = "", guideAgentMode = "") =>
     settingsReading({ status: "ready", revision: "1", values: { ghPath: "gh", glabPath: "glab", guideAgent, guideAgentEffort, guideAgentMode, syntaxTheme: "github" } });
   assert.deepEqual(await readGuideAgent(ready("codex/gpt-5.5")), { agent: "codex/gpt-5.5", effort: "", mode: "" });
-  assert.deepEqual(await readGuideAgent(ready(" ", " high ", " default ")), { agent: "claude-tty", effort: "high", mode: "default" });
+  assert.deepEqual(await readGuideAgent(ready(" ", " high ", " default ")), { agent: "claude", effort: "high", mode: "default" });
   assert.deepEqual(await readGuideAgent(settingsReading({ status: "invalid", revision: "1", error: "Invalid settings" })), {
-    agent: "claude-tty",
+    agent: "claude",
     effort: "",
     mode: "",
   });
