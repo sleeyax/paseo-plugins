@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/sleeyax/paseo-plugins/compare/discord-rich-presence-v0.2.0...discord-rich-presence-v0.3.0) (2026-11-09)
+
+
+### Features
+
+* adopt Paseo 0.13.0–0.14.0 ([5eea4f5](https://github.com/sleeyax/paseo-plugins/commit/5eea4f59141a7565c435bf808ad3a9aa13728a1c))
+
 ## [0.2.0](https://github.com/sleeyax/paseo-plugins/compare/discord-rich-presence-v0.1.0...discord-rich-presence-v0.2.0) (2026-10-07)
 
 
