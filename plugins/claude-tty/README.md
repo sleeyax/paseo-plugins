@@ -1,5 +1,10 @@
 # Claude TTY
 
+> [!WARNING]
+> **Deprecated.** Since Paseo 0.14, the built-in `claude` provider no longer has the usage penalty this plugin was built to avoid.
+> Use `claude` for new agents.
+> This plugin stays available, so threads that already use it keep working.
+
 Adds **Claude TTY** to Paseo's providers: the real interactive Claude Code CLI, run in a terminal by the [Claude TTY ACP adapter](../../apps/claude-tty-acp).
 A sidebar panel diagnoses the adapter and manages its saved sessions on the selected host.
 

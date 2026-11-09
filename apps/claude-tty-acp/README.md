@@ -1,12 +1,17 @@
 # Claude TTY ACP
 
+> [!WARNING]
+> **Deprecated**, along with the [Claude TTY plugin](../../plugins/claude-tty/README.md) that installs it.
+> Use Paseo's built-in `claude` provider for new agents.
+> This adapter stays available, so threads that already use it keep working.
+
 An [ACP](https://agentclientprotocol.com) adapter that runs the real interactive Claude Code CLI as a Paseo agent.
 Each session is one `claude` process in a terminal, and you get Paseo's native timeline, tool calls, plans, permission cards and pickers on top of it.
 
 ## Why?
 
 Paseo's built-in Claude agent runs on the Claude Agent SDK.
-Agent SDK integrations appear to consume usage limits faster than the Claude Code CLI does, [as reported for t3code and similar tools](https://github.com/pingdotgg/t3code/issues/7338#issuecomment-5426425282).
+Before Paseo 0.14, its sessions appeared to consume usage limits faster than the Claude Code CLI does, [as reported for t3code and similar tools](https://github.com/pingdotgg/t3code/issues/7338#issuecomment-5426425282).
 This adapter avoids the SDK by driving the same CLI you would run in a terminal.
 You keep its binary, login, billing, sessions, `CLAUDE.md` files, MCP servers, plugins, skills and permission rules.
 The cost is that Paseo's features are rebuilt from Claude's transcripts, hooks and screen, which is where the [limitations](#limitations) come from.

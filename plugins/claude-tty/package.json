@@ -2,6 +2,7 @@
   "name": "@paseo-plugins/claude-tty",
   "private": true,
   "version": "0.5.0",
+  "deprecated": "Use Paseo's built-in claude provider (Paseo 0.14 or newer). Kept so existing threads keep working.",
   "scripts": {
     "identity": "node scripts/set-identity.mjs",
     "typecheck": "tsc --noEmit",
