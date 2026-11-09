@@ -5,9 +5,7 @@ export const SETTINGS_ID = "settings";
 
 export const DEFAULT_GH_PATH = "gh";
 /** Claude with whichever model its provider calls the default, so a new model needs no settings change. */
-export const DEFAULT_GUIDE_AGENT = "claude-tty";
-/** What the default gives way to on a host where the claude-tty plugin's provider is not available. */
-export const FALLBACK_GUIDE_AGENT = "claude";
+export const DEFAULT_GUIDE_AGENT = "claude";
 
 export const DEFAULT_GLAB_PATH = "glab";
 
@@ -32,7 +30,7 @@ export const settingsDocument = defineSettings({
     /** The `glab` executable, read the same way as `ghPath`. */
     glabPath: z.string().default(DEFAULT_GLAB_PATH),
     /**
-     * The guide agent's provider, alone for its default model (`claude-tty`) or with a model
+     * The guide agent's provider, alone for its default model (`claude`) or with a model
      * (`codex/gpt-5.5`), as Paseo names them. Checked only when a guide agent is created.
      */
     guideAgent: z.string().default(DEFAULT_GUIDE_AGENT),

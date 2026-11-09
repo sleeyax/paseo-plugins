@@ -2,6 +2,7 @@
   "name": "@paseo-plugins/claude-tty-acp",
   "private": true,
   "version": "0.5.0",
+  "deprecated": "Use Paseo's built-in claude provider (Paseo 0.14 or newer). Kept so existing threads keep working.",
   "description": "ACP adapter for interactive Claude Code sessions",
   "type": "module",
   "bin": {

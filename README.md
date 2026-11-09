@@ -8,12 +8,12 @@ My plugins for [Paseo](https://github.com/getpaseo/paseo).
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | [Discord Rich Presence](plugins/discord-rich-presence) | Show your current Paseo activity on Discord.                                                           |
 | [Catppuccin theme](plugins/catppuccin-theme)           | Add all four Catppuccin flavours as app themes.                                                        |
-| [Claude TTY](plugins/claude-tty)                       | Offer the Claude TTY ACP adapter as a Paseo provider, and manage it on the daemon host.                |
+| [Claude TTY](plugins/claude-tty)                       | Deprecated: offer the Claude TTY ACP adapter as a Paseo provider, and manage it on the daemon host.    |
 | [Guided Review](plugins/guided-review)                 | Show a trunk-first guide to a pull request or merge request, and build your draft review alongside it. |
 
-| ACP                                   | Description                                                                |
-| ------------------------------------- | -------------------------------------------------------------------------- |
-| [Claude TTY ACP](apps/claude-tty-acp) | Run genuine interactive Claude Code sessions in Paseo's native agent view. |
+| ACP                                   | Description                                                                            |
+| ------------------------------------- | -------------------------------------------------------------------------------------- |
+| [Claude TTY ACP](apps/claude-tty-acp) | Deprecated: run genuine interactive Claude Code sessions in Paseo's native agent view. |
 
 ## Installation
 

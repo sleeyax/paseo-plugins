@@ -17,7 +17,6 @@ function stubPaseo() {
       { provider: "claude", id: "claude-opus-5-5", label: "Opus 5.5", isDefault: true },
     ] as { provider: string; id: string; label: string; isDefault?: boolean }[],
     modes: [{ id: "default", label: "Default" }, { id: "plan", label: "Plan" }] as { id: string; label: string; colorTier?: string }[],
-    available: [{ provider: "claude", available: true }] as { provider: string; available: boolean }[],
     created: [] as Record<string, unknown>[],
     waits: [] as Wait[],
     responses: [] as { requestId: string; response: PaseoAgentPermissionResponse }[],
@@ -57,9 +56,6 @@ function stubPaseo() {
       },
       async listModes() {
         return { modes: state.modes };
-      },
-      async listAvailable() {
-        return { providers: state.available };
       },
     },
     workspaces: {
@@ -122,36 +118,13 @@ test("a configured model is used as it is, and a provider that offers no read-on
   assert.deepEqual(state.created[0]!.config, { provider: "opencode/big-model" });
 });
 
-test("the default claude-tty is used where its plugin's provider is available", async () => {
+test("a host that names claude-tty keeps getting it", async () => {
   const { paseo, state } = stubPaseo();
-  state.available = [{ provider: "claude-tty", available: true }];
   const agents = createPaseoGuideAgents({ paseo: () => paseo, agent: async () => ({ agent: "claude-tty", effort: "", mode: "" }) });
 
   await agents.create({ workspace: WORKSPACE, title: "Guide", labels: {}, prompt: "Explain." });
 
   assert.deepEqual(state.created[0]!.config, { provider: "claude-tty/claude-opus-5-5", modeId: "plan" });
-});
-
-test("the default claude-tty gives way to claude where its plugin's provider is missing or unavailable", async () => {
-  for (const available of [[], [{ provider: "claude-tty", available: false }]]) {
-    const { paseo, state } = stubPaseo();
-    state.available = available;
-    const agents = createPaseoGuideAgents({ paseo: () => paseo, agent: async () => ({ agent: "claude-tty", effort: "", mode: "" }) });
-
-    await agents.create({ workspace: WORKSPACE, title: "Guide", labels: {}, prompt: "Explain." });
-
-    assert.deepEqual(state.created[0]!.config, { provider: "claude/claude-opus-5-5", modeId: "plan" });
-  }
-});
-
-test("claude-tty with a model is taken as asked for, available or not", async () => {
-  const { paseo, state } = stubPaseo();
-  state.available = [];
-  const agents = createPaseoGuideAgents({ paseo: () => paseo, agent: async () => ({ agent: "claude-tty/opus", effort: "", mode: "" }) });
-
-  await agents.create({ workspace: WORKSPACE, title: "Guide", labels: {}, prompt: "Explain." });
-
-  assert.deepEqual(state.created[0]!.config, { provider: "claude-tty/opus", modeId: "plan" });
 });
 
 test("a configured effort and asking mode are passed on as they are", async () => {
