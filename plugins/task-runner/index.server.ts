@@ -4,7 +4,10 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import type { ZodType, input as ZodInput, output as ZodOutput } from "zod";
 import { discoverTasks } from "./server/discovery/discover.ts";
 import { InferredTargets } from "./server/discovery/inferred-targets.ts";
+import { join } from "node:path";
+import { dataDirectory } from "./server/paths.ts";
 import { createPaseoTerminals } from "./server/runs/paseo-terminals.ts";
+import { createTaskHistory } from "./server/runs/task-history.ts";
 import { TaskRuns } from "./server/runs/task-runs.ts";
 import * as contracts from "./shared/contracts.ts";
 import { PLUGIN_ID } from "./shared/identity.ts";
@@ -21,7 +24,10 @@ export default function contribute(server: PluginServerContext) {
     if (paseo === null) throw new Error("Paseo is not connected to the plugin yet.");
     return paseo;
   };
-  const runs = new TaskRuns({ terminals: createPaseoTerminals(connection) });
+  const runs = new TaskRuns({
+    terminals: createPaseoTerminals(connection),
+    history: createTaskHistory(join(dataDirectory(), "recent-tasks.json")),
+  });
   const inferred = new InferredTargets();
 
   const wantsInferredTargets = async (workspaceId: string) => {
@@ -50,7 +56,7 @@ export default function contribute(server: PluginServerContext) {
       inferred: (await wantsInferredTargets(workspaceId)) ? inferred : undefined,
       log: (message) => console.warn(`${PLUGIN_ID}: ${message}`),
     });
-    return { kind: "ready" as const, tasks, nx };
+    return { kind: "ready" as const, tasks, nx, recentTaskIds: await runs.recent(workspaceId) };
   });
 
   serve(contracts.getRuns, async ({ workspaceId }) => ({ runs: await runs.states(workspaceId) }));
@@ -59,6 +65,8 @@ export default function contribute(server: PluginServerContext) {
     await runs.run(workspaceId, task);
     return OK;
   });
+
+  serve(contracts.rerunLastTask, async ({ workspaceId }) => ({ task: await runs.rerunLast(workspaceId) }));
 
   serve(contracts.stopTask, async ({ workspaceId, terminalId }) => {
     await runs.stop(workspaceId, terminalId);

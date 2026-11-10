@@ -11,7 +11,13 @@ export const listTasks = defineRpc({
   input: workspaceInput,
   output: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("unsupported"), message: z.string() }),
-    z.object({ kind: z.literal("ready"), tasks: z.array(taskSchema), nx: nxStatusSchema.nullable() }),
+    z.object({
+      kind: z.literal("ready"),
+      tasks: z.array(taskSchema),
+      nx: nxStatusSchema.nullable(),
+      /** Most recent first; a task no longer listed may be among them. */
+      recentTaskIds: z.array(z.string()),
+    }),
   ]),
 });
 
@@ -25,6 +31,13 @@ export const runTask = defineRpc({
   name: "task-runner.run",
   input: workspaceInput.extend({ task: taskSchema }),
   output: done,
+});
+
+/** Answers the task it ran, or null when nothing has run in the workspace yet. */
+export const rerunLastTask = defineRpc({
+  name: "task-runner.rerun-last",
+  input: workspaceInput,
+  output: z.object({ task: taskSchema.nullable() }),
 });
 
 export const stopTask = defineRpc({ name: "task-runner.stop", input: terminalInput, output: done });

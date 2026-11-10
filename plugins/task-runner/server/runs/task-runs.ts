@@ -1,5 +1,6 @@
 import { TASK_TERMINAL_PREFIX, type RunState, type Task } from "../../shared/task.ts";
 import { presentableOutput, readTaskExit, wrapTask, type TaskExit } from "./shell-wrapper.ts";
+import type { TaskHistory } from "./task-history.ts";
 import type { TerminalPort, TerminalRecord } from "./terminal-port.ts";
 
 const OUTPUT_LINES = 50;
@@ -16,16 +17,19 @@ type TrackedTerminal = {
 
 export type TaskRunsOptions = {
   terminals: TerminalPort;
+  history: TaskHistory;
   now?: () => number;
 };
 
 export class TaskRuns {
   private readonly terminals: TerminalPort;
+  private readonly history: TaskHistory;
   private readonly now: () => number;
   private readonly tracked = new Map<string, TrackedTerminal>();
 
   constructor(options: TaskRunsOptions) {
     this.terminals = options.terminals;
+    this.history = options.history;
     this.now = options.now ?? Date.now;
   }
 
@@ -34,6 +38,19 @@ export class TaskRuns {
     const existing = (await this.terminals.list(workspaceId)).filter((terminal) => terminal.name === task.id);
     await Promise.all(existing.map((terminal) => this.close(terminal.id)));
     await this.terminals.create({ workspaceId, name: task.id, cwd: task.cwd, ...wrapTask(task) });
+    await this.history.record(workspaceId, task);
+  }
+
+  /** Task IDs, most recent first. */
+  async recent(workspaceId: string): Promise<string[]> {
+    return (await this.history.read(workspaceId)).map((task) => task.id);
+  }
+
+  async rerunLast(workspaceId: string): Promise<Task | null> {
+    const [last] = await this.history.read(workspaceId);
+    if (last === undefined) return null;
+    await this.run(workspaceId, last);
+    return last;
   }
 
   async states(workspaceId: string): Promise<RunState[]> {

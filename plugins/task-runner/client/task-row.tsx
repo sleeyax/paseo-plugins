@@ -67,16 +67,33 @@ function Controls({ colors, task, run, busy, actions }: { colors: Colors; task: 
   );
 }
 
-export function TaskRow({ colors, task, run, busy, actions }: { colors: Colors; task: Task; run: RunState | null; busy: boolean; actions: TaskActions }) {
+export type TaskRowProps = {
+  colors: Colors;
+  task: Task;
+  /** Named when the row is listed outside its group, as under Recent. */
+  groupName: string | null;
+  /** The row Enter runs from the search box. */
+  highlighted: boolean;
+  run: RunState | null;
+  busy: boolean;
+  actions: TaskActions;
+};
+
+export function TaskRow({ colors, task, groupName, highlighted, run, busy, actions }: TaskRowProps) {
   const [expanded, setExpanded] = useState(false);
   const lastLine = run?.output.at(-1) ?? null;
   const hasOutput = lastLine !== null;
   const muted = task.disabledReason !== null;
   return (
-    <View style={{ paddingVertical: 4, paddingHorizontal: 8, gap: 2 }}>
+    <View style={{ paddingVertical: 4, paddingHorizontal: 8, gap: 2, borderRadius: 4, backgroundColor: highlighted ? colors.surface2 : undefined }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
         <Pressable accessibilityRole="button" accessibilityState={{ expanded }} disabled={!hasOutput} onPress={() => setExpanded(!expanded)} style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0 }}>
           <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: run === null ? colors.border : statusColor(run, colors) }} />
+          {groupName !== null ? (
+            <Text numberOfLines={1} style={{ flexShrink: 2, color: colors.foregroundMuted, fontSize: 13 }}>
+              {groupName} ›
+            </Text>
+          ) : null}
           <Text numberOfLines={1} style={{ flexShrink: 1, color: muted ? colors.foregroundMuted : colors.foreground, fontSize: 13 }}>
             {task.label}
           </Text>

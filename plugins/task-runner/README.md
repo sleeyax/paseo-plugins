@@ -33,6 +33,12 @@ Open **Tasks** in the Explorer, or choose **Run Task...** in the Command Center.
 Select the play button on a task.
 It runs in its own workspace terminal, which opens as a tab without taking focus.
 
+### Run a task from the keyboard
+
+Choose **Run Task...** in the Command Center, pick a task with the arrow keys, and press Enter.
+Recently run tasks are listed first.
+**Rerun Last Task** in the Command Center runs the last one again.
+
 ### List targets inferred by Nx plugins
 
 Select **Load inferred targets** in the panel, which runs the repository's own `nx`.

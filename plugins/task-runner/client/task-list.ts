@@ -16,3 +16,49 @@ export function groupTasks(tasks: Task[]): TaskGroup[] {
   for (const task of tasks) groups.set(task.group, [...(groups.get(task.group) ?? []), task]);
   return [...groups].map(([name, grouped]) => ({ name, tasks: grouped }));
 }
+
+const RECENT_SHOWN = 5;
+
+export type TaskSectionRow = {
+  task: Task;
+  /** The row's place in the keyboard order. */
+  index: number;
+  /** Whether the row sits outside its group, so its group needs naming. */
+  showGroup: boolean;
+};
+
+export type TaskSection = {
+  key: string;
+  /** Null for the only group, which needs no header. */
+  title: string | null;
+  collapsible: boolean;
+  open: boolean;
+  rows: TaskSectionRow[];
+};
+
+export type SectionOptions = {
+  query: string;
+  recentIds: string[];
+  collapsed: ReadonlySet<string>;
+};
+
+export function buildSections(tasks: Task[], { query, recentIds, collapsed }: SectionOptions): { sections: TaskSection[]; navigable: Task[] } {
+  const shown = filterTasks(tasks, query);
+  const grouped = groupTasks(tasks).length > 1;
+  const searching = query.trim() !== "";
+  const navigable: Task[] = [];
+  const rowsOf = (sectionTasks: Task[], showGroup: boolean) =>
+    sectionTasks.map((task) => {
+      navigable.push(task);
+      return { task, index: navigable.length - 1, showGroup };
+    });
+
+  const sections: TaskSection[] = [];
+  const recent = recentIds.flatMap((id) => shown.find((task) => task.id === id) ?? []).slice(0, RECENT_SHOWN);
+  if (recent.length > 0) sections.push({ key: "recent", title: "Recent", collapsible: false, open: true, rows: rowsOf(recent, grouped) });
+  for (const group of groupTasks(shown)) {
+    const open = searching || !collapsed.has(group.name);
+    sections.push({ key: `group:${group.name}`, title: grouped ? group.name : null, collapsible: grouped, open, rows: open ? rowsOf(group.tasks, false) : [] });
+  }
+  return { sections, navigable };
+}

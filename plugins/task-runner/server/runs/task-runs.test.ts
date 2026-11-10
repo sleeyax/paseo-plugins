@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import type { Task } from "../../shared/task.ts";
 import { createFakeTerminals } from "./fake-terminals.ts";
+import { createTaskHistory } from "./task-history.ts";
 import { TaskRuns } from "./task-runs.ts";
 
 const WORKSPACE = "wks_1";
@@ -21,6 +25,7 @@ const task = (overrides: Partial<Task> = {}): Task => ({
 describe("TaskRuns", () => {
   let fake: ReturnType<typeof createFakeTerminals>;
   let now: number;
+  let historyFile: string;
   let runs: TaskRuns;
 
   const started = async (overrides: Partial<Task> = {}) => {
@@ -38,7 +43,8 @@ describe("TaskRuns", () => {
   beforeEach(() => {
     fake = createFakeTerminals();
     now = 1_000;
-    runs = new TaskRuns({ terminals: fake.port, now: () => now });
+    historyFile = join(mkdtempSync(join(tmpdir(), "task-runner-history-")), "history.json");
+    runs = new TaskRuns({ terminals: fake.port, history: createTaskHistory(historyFile), now: () => now });
   });
 
   describe("running a task", () => {
@@ -142,7 +148,7 @@ describe("TaskRuns", () => {
     it("finds a finished run again from the buffer alone, as after an app or plugin reload", async () => {
       const terminal = await started();
       terminal.lines = ["ok", "::task-exit=0::"];
-      const fresh = new TaskRuns({ terminals: fake.port });
+      const fresh = new TaskRuns({ terminals: fake.port, history: createTaskHistory(historyFile) });
       assert.equal((await fresh.states(WORKSPACE))[0]?.status, "succeeded");
     });
 
@@ -221,6 +227,64 @@ describe("TaskRuns", () => {
       const second = await started();
       second.lines = ["::task-exit=0::"];
       assert.equal((await state()).status, "succeeded");
+    });
+  });
+
+  describe("recent tasks", () => {
+    it("lists the tasks run in a workspace, most recent first, each once", async () => {
+      await runs.run(WORKSPACE, task({ id: "task: a" }));
+      await runs.run(WORKSPACE, task({ id: "task: b" }));
+      await runs.run(WORKSPACE, task({ id: "task: a" }));
+      assert.deepEqual(await runs.recent(WORKSPACE), ["task: a", "task: b"]);
+    });
+
+    it("keeps each workspace's history apart", async () => {
+      await runs.run(WORKSPACE, task({ id: "task: a" }));
+      await runs.run("wks_2", task({ id: "task: b" }));
+      assert.deepEqual(await runs.recent(WORKSPACE), ["task: a"]);
+    });
+
+    it("keeps the ten most recent", async () => {
+      for (let index = 0; index < 12; index += 1) await runs.run(WORKSPACE, task({ id: `task: ${index}` }));
+      const recent = await runs.recent(WORKSPACE);
+      assert.equal(recent.length, 10);
+      assert.equal(recent[0], "task: 11");
+      assert.equal(recent.at(-1), "task: 2");
+    });
+
+    it("does not record a disabled task", async () => {
+      await assert.rejects(runs.run(WORKSPACE, task({ disabledReason: "No." })));
+      assert.deepEqual(await runs.recent(WORKSPACE), []);
+    });
+
+    it("survives a plugin reload", async () => {
+      await runs.run(WORKSPACE, task({ id: "task: a" }));
+      const fresh = new TaskRuns({ terminals: fake.port, history: createTaskHistory(historyFile) });
+      assert.deepEqual(await fresh.recent(WORKSPACE), ["task: a"]);
+    });
+
+    it("starts empty when the history file is unreadable", async () => {
+      const broken = join(mkdtempSync(join(tmpdir(), "task-runner-history-")), "history.json");
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(broken, "{ nope");
+      const fresh = new TaskRuns({ terminals: fake.port, history: createTaskHistory(broken) });
+      assert.deepEqual(await fresh.recent(WORKSPACE), []);
+      await fresh.run(WORKSPACE, task());
+      assert.deepEqual(await fresh.recent(WORKSPACE), ["task: build"]);
+    });
+  });
+
+  describe("rerunning the last task", () => {
+    it("runs the most recent task again, replacing its terminal", async () => {
+      await runs.run(WORKSPACE, task({ id: "task: a", command: "first" }));
+      const ran = await runs.rerunLast(WORKSPACE);
+      assert.equal(ran?.id, "task: a");
+      assert.deepEqual(fake.terminals.map((terminal) => [terminal.name, terminal.args.at(-1)]), [["task: a", "first run build"]]);
+    });
+
+    it("answers null when nothing has run in the workspace", async () => {
+      assert.equal(await runs.rerunLast(WORKSPACE), null);
+      assert.equal(fake.terminals.length, 0);
     });
   });
 });
