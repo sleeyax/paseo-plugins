@@ -3,6 +3,14 @@
 Run the scripts your project already defines from a **Tasks** panel in the Explorer, without declaring them again in `paseo.json`.
 It lists `package.json` scripts, Makefile targets, Nx targets and `.vscode/tasks.json` tasks.
 
+## Screenshots
+
+![Tasks grouped by package in a monorepo](./docs/screenshots/panel.png)
+
+![A finished task expanded to its output](./docs/screenshots/output.png)
+
+![A running task with Stop and Restart](./docs/screenshots/running.png)
+
 ## Installation
 
 Requires:
