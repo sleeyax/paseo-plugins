@@ -2,7 +2,7 @@
   "name": "@paseo-plugins/task-runner",
   "description": "Run a project's own scripts from a sidebar panel.",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
