@@ -10,6 +10,7 @@ My plugins for [Paseo](https://github.com/getpaseo/paseo).
 | [Catppuccin theme](plugins/catppuccin-theme)           | Add all four Catppuccin flavours as app themes.                                                        |
 | [Claude TTY](plugins/claude-tty)                       | Deprecated: offer the Claude TTY ACP adapter as a Paseo provider, and manage it on the daemon host.    |
 | [Guided Review](plugins/guided-review)                 | Show a trunk-first guide to a pull request or merge request, and build your draft review alongside it. |
+| [Task Runner](plugins/task-runner)                     | Run a project's own scripts from a sidebar panel.                                                       |
 
 | ACP                                   | Description                                                                            |
 | ------------------------------------- | -------------------------------------------------------------------------------------- |
