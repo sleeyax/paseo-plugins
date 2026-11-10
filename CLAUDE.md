@@ -40,7 +40,7 @@ Requires:
 paseo plugin add github:sleeyax/paseo-plugins:plugins/<name>
 ```
 
-Also available as `sleeyax/<name>` on [Paseo Community Plugins](https://paseo.sh/plugins) and on [Paseo Cafe](https://paseo.cafe/plugins/<name>).
+Also available as `sleeyax/<name>` on [Paseo Community Plugins](https://paseo.sh/plugins).
 <only when the plugin is listed there>
 
 Update with `paseo plugin update <name>`.

@@ -1,7 +1,5 @@
 # Catppuccin theme
 
-[![Paseo Cafe](https://img.shields.io/badge/Paseo_Cafe-catppuccin--theme-blue)](https://paseo.cafe/plugins/catppuccin-theme)
-
 Adds the four [Catppuccin](https://catppuccin.com/palette/) flavours to Paseo as app themes: Latte, Frappé, Macchiato and Mocha.
 
 ## Screenshots
@@ -24,7 +22,7 @@ Requires:
 paseo plugin add github:sleeyax/paseo-plugins:plugins/catppuccin-theme
 ```
 
-Also available as `sleeyax/catppuccin-theme` on [Paseo Community Plugins](https://paseo.sh/plugins) and on [Paseo Cafe](https://paseo.cafe/plugins/catppuccin-theme).
+Also available as `sleeyax/catppuccin-theme` on [Paseo Community Plugins](https://paseo.sh/plugins).
 Installing by registry ID needs Paseo 0.11 or newer.
 
 Update with `paseo plugin update catppuccin-theme`.
