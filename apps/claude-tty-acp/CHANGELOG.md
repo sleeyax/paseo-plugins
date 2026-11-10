@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-acp-v0.5.0...claude-tty-acp-v0.6.0) (2026-11-09)
+
+
+### Features
+
+* adopt Paseo 0.13.0–0.14.0 ([5eea4f5](https://github.com/sleeyax/paseo-plugins/commit/5eea4f59141a7565c435bf808ad3a9aa13728a1c))
+* **claude-tty:** deprecate the plugin and its adapter ([2a12f13](https://github.com/sleeyax/paseo-plugins/commit/2a12f13999b71ae30e25c542ece2a562a8369d2f))
+* **claude-tty:** deprecate the plugin and its adapter ([fe949a3](https://github.com/sleeyax/paseo-plugins/commit/fe949a3a417d79865d24868e3ca899d79dd4b1a6))
+* **claude-tty:** keep Paseo's idle cleanup from stopping a running Claude ([90670d3](https://github.com/sleeyax/paseo-plugins/commit/90670d3c8f62a31d9d5f990bc2c6f311dbf140aa)), closes [#168](https://github.com/sleeyax/paseo-plugins/issues/168)
+
+
+### Bug Fixes
+
+* **claude-tty:** keep the idle timeout from stopping Claude while its background work runs ([#170](https://github.com/sleeyax/paseo-plugins/issues/170)) ([3a2c1c7](https://github.com/sleeyax/paseo-plugins/commit/3a2c1c7d11ef9769ea31ab9d03b22ea91fdfa13f))
+* **claude-tty:** restore a resumed session's earlier prompts ([f53f51e](https://github.com/sleeyax/paseo-plugins/commit/f53f51ec9d0e6e95498345c6ecd0e9e0c80d7962)), closes [#166](https://github.com/sleeyax/paseo-plugins/issues/166)
+
 ## [0.5.0](https://github.com/sleeyax/paseo-plugins/compare/claude-tty-acp-v0.4.0...claude-tty-acp-v0.5.0) (2026-10-21)
 
 
