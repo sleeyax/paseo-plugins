@@ -15,6 +15,10 @@ type Colors = PluginTheme["colors"];
 
 const RUNS_POLL_MS = 1_500;
 const INFERRED_POLL_MS = 3_000;
+const GROUP_HEADER_PADDING = 6;
+const CHEVRON_SIZE = 14;
+/** Puts a group's guide line under its chevron's centre. */
+const GROUP_GUIDE_INSET = GROUP_HEADER_PADDING + CHEVRON_SIZE / 2 - 1;
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -114,6 +118,7 @@ export function TasksPanel({ theme, workspaceId }: PluginWorkspacePanelProps) {
 
     const shown = filterTasks(tasks.data.tasks, query);
     const groups = groupTasks(shown);
+    const grouped = groupTasks(tasks.data.tasks).length > 1;
     return (
       <>
         {tasks.data.nx !== null ? <NxNotice colors={colors} status={tasks.data.nx} onChange={(enabled) => void setInferredTargets(enabled)} /> : null}
@@ -123,15 +128,21 @@ export function TasksPanel({ theme, workspaceId }: PluginWorkspacePanelProps) {
           const open = query.trim() !== "" || !collapsed.has(group.name);
           return (
             <View key={group.name}>
-              {tasks.data.kind === "ready" && groupTasks(tasks.data.tasks).length > 1 ? (
-                <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => toggleGroup(group.name)} style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 6, paddingVertical: 4 }}>
-                  <Icon name={open ? "ChevronDown" : "ChevronRight"} size={14} color={colors.foregroundMuted} />
+              {grouped ? (
+                <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => toggleGroup(group.name)} style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: GROUP_HEADER_PADDING, paddingVertical: 4 }}>
+                  <Icon name={open ? "ChevronDown" : "ChevronRight"} size={CHEVRON_SIZE} color={colors.foregroundMuted} />
                   <Text numberOfLines={1} style={{ flexShrink: 1, color: colors.foregroundMuted, fontSize: 12, fontWeight: "600" }}>
                     {group.name}
                   </Text>
                 </Pressable>
               ) : null}
-              {open ? group.tasks.map((task) => <TaskRow key={task.id} colors={colors} task={task} run={runsByTask.get(task.id) ?? null} busy={action.isPending} actions={actions} />) : null}
+              {open ? (
+                <View style={grouped ? { marginLeft: GROUP_GUIDE_INSET, borderLeftWidth: 1, borderColor: colors.border, marginBottom: 4 } : undefined}>
+                  {group.tasks.map((task) => (
+                    <TaskRow key={task.id} colors={colors} task={task} run={runsByTask.get(task.id) ?? null} busy={action.isPending} actions={actions} />
+                  ))}
+                </View>
+              ) : null}
             </View>
           );
         })}
