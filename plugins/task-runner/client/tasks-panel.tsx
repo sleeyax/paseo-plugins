@@ -142,6 +142,7 @@ export function TasksPanel({ theme, layout, workspaceId, revision }: PluginWorks
     return (
       <Pressable accessibilityRole="button" accessibilityState={{ expanded: section.open }} onPress={() => toggleSection(section.key)} style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: GROUP_HEADER_PADDING, paddingVertical: 4 }}>
         <Icon name={section.open ? "ChevronDown" : "ChevronRight"} size={CHEVRON_SIZE} color={colors.foregroundMuted} />
+        {section.key === "recent" ? <Icon name="History" size={CHEVRON_SIZE - 1} color={colors.foregroundMuted} /> : null}
         <Text numberOfLines={1} style={{ flexShrink: 1, color: colors.foregroundMuted, fontSize: 12, fontWeight: "600" }}>
           {section.title}
         </Text>
