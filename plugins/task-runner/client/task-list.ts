@@ -39,7 +39,7 @@ export type TaskSection = {
 export type SectionOptions = {
   query: string;
   recentIds: string[];
-  /** Section keys, so a package named Recent does not share the Recent section's state. */
+  /** Section keys, so a package named recent does not share the recent section's state. */
   collapsed: ReadonlySet<string>;
 };
 
@@ -59,7 +59,7 @@ export function buildSections(tasks: Task[], { query, recentIds, collapsed }: Se
   const recent = recentIds.flatMap((id) => shown.find((task) => task.id === id) ?? []).slice(0, RECENT_SHOWN);
   if (recent.length > 0) {
     const open = isOpen("recent");
-    sections.push({ key: "recent", title: "Recent", collapsible: true, open, rows: open ? rowsOf(recent, grouped) : [] });
+    sections.push({ key: "recent", title: "recent", collapsible: true, open, rows: open ? rowsOf(recent, grouped) : [] });
   }
   for (const group of groupTasks(shown)) {
     const key = `group:${group.name}`;

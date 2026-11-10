@@ -70,7 +70,7 @@ function Controls({ colors, task, run, busy, actions }: { colors: Colors; task: 
 export type TaskRowProps = {
   colors: Colors;
   task: Task;
-  /** Named when the row is listed outside its group, as under Recent. */
+  /** Named when the row is listed outside its group, as under recent. */
   groupName: string | null;
   /** The row Enter runs from the search box. */
   highlighted: boolean;

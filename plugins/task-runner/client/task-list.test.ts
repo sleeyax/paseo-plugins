@@ -57,9 +57,9 @@ describe("buildSections", () => {
     assert.deepEqual(layout().navigable.map((item) => item.label), ["build", "dev", "build", "image"]);
   });
 
-  it("puts recently run tasks first, under Recent, with their group shown", () => {
+  it("puts recently run tasks first, under recent, with their group shown", () => {
     const result = layout({ recentIds: ["task: web: image", "task: app: dev"] });
-    assert.deepEqual(rows(result)[0], ["Recent", ["0:web/image", "1:app/dev"]]);
+    assert.deepEqual(rows(result)[0], ["recent", ["0:web/image", "1:app/dev"]]);
     assert.equal(result.sections[0]?.rows[0]?.showGroup, true);
     assert.equal(result.sections[1]?.rows[0]?.index, 2);
   });
@@ -67,7 +67,7 @@ describe("buildSections", () => {
   it("filters recent tasks too, and skips ones no longer listed", () => {
     const result = layout({ query: "image", recentIds: ["task: gone: x", "task: web: image", "task: app: dev"] });
     assert.deepEqual(rows(result), [
-      ["Recent", ["0:web/image"]],
+      ["recent", ["0:web/image"]],
       ["web", ["1:web/image"]],
     ]);
   });
@@ -87,18 +87,18 @@ describe("buildSections", () => {
     assert.equal(layout({ collapsed: new Set(["group:app"]), query: "dev" }).sections[0]?.open, true);
   });
 
-  it("collapses Recent like a group, leaving its rows out of the keyboard order", () => {
+  it("collapses recent like a group, leaving its rows out of the keyboard order", () => {
     const result = layout({ recentIds: ["task: app: dev"], collapsed: new Set(["recent"]) });
-    assert.equal(result.sections[0]?.title, "Recent");
+    assert.equal(result.sections[0]?.title, "recent");
     assert.equal(result.sections[0]?.collapsible, true);
     assert.equal(result.sections[0]?.open, false);
     assert.equal(result.sections[1]?.rows[0]?.index, 0);
   });
 
-  it("does not confuse a package named Recent with the Recent section", () => {
-    const named = [task("a", "Recent"), task("b", "other")];
-    const result = buildSections(named, { query: "", recentIds: ["task: Recent: a"], collapsed: new Set(["group:Recent"]) });
-    assert.deepEqual(result.sections.map((section) => [section.title, section.open]), [["Recent", true], ["Recent", false], ["other", true]]);
+  it("does not confuse a package named recent with the recent section", () => {
+    const named = [task("a", "recent"), task("b", "other")];
+    const result = buildSections(named, { query: "", recentIds: ["task: recent: a"], collapsed: new Set(["group:recent"]) });
+    assert.deepEqual(result.sections.map((section) => [section.title, section.open]), [["recent", true], ["recent", false], ["other", true]]);
   });
 
   it("gives a single group no title", () => {
