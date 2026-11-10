@@ -1,7 +1,5 @@
 # Discord Rich Presence
 
-[![Paseo Cafe](https://img.shields.io/badge/Paseo_Cafe-discord--rich--presence-blue)](https://paseo.cafe/plugins/discord-rich-presence)
-
 Show your current Paseo activity on your Discord profile.
 
 ## Screenshots
@@ -23,7 +21,7 @@ Requires:
 paseo plugin add github:sleeyax/paseo-plugins:plugins/discord-rich-presence
 ```
 
-Also available as `sleeyax/discord-rich-presence` on [Paseo Community Plugins](https://paseo.sh/plugins) and on [Paseo Cafe](https://paseo.cafe/plugins/discord-rich-presence).
+Also available as `sleeyax/discord-rich-presence` on [Paseo Community Plugins](https://paseo.sh/plugins).
 
 Update with `paseo plugin update discord-rich-presence`.
 To install from source, see the [root README](../../README.md#from-source).
