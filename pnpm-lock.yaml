@@ -143,10 +143,6 @@ importers:
         version: 4.4.3
 
   plugins/task-runner:
-    dependencies:
-      yaml:
-        specifier: ^2.8.1
-        version: 2.9.0
     devDependencies:
       '@getpaseo/client':
         specifier: 0.15.0

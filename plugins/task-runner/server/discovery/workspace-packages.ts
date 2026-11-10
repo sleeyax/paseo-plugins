@@ -1,6 +1,5 @@
 import { readdir } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { isJsonObject, readJsonObject, readText } from "./files.ts";
 import type { WorkspacePackage } from "./source.ts";
 
@@ -58,17 +57,37 @@ function excludes(pattern: string, path: string[]): boolean {
   return match(patternSegments(pattern), 0);
 }
 
-async function declaredPatterns(root: string): Promise<string[]> {
-  const patterns: string[] = [];
-  const pnpmWorkspace = await readText(join(root, "pnpm-workspace.yaml"));
-  if (pnpmWorkspace !== null) {
-    try {
-      const parsed: unknown = parseYaml(pnpmWorkspace);
-      if (isJsonObject(parsed) && Array.isArray(parsed.packages)) patterns.push(...parsed.packages);
-    } catch {
-      // A malformed file declares nothing.
-    }
+function yamlScalar(raw: string): string {
+  const quoted = /^(['"])(.*?)\1/.exec(raw.trim());
+  return quoted?.[2] ?? raw.replace(/\s+#.*$/, "").trim();
+}
+
+/** Reads only the `packages` list, as a block or a flow sequence, so the plugin needs no YAML library and no install step. */
+function pnpmWorkspacePatterns(text: string): string[] {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^packages\s*:/.test(line));
+  if (start === -1) return [];
+
+  const inline = (lines[start] ?? "").replace(/^packages\s*:/, "").trim();
+  if (inline.startsWith("[")) {
+    const flow = [inline, ...lines.slice(start + 1)].join("\n");
+    const close = flow.indexOf("]");
+    return flow.slice(1, close === -1 ? undefined : close).split(",").map(yamlScalar).filter(Boolean);
   }
+
+  const patterns: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^\s*(#.*)?$/.test(line)) continue;
+    const item = /^\s*-\s+(.*)$/.exec(line);
+    if (item?.[1] === undefined) break;
+    patterns.push(yamlScalar(item[1]));
+  }
+  return patterns;
+}
+
+async function declaredPatterns(root: string): Promise<string[]> {
+  const pnpmWorkspace = await readText(join(root, "pnpm-workspace.yaml"));
+  const patterns = pnpmWorkspace === null ? [] : pnpmWorkspacePatterns(pnpmWorkspace);
   const workspaces = (await readJsonObject(join(root, "package.json")))?.workspaces;
   const declared = isJsonObject(workspaces) ? workspaces.packages : workspaces;
   if (Array.isArray(declared)) patterns.push(...declared);

@@ -98,6 +98,43 @@ describe("monorepos", () => {
     assert.equal(web.command, "pnpm");
   });
 
+  it("reads a pnpm-workspace.yaml with comments, plain and double-quoted globs, and other keys after the list", async () => {
+    const root = await writeTree({
+      "pnpm-workspace.yaml": [
+        "# workspace",
+        "packages:",
+        "  # the apps",
+        "  - apps/*   # every app",
+        "",
+        '  - "libs/*"',
+        "catalog:",
+        "  react: ^19",
+        "onlyBuiltDependencies:",
+        "  - esbuild",
+        "",
+      ].join("\n"),
+      "apps/web/package.json": { name: "web", scripts: { go: "x" } },
+      "libs/ui/package.json": { name: "ui", scripts: { go: "x" } },
+      "esbuild/package.json": { name: "not-a-package", scripts: { go: "x" } },
+    });
+    assert.deepEqual((await discoverTasks({ root })).tasks.map((task) => task.group), ["ui", "web"]);
+  });
+
+  it("reads a pnpm-workspace.yaml list that is not indented", async () => {
+    const root = await writeTree({ "pnpm-workspace.yaml": "packages:\n- apps/*\n", "apps/web/package.json": { name: "web", scripts: { go: "x" } } });
+    assert.deepEqual((await discoverTasks({ root })).tasks.map((task) => task.group), ["web"]);
+  });
+
+  it("reads a pnpm-workspace.yaml flow list, across lines", async () => {
+    const root = await writeTree({
+      "pnpm-workspace.yaml": "packages: [apps/*,\n  'libs/*', \"!libs/old\"] # all\n",
+      "apps/web/package.json": { name: "web", scripts: { go: "x" } },
+      "libs/ui/package.json": { name: "ui", scripts: { go: "x" } },
+      "libs/old/package.json": { name: "old", scripts: { go: "x" } },
+    });
+    assert.deepEqual((await discoverTasks({ root })).tasks.map((task) => task.group), ["ui", "web"]);
+  });
+
   it("reads the workspaces field, as an array or as an object", async () => {
     for (const workspaces of [["apps/*"], { packages: ["apps/*"] }]) {
       const root = await writeTree({
