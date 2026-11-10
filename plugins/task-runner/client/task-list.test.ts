@@ -79,12 +79,26 @@ describe("buildSections", () => {
   });
 
   it("leaves a collapsed group's rows out of the keyboard order, unless searching", () => {
-    assert.deepEqual(rows(layout({ collapsed: new Set(["app"]) })), [
+    assert.deepEqual(rows(layout({ collapsed: new Set(["group:app"]) })), [
       ["app", []],
       ["web", ["0:web/build", "1:web/image"]],
     ]);
-    assert.equal(layout({ collapsed: new Set(["app"]) }).sections[0]?.open, false);
-    assert.equal(layout({ collapsed: new Set(["app"]), query: "dev" }).sections[0]?.open, true);
+    assert.equal(layout({ collapsed: new Set(["group:app"]) }).sections[0]?.open, false);
+    assert.equal(layout({ collapsed: new Set(["group:app"]), query: "dev" }).sections[0]?.open, true);
+  });
+
+  it("collapses Recent like a group, leaving its rows out of the keyboard order", () => {
+    const result = layout({ recentIds: ["task: app: dev"], collapsed: new Set(["recent"]) });
+    assert.equal(result.sections[0]?.title, "Recent");
+    assert.equal(result.sections[0]?.collapsible, true);
+    assert.equal(result.sections[0]?.open, false);
+    assert.equal(result.sections[1]?.rows[0]?.index, 0);
+  });
+
+  it("does not confuse a package named Recent with the Recent section", () => {
+    const named = [task("a", "Recent"), task("b", "other")];
+    const result = buildSections(named, { query: "", recentIds: ["task: Recent: a"], collapsed: new Set(["group:Recent"]) });
+    assert.deepEqual(result.sections.map((section) => [section.title, section.open]), [["Recent", true], ["Recent", false], ["other", true]]);
   });
 
   it("gives a single group no title", () => {

@@ -39,6 +39,7 @@ export type TaskSection = {
 export type SectionOptions = {
   query: string;
   recentIds: string[];
+  /** Section keys, so a package named Recent does not share the Recent section's state. */
   collapsed: ReadonlySet<string>;
 };
 
@@ -54,11 +55,16 @@ export function buildSections(tasks: Task[], { query, recentIds, collapsed }: Se
     });
 
   const sections: TaskSection[] = [];
+  const isOpen = (key: string) => searching || !collapsed.has(key);
   const recent = recentIds.flatMap((id) => shown.find((task) => task.id === id) ?? []).slice(0, RECENT_SHOWN);
-  if (recent.length > 0) sections.push({ key: "recent", title: "Recent", collapsible: false, open: true, rows: rowsOf(recent, grouped) });
+  if (recent.length > 0) {
+    const open = isOpen("recent");
+    sections.push({ key: "recent", title: "Recent", collapsible: true, open, rows: open ? rowsOf(recent, grouped) : [] });
+  }
   for (const group of groupTasks(shown)) {
-    const open = searching || !collapsed.has(group.name);
-    sections.push({ key: `group:${group.name}`, title: grouped ? group.name : null, collapsible: grouped, open, rows: open ? rowsOf(group.tasks, false) : [] });
+    const key = `group:${group.name}`;
+    const open = isOpen(key);
+    sections.push({ key, title: grouped ? group.name : null, collapsible: grouped, open, rows: open ? rowsOf(group.tasks, false) : [] });
   }
   return { sections, navigable };
 }

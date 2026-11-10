@@ -131,33 +131,20 @@ export function TasksPanel({ theme, layout, workspaceId, revision }: PluginWorks
   };
 
   const runsByTask = new Map((runs.data?.runs ?? []).map((run) => [run.taskId, run]));
-  const toggleGroup = (name: string) => {
+  const toggleSection = (key: string) => {
     const next = new Set(collapsed);
-    if (!next.delete(name)) next.add(name);
+    if (!next.delete(key)) next.add(key);
     setCollapsed(next);
   };
 
   const sectionHeader = (section: TaskSection) => {
-    if (section.title === null) return null;
-    const style = { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: GROUP_HEADER_PADDING, paddingVertical: 4 } as const;
-    const title = (
-      <Text numberOfLines={1} style={{ flexShrink: 1, color: colors.foregroundMuted, fontSize: 12, fontWeight: "600" }}>
-        {section.title}
-      </Text>
-    );
-    if (!section.collapsible) {
-      return (
-        <View style={style}>
-          <Icon name="History" size={CHEVRON_SIZE} color={colors.foregroundMuted} />
-          {title}
-        </View>
-      );
-    }
-    const name = section.title;
+    if (section.title === null || !section.collapsible) return null;
     return (
-      <Pressable accessibilityRole="button" accessibilityState={{ expanded: section.open }} onPress={() => toggleGroup(name)} style={style}>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: section.open }} onPress={() => toggleSection(section.key)} style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: GROUP_HEADER_PADDING, paddingVertical: 4 }}>
         <Icon name={section.open ? "ChevronDown" : "ChevronRight"} size={CHEVRON_SIZE} color={colors.foregroundMuted} />
-        {title}
+        <Text numberOfLines={1} style={{ flexShrink: 1, color: colors.foregroundMuted, fontSize: 12, fontWeight: "600" }}>
+          {section.title}
+        </Text>
       </Pressable>
     );
   };
