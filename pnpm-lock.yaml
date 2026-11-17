@@ -33,8 +33,8 @@ importers:
   plugins/catppuccin-theme:
     devDependencies:
       '@getpaseo/plugin':
-        specifier: 0.9.2
-        version: 0.9.2(@getpaseo/client@0.9.2)(@getpaseo/protocol@0.9.2)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.1.0)(supports-color@8.1.1))(react@19.1.0)(zod@4.4.3)
+        specifier: 0.16.0
+        version: 0.16.0(@getpaseo/client@0.16.0)(@getpaseo/protocol@0.16.0)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.1.0)(supports-color@8.1.1))(react@19.1.0)(typescript@5.9.3)(zod@4.4.3)
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
@@ -359,8 +359,8 @@ packages:
   '@getpaseo/client@0.15.0':
     resolution: {integrity: sha512-DlX/ByuoSZ8xZIsn0DU4c2WinYEni07+5/Qr3F7XhSTU3KSCLedUGy9wSHm841P+MdyC0Jqtn91FdhdOnSQhFw==}
 
-  '@getpaseo/client@0.9.2':
-    resolution: {integrity: sha512-MvStNVcWF3JhEaCAOhrPQ5qaLQJtkz1bvPop+wp8npqHB0z2PjAwPMZUYP/2T3kWrZj2ukWmODxjihKnwd0qTQ==}
+  '@getpaseo/client@0.16.0':
+    resolution: {integrity: sha512-J0ufRdEN33c55UAZF3BEG/d1v4iEBvHknAu4hFT0MXLZwmq17jL56XkOaKB5zBDKONpNU6O5ZSqRv4S0JEEhMg==}
 
   '@getpaseo/highlight@0.11.0':
     resolution: {integrity: sha512-K8yeWS+/DKdg1RglJ/rbKkWolzmuY+hxm1KmotQadwpHDhCUIc6ENXwEJiT1SWohBdVxUlKcZvqb4nCQMMU9GQ==}
@@ -401,12 +401,12 @@ packages:
       react-native:
         optional: true
 
-  '@getpaseo/plugin@0.9.2':
-    resolution: {integrity: sha512-g10IFjhcAlws4udHhDUdR1TBIudzP1bNL9ixfMdezkU4HcHJbULhkEtZo/KP0WF/sL+w0UW/msawtzL++1neGQ==}
+  '@getpaseo/plugin@0.16.0':
+    resolution: {integrity: sha512-tUpE5llA4KEYvGckdHT4bwslJxvJ2RthR7W6lY9SEc6G6jJCNpkpebqd2pjDo4hztGpaQd/jSBUxKrXSLJqw5A==}
     peerDependencies:
-      '@getpaseo/client': 0.9.2
-      '@getpaseo/protocol': 0.9.2
-      react: ~19.1.0
+      '@getpaseo/client': 0.16.0
+      '@getpaseo/protocol': 0.16.0
+      react: '>=19.1.0 <20'
       react-native: '>=0.81.5'
       zod: ^4.4.3
     peerDependenciesMeta:
@@ -422,8 +422,8 @@ packages:
   '@getpaseo/protocol@0.15.0':
     resolution: {integrity: sha512-UqB9eB6h1X5AXeeTdTQsS0CmfG31KgTdxbw5Wrp9nYc7kk0uBqRbVgGx7uqVAzJYjdcDGUiYpQv+649T2POA5w==}
 
-  '@getpaseo/protocol@0.9.2':
-    resolution: {integrity: sha512-CGfyfqOVNxETLCgVhQGeaP6PtP17FvP5wBuRxmVQ+WIw3F/qCNju/a5aSDF+vbh+62Qf2qtha9MpQB9DrVJehA==}
+  '@getpaseo/protocol@0.16.0':
+    resolution: {integrity: sha512-kCfnli5PwqMRSjQ1xCN06Mtf4o+KTjPAxWEfLtSuchJFRR5m3yDkkL2EFqw5PZEcXk4H+dfsySrzkA9PNKUDmw==}
 
   '@getpaseo/relay@0.13.0':
     resolution: {integrity: sha512-Yd/RR+2hStTEtmkutwE21drjVmgz+RnQWyjmoh1++dPysp2oNsrimurnbfN0yoBJ5xXWlyuvn8Sr7CziTpkv7Q==}
@@ -434,8 +434,8 @@ packages:
   '@getpaseo/relay@0.15.0':
     resolution: {integrity: sha512-VJJ6au8Jjw+U5/PHGEFlr+oj4yBxhCnTXh6zIFaz1MJnYW0gO/II0EaP3A8r5eM+iHRaiEuPRotKDht5sFXeBw==}
 
-  '@getpaseo/relay@0.9.2':
-    resolution: {integrity: sha512-jlnePwu5unMX04yWtvkY35bTi5yFZYfwlYPhVgwWxfEmFwGMJE4TgI62HO2bY9uS9GfehXIyn4wBmOvYPkNlwA==}
+  '@getpaseo/relay@0.16.0':
+    resolution: {integrity: sha512-lzzZXOIJ0KY9j3OQvzwKmSsw4IyBHmJ0gSqfouIg6AeSjgbQjU33ExpFqGnu5NC8iUtV0BP0x+aSnT/g63oSYQ==}
 
   '@isaacs/ttlcache@1.4.1':
     resolution: {integrity: sha512-RQgQ4uQ+pLbqXfOmieB91ejmLwvSgv9nLx6sT6sD83s7umBypgg+OIBOBbEUiJXrfpnp9j0mRhYYdzp9uqq3lA==}
@@ -1854,10 +1854,11 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@getpaseo/client@0.9.2':
+  '@getpaseo/client@0.16.0':
     dependencies:
-      '@getpaseo/protocol': 0.9.2
-      '@getpaseo/relay': 0.9.2
+      '@getpaseo/protocol': 0.16.0
+      '@getpaseo/relay': 0.16.0
+      ws: 8.21.3
       zod: 4.4.3
     transitivePeerDependencies:
       - bufferutil
@@ -1927,16 +1928,19 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  '@getpaseo/plugin@0.9.2(@getpaseo/client@0.9.2)(@getpaseo/protocol@0.9.2)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.1.0)(supports-color@8.1.1))(react@19.1.0)(zod@4.4.3)':
+  '@getpaseo/plugin@0.16.0(@getpaseo/client@0.16.0)(@getpaseo/protocol@0.16.0)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.1.0)(supports-color@8.1.1))(react@19.1.0)(typescript@5.9.3)(zod@4.4.3)':
     dependencies:
       '@agentclientprotocol/sdk': 1.4.0(zod@4.4.3)
-      '@getpaseo/client': 0.9.2
-      '@getpaseo/protocol': 0.9.2
+      '@getpaseo/client': 0.16.0
+      '@getpaseo/protocol': 0.16.0
+      i18next: 26.5.12(typescript@5.9.3)
       react: 19.1.0
       use-sync-external-store: 1.7.0(react@19.1.0)
       zod: 4.4.3
     optionalDependencies:
       react-native: 0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.1.0)(supports-color@8.1.1)
+    transitivePeerDependencies:
+      - typescript
 
   '@getpaseo/protocol@0.13.0':
     dependencies:
@@ -1953,7 +1957,7 @@ snapshots:
       semver: 7.8.5
       zod: 4.4.3
 
-  '@getpaseo/protocol@0.9.2':
+  '@getpaseo/protocol@0.16.0':
     dependencies:
       semver: 7.8.5
       zod: 4.4.3
@@ -1994,8 +1998,11 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@getpaseo/relay@0.9.2':
+  '@getpaseo/relay@0.16.0':
     dependencies:
+      '@noble/ciphers': 2.4.0
+      '@noble/curves': 2.4.0
+      '@noble/hashes': 2.4.0
       base64-js: 1.5.1
       tweetnacl: 1.0.3
       ws: 8.21.3
