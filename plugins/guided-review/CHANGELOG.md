@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/sleeyax/paseo-plugins/compare/guided-review-v0.3.0...guided-review-v0.4.0) (2026-11-17)
+
+
+### Features
+
+* adopt Paseo 0.16 (Catppuccin colours, plugin names, gallery) ([4bcce2e](https://github.com/sleeyax/paseo-plugins/commit/4bcce2e415c3655cd3578b9c5c20645090d7280c))
+* name every plugin in its manifest ([970f6ad](https://github.com/sleeyax/paseo-plugins/commit/970f6addcde7104e2b40e73e74d25d8ce0c5d20d)), closes [#180](https://github.com/sleeyax/paseo-plugins/issues/180)
+
 ## [0.3.0](https://github.com/sleeyax/paseo-plugins/compare/guided-review-v0.2.0...guided-review-v0.3.0) (2026-11-09)
 
 
