@@ -23,6 +23,7 @@ paseo plugin add github:sleeyax/paseo-plugins:plugins/catppuccin-theme
 ```
 
 Also available as `sleeyax/catppuccin-theme` on [Paseo Community Plugins](https://paseo.sh/plugins).
+You can also install it from **Settings → Host → Plugins → Browse**.
 
 Update with `paseo plugin update catppuccin-theme`.
 To install from source, see the [root README](../../README.md#from-source).

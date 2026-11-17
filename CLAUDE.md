@@ -41,6 +41,7 @@ paseo plugin add github:sleeyax/paseo-plugins:plugins/<name>
 ```
 
 Also available as `sleeyax/<name>` on [Paseo Community Plugins](https://paseo.sh/plugins).
+Paseo 0.16 or newer can also install it from **Settings → Host → Plugins → Browse**.
 <only when the plugin is listed there>
 
 Update with `paseo plugin update <name>`.

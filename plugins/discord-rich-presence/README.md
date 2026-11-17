@@ -22,6 +22,7 @@ paseo plugin add github:sleeyax/paseo-plugins:plugins/discord-rich-presence
 ```
 
 Also available as `sleeyax/discord-rich-presence` on [Paseo Community Plugins](https://paseo.sh/plugins).
+Paseo 0.16 or newer can also install it from **Settings → Host → Plugins → Browse**.
 
 Update with `paseo plugin update discord-rich-presence`.
 To install from source, see the [root README](../../README.md#from-source).
