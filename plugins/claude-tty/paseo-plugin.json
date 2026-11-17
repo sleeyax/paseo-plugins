@@ -1,5 +1,6 @@
 {
   "id": "claude-tty",
+  "name": "Claude TTY",
   "description": "Deprecated: use Paseo's built-in claude provider for new agents. Run Claude Code in its real terminal UI as a Paseo agent, with suspend/resume and card-based permission prompts.",
   "requirements": { "paseo": ">=0.13.0" },
   "build": [
