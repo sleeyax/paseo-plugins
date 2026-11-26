@@ -11,6 +11,7 @@ My plugins for [Paseo](https://github.com/getpaseo/paseo).
 | [Claude TTY](plugins/claude-tty)                       | Deprecated: offer the Claude TTY ACP adapter as a Paseo provider, and manage it on the daemon host.    |
 | [Guided Review](plugins/guided-review)                 | Show a trunk-first guide to a pull request or merge request, and build your draft review alongside it. |
 | [Task Runner](plugins/task-runner)                     | Run a project's own scripts from a sidebar panel.                                                       |
+| [Quick Commands](plugins/quick-commands)               | Save shell commands once and run them on the host from a button.                                       |
 
 | ACP                                   | Description                                                                            |
 | ------------------------------------- | -------------------------------------------------------------------------------------- |

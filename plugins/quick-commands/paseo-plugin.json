@@ -1,0 +1,6 @@
+{
+  "id": "quick-commands",
+  "name": "Quick Commands",
+  "description": "Save shell commands once and run them on the host from a button.",
+  "requirements": { "paseo": ">=0.16.0" }
+}

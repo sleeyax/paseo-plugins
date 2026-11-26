@@ -4,5 +4,6 @@
   "plugins/discord-rich-presence": "0.3.0",
   "plugins/guided-review": "0.3.0",
   "plugins/task-runner": "1.0.0",
+  "plugins/quick-commands": "0.0.0",
   "apps/claude-tty-acp": "0.6.0"
 }
