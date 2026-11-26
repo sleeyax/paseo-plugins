@@ -3,6 +3,14 @@
 Save a shell command once, such as rebooting the host or restarting a service, and run it on the host with one tap.
 It works the same from a phone, without opening a terminal or asking an agent.
 
+## Screenshots
+
+![A command that succeeded, expanded to its output](./docs/screenshots/output.png)
+
+![Confirming a command that asks before running](./docs/screenshots/confirm.png)
+
+![Adding a command](./docs/screenshots/editor.png)
+
 ## Installation
 
 Requires:
