@@ -4,13 +4,13 @@ Adds the four [Catppuccin](https://catppuccin.com/palette/) flavours to Paseo as
 
 ## Screenshots
 
-![Catppuccin Latte](./docs/screenshots/latte.png)
-
-![Catppuccin Frappé](./docs/screenshots/frappe.png)
+![Catppuccin Mocha](./docs/screenshots/mocha.png)
 
 ![Catppuccin Macchiato](./docs/screenshots/macchiato.png)
 
-![Catppuccin Mocha](./docs/screenshots/mocha.png)
+![Catppuccin Frappé](./docs/screenshots/frappe.png)
+
+![Catppuccin Latte](./docs/screenshots/latte.png)
 
 ## Installation
 
