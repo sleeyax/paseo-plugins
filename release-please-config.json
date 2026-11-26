@@ -22,6 +22,10 @@
       "release-type": "node",
       "component": "task-runner"
     },
+    "plugins/quick-commands": {
+      "release-type": "node",
+      "component": "quick-commands"
+    },
     "apps/claude-tty-acp": {
       "release-type": "node",
       "component": "claude-tty-acp",
